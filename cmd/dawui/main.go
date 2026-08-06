@@ -1,0 +1,210 @@
+// Command dawui runs the docker-agent web dashboard.
+//
+// It binds to the literal loopback host 127.0.0.1 and serves both the API and
+// the embedded frontend from a single process. 127.0.0.1 is the security
+// boundary; there is deliberately no HOST override.
+package main
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/rumpl/daw/internal/adapter"
+	"github.com/rumpl/daw/internal/adapter/dagent"
+	"github.com/rumpl/daw/internal/adapter/fake"
+	"github.com/rumpl/daw/internal/httpapi"
+	"github.com/rumpl/daw/internal/pathsec"
+	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/webassets"
+)
+
+// bindHost is not configurable. Widening it would defeat the entire security
+// model: everything else (CSRF, host allow-list, Tailscale Serve) assumes the
+// listener is reachable only from this machine.
+const bindHost = "127.0.0.1"
+
+const defaultPort = 4788
+
+// appVersion is overridden at build time with -ldflags.
+var appVersion = "dev"
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	logLevel := slog.LevelInfo
+	if os.Getenv("DAWUI_DEBUG") != "" {
+		logLevel = slog.LevelDebug
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(log)
+
+	port, err := resolvePort(os.Getenv("PORT"))
+	if err != nil {
+		return err
+	}
+
+	guard, skipped, err := pathsec.NewGuard(pathsec.DefaultRoots(os.Getenv("WORKSPACE_ROOTS")))
+	if err != nil {
+		return fmt.Errorf("no usable workspace root: set WORKSPACE_ROOTS to one or more existing directories")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var ad adapter.Adapter
+	if os.Getenv("DAWUI_FAKE_ADAPTER") == "1" {
+		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
+		f := fake.New()
+		if d := os.Getenv("DAWUI_FAKE_DELAY_MS"); d != "" {
+			if ms, err := strconv.Atoi(d); err == nil {
+				f.Delay = time.Duration(ms) * time.Millisecond
+			}
+		}
+		f.Seed("seeded-session-1", "Earlier conversation", os.Getenv("DAWUI_FAKE_WORKSPACE"), nil)
+		ad = f
+	} else {
+		real, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
+		if err != nil {
+			return fmt.Errorf("docker-agent could not be initialized: %w", err)
+		}
+		ad = real
+	}
+
+	defaultPosture, err := resolveDefaultPosture(os.Getenv("DEFAULT_SAFETY"))
+	if err != nil {
+		return err
+	}
+
+	srv := httpapi.New(httpapi.Options{
+		Adapter:        ad,
+		DefaultAgent:   strings.TrimSpace(os.Getenv("DEFAULT_AGENT")),
+		DefaultPosture: defaultPosture,
+		Guard:          guard,
+		AppVersion:     appVersion,
+		TailscaleHosts: splitList(os.Getenv("TAILSCALE_HOSTNAMES")),
+		AllowedTSUsers: splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
+		Static:         webassets.Handler(),
+		Logger:         log,
+		SkippedRoots:   skipped,
+	})
+
+	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
+	ln, err := net.Listen("tcp4", addr)
+	if err != nil {
+		if isAddrInUse(err) {
+			return fmt.Errorf("port %d on %s is already in use (EADDRINUSE). "+
+				"Stop the other process or set PORT to a free port between 1024 and 65535", port, bindHost)
+		}
+		return fmt.Errorf("listening on %s: %w", addr, err)
+	}
+
+	httpServer := &http.Server{
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout: SSE streams are long-lived by design.
+		IdleTimeout: 120 * time.Second,
+	}
+
+	if !webassets.Available() {
+		log.Warn("frontend assets are not built into this binary; run `make build`")
+	}
+	fmt.Printf("docker-agent dashboard listening on http://%s\n", addr)
+	fmt.Printf("  workspace roots: %s\n", strings.Join(guard.Roots(), ", "))
+	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
+	fmt.Printf("  default agent: %s\n", cmp.Or(strings.TrimSpace(os.Getenv("DEFAULT_AGENT")), "coder (built-in)"))
+	fmt.Printf("  default safety mode for new chats: %s\n", defaultPosture)
+	if defaultPosture == protocol.PostureAutonomous {
+		fmt.Println("  -> autonomous: EVERY tool call is auto-approved. Set DEFAULT_SAFETY=strict to require confirmation.")
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpServer.Serve(ln) }()
+
+	select {
+	case <-ctx.Done():
+		fmt.Println("\nshutting down…")
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	srv.Shutdown(shutdownCtx)
+	return httpServer.Shutdown(shutdownCtx)
+}
+
+func currentUser() string {
+	if u := os.Getenv("USER"); u != "" {
+		return u
+	}
+	return "the current user"
+}
+
+// resolveDefaultPosture validates DEFAULT_SAFETY. It selects the safety mode
+// new chats start in, using docker-agent's own three mode names. The default
+// for this deployment is autonomous (auto-approve every tool call), which is a
+// deliberate, documented choice for a single-user localhost dashboard; set
+// DEFAULT_SAFETY=strict to require confirmation for every tool call.
+func resolveDefaultPosture(v string) (protocol.Posture, error) {
+	switch p := protocol.Posture(strings.ToLower(strings.TrimSpace(v))); p {
+	case "":
+		return protocol.PostureAutonomous, nil
+	case protocol.PostureStrict, protocol.PostureBalanced, protocol.PostureAutonomous:
+		return p, nil
+	default:
+		return "", fmt.Errorf("DEFAULT_SAFETY must be strict, balanced or autonomous, got %q", v)
+	}
+}
+
+// resolvePort validates the PORT override. Only 1024-65535 is accepted so the
+// server never needs privileges.
+func resolvePort(v string) (int, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return defaultPort, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("PORT must be a number between 1024 and 65535, got %q", v)
+	}
+	if n < 1024 || n > 65535 {
+		return 0, fmt.Errorf("PORT must be between 1024 and 65535, got %d", n)
+	}
+	return n, nil
+}
+
+func isAddrInUse(err error) bool {
+	return errors.Is(err, syscall.EADDRINUSE)
+}
+
+func splitList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
