@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker-agent/pkg/permissions"
+	daruntime "github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/runtime/toolexec"
 	"github.com/docker/docker-agent/pkg/safety"
 	"github.com/docker/docker-agent/pkg/session"
@@ -64,6 +65,21 @@ func TestSummarizeArgsHandlesNonJSON(t *testing.T) {
 	call := tools.ToolCall{Function: tools.FunctionCall{Name: "x", Arguments: "not json"}}
 	if got := summarizeArgs(call); got != "not json" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestMCPInitializationDoesNotClutterTimeline(t *testing.T) {
+	c := &chat{sess: session.New(), events: make(chan protocol.Event, 2)}
+
+	// The runtime initializes MCP toolsets on every turn. These lifecycle
+	// events are expected housekeeping, not persistent conversation items.
+	c.normalize(daruntime.MCPInitStarted("coder"))
+	c.normalize(daruntime.MCPInitFinished("coder"))
+
+	select {
+	case ev := <-c.events:
+		t.Fatalf("MCP initialization emitted a timeline event: %+v", ev)
+	default:
 	}
 }
 

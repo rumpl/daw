@@ -36,7 +36,11 @@ export function ToolConfirmDialog({
         <div id="confirm-body">
           <p>
             <strong>{clip(request.agentName, 60) || 'The agent'}</strong> wants to run{' '}
-            <code>{clip(request.toolName, 60)}</code>.
+            <strong>{clip(request.displayName || request.toolName, 80)}</strong>
+            {request.displayName && request.displayName !== request.toolName ? (
+              <> (<code>{clip(request.toolName, 60)}</code>)</>
+            ) : null}
+            .
           </p>
           <pre className="dialog-cmd" tabIndex={0}>
             {request.argsSummary}

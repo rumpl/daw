@@ -474,8 +474,9 @@ func (c *chat) toolTurn(ctx context.Context, runID string) bool {
 	posture := c.st.posture
 	c.mu.Unlock()
 
-	act := &protocol.ToolActivity{ID: id, Name: "shell", Category: "shell",
-		AgentName: c.st.agentName, ArgsSummary: `ls -la /workspace`, State: protocol.ToolStatePending}
+	act := &protocol.ToolActivity{ID: id, Name: "shell", DisplayName: "Shell", Category: "shell",
+		AgentName: c.st.agentName, ArgsSummary: `ls -la /workspace`,
+		Arguments: map[string]any{"cmd": "ls -la /workspace", "cwd": "."}, State: protocol.ToolStatePending}
 	c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: act})
 
 	// Mirrors toolexec's (mode x label) table: autonomous auto-approves
@@ -486,7 +487,7 @@ func (c *chat) toolTurn(ctx context.Context, runID string) bool {
 		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: act})
 		pattern := "shell(ls*)"
 		req := &protocol.ToolConfirmationRequest{
-			ToolCallID: id, ToolName: "shell", AgentName: c.st.agentName,
+			ToolCallID: id, ToolName: "shell", DisplayName: "Shell", AgentName: c.st.agentName,
 			ArgsSummary: `ls -la /workspace`, Pattern: pattern,
 			PatternLabel:     "Always allow " + pattern,
 			RejectionReasons: []protocol.RejectionReason{{Label: "Not now", Reason: "The user declined this action."}},

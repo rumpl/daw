@@ -315,6 +315,9 @@ func (l *liveChat) mergeToolLocked(in protocol.ToolActivity) protocol.ToolActivi
 	if in.Name != "" {
 		out.Name = in.Name
 	}
+	if in.DisplayName != "" {
+		out.DisplayName = in.DisplayName
+	}
 	if in.Category != "" {
 		out.Category = in.Category
 	}
@@ -323,6 +326,9 @@ func (l *liveChat) mergeToolLocked(in protocol.ToolActivity) protocol.ToolActivi
 	}
 	if in.ArgsSummary != "" {
 		out.ArgsSummary = in.ArgsSummary
+	}
+	if in.Arguments != nil {
+		out.Arguments = in.Arguments
 	}
 	if in.Preview != "" {
 		out.Preview = in.Preview

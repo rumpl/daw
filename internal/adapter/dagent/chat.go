@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	daagent "github.com/docker/docker-agent/pkg/agent"
 	dachat "github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/effort"
-	daagent "github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/permissions"
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/session"
@@ -52,7 +52,7 @@ type chat struct {
 	grants       []string
 	// unsaved marks a brand-new session whose row is created lazily, on the
 	// first real prompt, exactly as the CLI does.
-	unsaved bool
+	unsaved      bool
 	agentsIgnore bool
 	model        string
 	thinking     string
@@ -234,9 +234,10 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 			for _, tc := range m.Message.ToolCalls {
 				act := &protocol.ToolActivity{
 					ID: tc.ID, Name: tc.Function.Name, AgentName: m.AgentName,
-					ArgsSummary: summarizeArgs(tc), State: protocol.ToolStateSuccess,
+					ArgsSummary: summarizeArgs(tc), Arguments: presentationArgs(tc), State: protocol.ToolStateSuccess,
 				}
 				if def, ok := toolDefs[tc.Function.Name]; ok {
+					act.DisplayName = def.DisplayName()
 					act.Category = def.Category
 				}
 				if res, ok := toolResults[tc.ID]; ok {
@@ -743,8 +744,8 @@ func (c *chat) Stats(context.Context) protocol.Stats {
 	model := c.model
 	c.mu.Unlock()
 	return protocol.Stats{
-		Usage:       protocol.Usage{InputTokens: in, OutputTokens: out, Cost: cost},
-		Messages:    msgs, ToolCalls: toolCalls, Model: model, AgentName: c.agentName,
+		Usage:    protocol.Usage{InputTokens: in, OutputTokens: out, Cost: cost},
+		Messages: msgs, ToolCalls: toolCalls, Model: model, AgentName: c.agentName,
 		DurationSec: int64(c.sess.Duration().Seconds()),
 	}
 }

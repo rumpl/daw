@@ -183,6 +183,23 @@ test.describe('dashboard', () => {
     await expect(session).toBeVisible();
     await session.click();
     await connected(page);
+    await expect(page).toHaveURL(/\/sessions\//);
+    await expect(page.getByLabel('user message').first()).toContainText('remember this');
+
+    // The session and workspace are part of the URL. A hard refresh restores
+    // both without asking the user to reopen or reselect anything.
+    const sessionURL = page.url();
+    await page.reload();
+    await connected(page);
+    expect(page.url()).toBe(sessionURL);
+    await expect(page.getByLabel('user message').first()).toContainText('remember this');
+
+    // Browser history is routing history, not just an in-memory chat switch.
+    await page.goBack();
+    await expect(page).toHaveURL('/');
+    await expect(page.getByLabel('Message')).toHaveCount(0);
+    await page.goForward();
+    await connected(page);
     await expect(page.getByLabel('user message').first()).toContainText('remember this');
   });
 
@@ -227,6 +244,26 @@ test.describe('dashboard', () => {
     await openDrawerIfMobile(page);
     await expect(page.locator('.mono-path')).toHaveText(workspace);
     await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeEnabled();
+  });
+
+  test('server projects are available without this browser local storage', async ({ page }) => {
+    await page.goto('/');
+    await openDrawerIfMobile(page);
+    await openWorkspaceAndAgent(page);
+
+    // Simulate visiting from a different device: there is no browser-local
+    // workspace preference, but bootstrap still carries the server's MRU.
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await openDrawerIfMobile(page);
+    await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+    const project = page.getByTitle(workspace);
+    await expect(project).toBeVisible();
+
+    // Selecting a project highlights it; it must not disappear from the list.
+    await project.click();
+    await expect(project).toBeVisible();
+    await expect(project).toHaveAttribute('aria-current', 'page');
   });
 
   test('a workspace that no longer resolves is dropped without an error', async ({ page }) => {

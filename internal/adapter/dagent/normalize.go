@@ -53,12 +53,12 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.mu.Unlock()
 		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
 			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name,
-			Category: e.ToolDefinition.Category, AgentName: e.AgentName,
-			ArgsSummary: summarizeArgs(e.ToolCall), State: protocol.ToolStateAwaiting}})
+			DisplayName: e.ToolDefinition.DisplayName(), Category: e.ToolDefinition.Category, AgentName: e.AgentName,
+			ArgsSummary: summarizeArgs(e.ToolCall), Arguments: presentationArgs(e.ToolCall), State: protocol.ToolStateAwaiting}})
 		c.emit(protocol.Event{Type: protocol.EventToolConfirmation,
 			Confirmation: &protocol.ToolConfirmationRequest{
 				ToolCallID: e.ToolCall.ID, ToolName: e.ToolCall.Function.Name,
-				AgentName: e.AgentName, ArgsSummary: summarizeArgs(e.ToolCall),
+				DisplayName: e.ToolDefinition.DisplayName(), AgentName: e.AgentName, ArgsSummary: summarizeArgs(e.ToolCall),
 				Pattern: pattern, PatternLabel: toolconfirm.AlwaysAllowLabel(pattern),
 				Metadata: e.Metadata, RejectionReasons: rejectionReasons(),
 			}})
@@ -67,13 +67,13 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.closeAssistant()
 		c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: &protocol.ToolActivity{
 			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name,
-			Category: e.ToolDefinition.Category, AgentName: e.AgentName,
-			ArgsSummary: summarizeArgs(e.ToolCall), State: protocol.ToolStateRunning}})
+			DisplayName: e.ToolDefinition.DisplayName(), Category: e.ToolDefinition.Category, AgentName: e.AgentName,
+			ArgsSummary: summarizeArgs(e.ToolCall), Arguments: presentationArgs(e.ToolCall), State: protocol.ToolStateRunning}})
 
 	case *daruntime.ToolCallOutputEvent:
 		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
-			ID: e.ToolCallID, Name: e.ToolDefinition.Name, Category: e.ToolDefinition.Category,
-			AgentName: e.AgentName, State: protocol.ToolStateRunning,
+			ID: e.ToolCallID, Name: e.ToolDefinition.Name, DisplayName: e.ToolDefinition.DisplayName(),
+			Category: e.ToolDefinition.Category, AgentName: e.AgentName, State: protocol.ToolStateRunning,
 			Preview: e.Output, OutputBytes: len(e.Output)}})
 
 	case *daruntime.ToolCallResponseEvent:
@@ -84,8 +84,8 @@ func (c *chat) normalize(ev daruntime.Event) {
 			isErr = true
 		}
 		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
-			ID: e.ToolCallID, Name: e.ToolDefinition.Name, Category: e.ToolDefinition.Category,
-			AgentName: e.AgentName, State: state, Preview: e.Response,
+			ID: e.ToolCallID, Name: e.ToolDefinition.Name, DisplayName: e.ToolDefinition.DisplayName(),
+			Category: e.ToolDefinition.Category, AgentName: e.AgentName, State: state, Preview: e.Response,
 			OutputBytes: len(e.Response), IsError: isErr}})
 
 	case *daruntime.HookBlockedEvent:
@@ -152,11 +152,11 @@ func (c *chat) normalize(ev daruntime.Event) {
 			return
 		}
 
-	case *daruntime.MCPInitStartedEvent:
-		c.notice(protocol.NoticeInfo, "Starting MCP toolsets…", "mcp_init")
-
-	case *daruntime.MCPInitFinishedEvent:
-		// no notice: success is the expected path
+	case *daruntime.MCPInitStartedEvent, *daruntime.MCPInitFinishedEvent:
+		// MCP initialization is expected runtime housekeeping and occurs on
+		// every turn. Keep it out of the persistent conversation timeline;
+		// warnings and errors from initialization still arrive as their own
+		// WarningEvent or ErrorEvent and remain visible.
 
 	case *daruntime.SessionTitleEvent:
 		meta := c.Meta()

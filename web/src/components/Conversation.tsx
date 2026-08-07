@@ -1,8 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import type { Item, MessageItem, Notice, ToolActivity, Transfer, Summary } from '../protocol.gen';
+import type { Item, MessageItem, Notice, Transfer, Summary } from '../protocol.gen';
 import { Markdown } from '../Markdown';
 import { clip } from '../safety';
 import { itemKey } from '../reducer';
+import { ToolCard } from './ToolActivity';
 
 const BOTTOM_THRESHOLD_PX = 96;
 
@@ -35,27 +36,6 @@ function MessageBubble({ message }: { message: MessageItem }) {
         <Markdown>{message.text}</Markdown>
       )}
     </article>
-  );
-}
-
-function ToolCard({ tool }: { tool: ToolActivity }) {
-  const state = tool.state;
-  // Only failures and in-flight calls get any colour; success is silent.
-  const tone = state === 'error' ? 'error' : state === 'rejected' ? 'rejected' : state === 'success' ? 'ok' : 'running';
-  return (
-    <details className={`tool tool-${tone}`} aria-label={`tool ${tool.name}`}>
-      <summary>
-        <span className="tool-name">{clip(tool.name, 60)}</span>
-        <span className="tool-args">{clip(tool.argsSummary, 160)}</span>
-        <span className="tool-state">{state === 'awaiting_confirmation' ? 'waiting' : state}</span>
-      </summary>
-      {tool.preview ? (
-        <pre className="tool-output" tabIndex={0}>
-          {tool.preview}
-        </pre>
-      ) : null}
-      {tool.truncated ? <p className="tool-note">Output truncated for display.</p> : null}
-    </details>
   );
 }
 

@@ -26,9 +26,11 @@ export interface MessageItem {
 export interface ToolActivity {
   id: string;
   name: string;
+  displayName?: string;
   category: string;
   agentName: string;
   argsSummary: string;
+  arguments?: Record<string, unknown>;
   state: ToolState;
   preview: string;
   truncated: boolean;
@@ -73,6 +75,7 @@ export interface RejectionReason {
 export interface ToolConfirmationRequest {
   toolCallId: string;
   toolName: string;
+  displayName?: string;
   agentName: string;
   argsSummary: string;
   pattern: string;

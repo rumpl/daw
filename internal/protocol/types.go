@@ -135,16 +135,21 @@ type MessageItem struct {
 
 // ToolActivity is one tool call with a bounded preview of its result.
 type ToolActivity struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Category    string    `json:"category"`
-	AgentName   string    `json:"agentName"`
-	ArgsSummary string    `json:"argsSummary"`
-	State       ToolState `json:"state"`
-	Preview     string    `json:"preview"`
-	Truncated   bool      `json:"truncated"`
-	OutputBytes int       `json:"outputBytes"`
-	IsError     bool      `json:"isError"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Category    string `json:"category"`
+	AgentName   string `json:"agentName"`
+	ArgsSummary string `json:"argsSummary"`
+	// Arguments contains a bounded, presentation-safe subset of the call's
+	// structured arguments. Large file contents are represented by counts and
+	// short previews rather than copied wholesale into the browser timeline.
+	Arguments   map[string]any `json:"arguments,omitempty"`
+	State       ToolState      `json:"state"`
+	Preview     string         `json:"preview"`
+	Truncated   bool           `json:"truncated"`
+	OutputBytes int            `json:"outputBytes"`
+	IsError     bool           `json:"isError"`
 }
 
 // Transfer records a sub-agent delegation.
@@ -166,9 +171,9 @@ type Notice struct {
 
 // Summary is a compaction summary entry.
 type Summary struct {
-	ID      string `json:"id"`
-	Text    string `json:"text"`
-	Cost    float64 `json:"cost"`
+	ID   string  `json:"id"`
+	Text string  `json:"text"`
+	Cost float64 `json:"cost"`
 }
 
 // Item is one entry in the conversation timeline.
@@ -197,6 +202,7 @@ type RejectionReason struct {
 type ToolConfirmationRequest struct {
 	ToolCallID       string            `json:"toolCallId"`
 	ToolName         string            `json:"toolName"`
+	DisplayName      string            `json:"displayName,omitempty"`
 	AgentName        string            `json:"agentName"`
 	ArgsSummary      string            `json:"argsSummary"`
 	Pattern          string            `json:"pattern"`
@@ -259,20 +265,20 @@ type PermissionsView struct {
 
 // SessionMeta is per-chat metadata shown in the header and sidebar.
 type SessionMeta struct {
-	ChatID        string          `json:"chatId"`
-	SessionID     string          `json:"sessionId"`
-	Title         string          `json:"title"`
-	WorkspaceID   string          `json:"workspaceId"`
-	WorkingDir    string          `json:"workingDir"`
-	AgentID       string          `json:"agentId"`
-	AgentSource   string          `json:"agentSource"`
-	AgentName     string          `json:"agentName"`
-	SubAgents     []string        `json:"subAgents"`
-	Model         string          `json:"model"`
-	ThinkingLevel string          `json:"thinkingLevel"`
-	ThinkingLevels []string       `json:"thinkingLevels"`
-	Permissions   PermissionsView `json:"permissions"`
-	CreatedAt     string          `json:"createdAt"`
+	ChatID         string          `json:"chatId"`
+	SessionID      string          `json:"sessionId"`
+	Title          string          `json:"title"`
+	WorkspaceID    string          `json:"workspaceId"`
+	WorkingDir     string          `json:"workingDir"`
+	AgentID        string          `json:"agentId"`
+	AgentSource    string          `json:"agentSource"`
+	AgentName      string          `json:"agentName"`
+	SubAgents      []string        `json:"subAgents"`
+	Model          string          `json:"model"`
+	ThinkingLevel  string          `json:"thinkingLevel"`
+	ThinkingLevels []string        `json:"thinkingLevels"`
+	Permissions    PermissionsView `json:"permissions"`
+	CreatedAt      string          `json:"createdAt"`
 }
 
 // Snapshot is the complete, authoritative state of a chat.
@@ -294,26 +300,26 @@ type Snapshot struct {
 type EventType string
 
 const (
-	EventSnapshot          EventType = "snapshot"
-	EventRunStatus         EventType = "run_status"
-	EventMessageItem       EventType = "message_item"
-	EventAssistantDelta    EventType = "assistant_delta"
-	EventAssistantEnd      EventType = "assistant_end"
-	EventReasoningDelta    EventType = "reasoning_delta"
-	EventReasoningEnd      EventType = "reasoning_end"
-	EventToolStart         EventType = "tool_start"
-	EventToolUpdate        EventType = "tool_update"
-	EventToolEnd           EventType = "tool_end"
-	EventToolConfirmation  EventType = "tool_confirmation"
-	EventToolResolved      EventType = "tool_confirmation_resolved"
-	EventElicitation       EventType = "elicitation"
-	EventElicitResolved    EventType = "elicitation_resolved"
-	EventTransfer          EventType = "transfer"
-	EventUsage             EventType = "usage"
-	EventNotice            EventType = "notice"
-	EventSessionMeta       EventType = "session_meta"
-	EventGap               EventType = "gap"
-	EventChatClosed        EventType = "chat_closed"
+	EventSnapshot         EventType = "snapshot"
+	EventRunStatus        EventType = "run_status"
+	EventMessageItem      EventType = "message_item"
+	EventAssistantDelta   EventType = "assistant_delta"
+	EventAssistantEnd     EventType = "assistant_end"
+	EventReasoningDelta   EventType = "reasoning_delta"
+	EventReasoningEnd     EventType = "reasoning_end"
+	EventToolStart        EventType = "tool_start"
+	EventToolUpdate       EventType = "tool_update"
+	EventToolEnd          EventType = "tool_end"
+	EventToolConfirmation EventType = "tool_confirmation"
+	EventToolResolved     EventType = "tool_confirmation_resolved"
+	EventElicitation      EventType = "elicitation"
+	EventElicitResolved   EventType = "elicitation_resolved"
+	EventTransfer         EventType = "transfer"
+	EventUsage            EventType = "usage"
+	EventNotice           EventType = "notice"
+	EventSessionMeta      EventType = "session_meta"
+	EventGap              EventType = "gap"
+	EventChatClosed       EventType = "chat_closed"
 )
 
 // Delta carries streamed assistant or reasoning text for one message item.
@@ -405,23 +411,23 @@ type AgentSourceHint struct {
 
 // Bootstrap is GET /api/bootstrap: non-secret app and docker-agent status.
 type Bootstrap struct {
-	AppVersion       string            `json:"appVersion"`
-	AgentVersion     string            `json:"agentVersion"`
-	AgentCommit      string            `json:"agentCommit"`
-	ConfigDir        string            `json:"configDir"`
-	DataDir          string            `json:"dataDir"`
-	CacheDir         string            `json:"cacheDir"`
-	SessionDB        string            `json:"sessionDb"`
-	WorkspaceRoots   []string          `json:"workspaceRoots"`
-	CSRFToken        string            `json:"csrfToken"`
-	Sandboxed        bool              `json:"sandboxed"`
+	AppVersion     string   `json:"appVersion"`
+	AgentVersion   string   `json:"agentVersion"`
+	AgentCommit    string   `json:"agentCommit"`
+	ConfigDir      string   `json:"configDir"`
+	DataDir        string   `json:"dataDir"`
+	CacheDir       string   `json:"cacheDir"`
+	SessionDB      string   `json:"sessionDb"`
+	WorkspaceRoots []string `json:"workspaceRoots"`
+	CSRFToken      string   `json:"csrfToken"`
+	Sandboxed      bool     `json:"sandboxed"`
 	// DefaultPosture is the safety mode new chats start in on this server.
 	DefaultPosture Posture `json:"defaultPosture"`
 	// DefaultAgent is the agent source used when a chat is created without an
 	// explicit agentId. Normally docker-agent's built-in "coder".
 	DefaultAgent string `json:"defaultAgent"`
 	// BuiltinAgents lists the embedded agents this docker-agent ships.
-	BuiltinAgents []string `json:"builtinAgents"`
+	BuiltinAgents    []string          `json:"builtinAgents"`
 	ModelsAvailable  bool              `json:"modelsAvailable"`
 	ModelsHint       string            `json:"modelsHint"`
 	WorkspaceHints   []WorkspaceHint   `json:"workspaceHints"`
@@ -436,12 +442,12 @@ type OpenWorkspaceRequest struct {
 
 // Workspace is an opaque, server-resolved working directory.
 type Workspace struct {
-	WorkspaceID string   `json:"workspaceId"`
-	Path        string   `json:"path"`
-	Label       string   `json:"label"`
-	Notices     []Notice `json:"notices"`
-	AgentsMD    bool     `json:"agentsMd"`
-	AgentsIgnore bool    `json:"agentsIgnore"`
+	WorkspaceID  string   `json:"workspaceId"`
+	Path         string   `json:"path"`
+	Label        string   `json:"label"`
+	Notices      []Notice `json:"notices"`
+	AgentsMD     bool     `json:"agentsMd"`
+	AgentsIgnore bool     `json:"agentsIgnore"`
 }
 
 // ResolveAgentRequest is POST /api/agents/resolve.

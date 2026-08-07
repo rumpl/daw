@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -68,7 +69,8 @@ func run() error {
 	defer stop()
 
 	var ad adapter.Adapter
-	if os.Getenv("DAWUI_FAKE_ADAPTER") == "1" {
+	fakeAdapter := os.Getenv("DAWUI_FAKE_ADAPTER") == "1"
+	if fakeAdapter {
 		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
 		f := fake.New()
 		if d := os.Getenv("DAWUI_FAKE_DELAY_MS"); d != "" {
@@ -91,17 +93,33 @@ func run() error {
 		return err
 	}
 
+	// The real dashboard keeps its project MRU beside docker-agent's session
+	// data. Tests using the fake adapter stay isolated unless they explicitly
+	// provide a history file.
+	workspaceHistoryFile := strings.TrimSpace(os.Getenv("DAWUI_WORKSPACE_HISTORY_FILE"))
+	if workspaceHistoryFile == "" && !fakeAdapter {
+		info, err := ad.Info(ctx)
+		if err != nil {
+			return fmt.Errorf("docker-agent could not report its data directory: %w", err)
+		}
+		if strings.TrimSpace(info.DataDir) == "" {
+			return errors.New("docker-agent reported an empty data directory")
+		}
+		workspaceHistoryFile = filepath.Join(info.DataDir, "dawui-workspaces.json")
+	}
+
 	srv := httpapi.New(httpapi.Options{
-		Adapter:        ad,
-		DefaultAgent:   strings.TrimSpace(os.Getenv("DEFAULT_AGENT")),
-		DefaultPosture: defaultPosture,
-		Guard:          guard,
-		AppVersion:     appVersion,
-		TailscaleHosts: splitList(os.Getenv("TAILSCALE_HOSTNAMES")),
-		AllowedTSUsers: splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
-		Static:         webassets.Handler(),
-		Logger:         log,
-		SkippedRoots:   skipped,
+		Adapter:              ad,
+		DefaultAgent:         strings.TrimSpace(os.Getenv("DEFAULT_AGENT")),
+		DefaultPosture:       defaultPosture,
+		Guard:                guard,
+		AppVersion:           appVersion,
+		TailscaleHosts:       splitList(os.Getenv("TAILSCALE_HOSTNAMES")),
+		AllowedTSUsers:       splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
+		Static:               webassets.Handler(),
+		Logger:               log,
+		SkippedRoots:         skipped,
+		WorkspaceHistoryFile: workspaceHistoryFile,
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))

@@ -50,23 +50,28 @@ type Options struct {
 	DefaultPosture protocol.Posture
 	// SkippedRoots are configured roots that could not be canonicalized.
 	SkippedRoots []string
+	// WorkspaceHistoryFile persists successfully opened project paths so the
+	// list is shared by every browser connected to this server. Empty disables
+	// persistence (primarily useful for tests).
+	WorkspaceHistoryFile string
 }
 
 // Server is the whole dashboard HTTP surface.
 type Server struct {
-	mux            *http.ServeMux
-	adapter        adapter.Adapter
-	guard          *pathsec.Guard
-	hosts          *hostPolicy
-	csrf           string
-	appVersion     string
-	allowedTSUsers map[string]bool
-	static         http.Handler
-	log            *slog.Logger
-	started        time.Time
-	skippedRoots   []string
-	defaultPosture protocol.Posture
-	defaultAgent   string
+	mux                  *http.ServeMux
+	adapter              adapter.Adapter
+	guard                *pathsec.Guard
+	hosts                *hostPolicy
+	csrf                 string
+	appVersion           string
+	allowedTSUsers       map[string]bool
+	static               http.Handler
+	log                  *slog.Logger
+	started              time.Time
+	skippedRoots         []string
+	defaultPosture       protocol.Posture
+	defaultAgent         string
+	workspaceHistoryFile string
 	// builtins is the set of agent names embedded in the matched module.
 	// It is populated from the adapter, never from the browser.
 	builtinsOnce sync.Once
@@ -115,24 +120,26 @@ func New(opts Options) *Server {
 		defaultAgent = "coder"
 	}
 	s := &Server{
-		defaultAgent:   defaultAgent,
-		defaultPosture: defaultPosture,
-		mux:            http.NewServeMux(),
-		adapter:        opts.Adapter,
-		guard:          opts.Guard,
-		hosts:          newHostPolicy(opts.TailscaleHosts),
-		csrf:           newToken(),
-		appVersion:     opts.AppVersion,
-		allowedTSUsers: users,
-		static:         opts.Static,
-		log:            log,
-		started:        time.Now(),
-		skippedRoots:   opts.SkippedRoots,
-		workspaces:     map[string]*workspaceEntry{},
-		agents:         map[string]*agentEntry{},
-		chats:          map[string]*liveChat{},
-		bySession:      map[string]string{},
+		defaultAgent:         defaultAgent,
+		defaultPosture:       defaultPosture,
+		workspaceHistoryFile: strings.TrimSpace(opts.WorkspaceHistoryFile),
+		mux:                  http.NewServeMux(),
+		adapter:              opts.Adapter,
+		guard:                opts.Guard,
+		hosts:                newHostPolicy(opts.TailscaleHosts),
+		csrf:                 newToken(),
+		appVersion:           opts.AppVersion,
+		allowedTSUsers:       users,
+		static:               opts.Static,
+		log:                  log,
+		started:              time.Now(),
+		skippedRoots:         opts.SkippedRoots,
+		workspaces:           map[string]*workspaceEntry{},
+		agents:               map[string]*agentEntry{},
+		chats:                map[string]*liveChat{},
+		bySession:            map[string]string{},
 	}
+	s.loadWorkspaceHistory()
 	s.routes()
 	return s
 }
@@ -372,14 +379,24 @@ func (s *Server) failPath(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) rememberWorkspaceLocked(path string) {
-	for _, h := range s.hintsWS {
-		if h.Path == path {
-			return
+	// Opening an existing project promotes it to the front, making this a true
+	// most-recently-used list rather than merely a set of the first paths seen.
+	next := make([]protocol.WorkspaceHint, 0, min(len(s.hintsWS)+1, maxWorkspaceHints))
+	next = append(next, protocol.WorkspaceHint{Path: path, Label: filepath.Base(path)})
+	for _, hint := range s.hintsWS {
+		if hint.Path == path {
+			continue
+		}
+		next = append(next, hint)
+		if len(next) == maxWorkspaceHints {
+			break
 		}
 	}
-	s.hintsWS = append([]protocol.WorkspaceHint{{Path: path, Label: filepath.Base(path)}}, s.hintsWS...)
-	if len(s.hintsWS) > 10 {
-		s.hintsWS = s.hintsWS[:10]
+	s.hintsWS = next
+	if s.workspaceHistoryFile != "" {
+		if err := writeWorkspaceHistory(s.workspaceHistoryFile, s.hintsWS); err != nil {
+			s.log.Warn("could not persist workspace history", "error", err)
+		}
 	}
 }
 

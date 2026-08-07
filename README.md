@@ -151,6 +151,7 @@ credential helpers.
 | `TAILSCALE_HOSTNAMES` | — | Hostnames to accept besides loopback |
 | `ALLOWED_TAILSCALE_USERS` | — | Tailnet logins allowed through Tailscale Serve |
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
+| `DAWUI_WORKSPACE_HISTORY_FILE` | `<data>/dawui-workspaces.json` | Opened-project history path |
 | `DAWUI_DEBUG` | — | Debug logging |
 
 The server binds to `127.0.0.1` only; there is no host override.
@@ -231,10 +232,16 @@ Everything stays in docker-agent's own directories, resolved through its
 | Config | `~/.config/cagent` |
 | Data | `~/.cagent` |
 | Sessions | `~/.cagent/session.db` |
+| Opened projects | `~/.cagent/dawui-workspaces.json` |
+
+The server keeps the ten most recently opened projects in that owner-only JSON
+file. They appear under **Projects** in every browser connected to the server,
+so a project opened on desktop is available when you visit from your phone.
+Paths are revalidated against `WORKSPACE_ROOTS` before they are advertised.
 
 Sessions are created lazily on the first message, exactly like the CLI. In the
-browser, `localStorage` holds only UI preferences, recent selections and unsent
-drafts.
+browser, `localStorage` holds only UI preferences, the current device's last
+selection and unsent drafts.
 
 Don't drive the *same* session from two places at once — this dashboard and
 `docker agent run` in a terminal can share the store, but not one live session.

@@ -77,6 +77,25 @@ function upsert(items: Item[], item: Item): Item[] {
   return next;
 }
 
+function upsertTool(items: Item[], tool: NonNullable<Item['tool']>): Item[] {
+  const key = `t:${tool.id}`;
+  const idx = items.findIndex((existing) => itemKey(existing) === key);
+  if (idx === -1) return [...items, { kind: 'tool', tool }];
+  const current = items[idx]?.tool;
+  if (!current) return items;
+  const merged = {
+    ...current,
+    ...tool,
+    // Incremental output events may omit the call-only presentation fields.
+    displayName: tool.displayName || current.displayName,
+    argsSummary: tool.argsSummary || current.argsSummary,
+    arguments: tool.arguments ?? current.arguments,
+  };
+  const next = items.slice();
+  next[idx] = { kind: 'tool', tool: merged };
+  return next;
+}
+
 function patchMessage(items: Item[], id: string, patch: (text: string, reasoning: string) => [string, string, boolean]): Item[] {
   const key = `m:${id}`;
   const idx = items.findIndex((existing) => itemKey(existing) === key);
@@ -161,7 +180,7 @@ export function reduce(state: ChatState, event: Event): ChatState {
     case 'tool_update':
     case 'tool_end':
       return event.tool
-        ? { ...state, seq, items: upsert(state.items, { kind: 'tool', tool: event.tool }) }
+        ? { ...state, seq, items: upsertTool(state.items, event.tool) }
         : { ...state, seq };
     case 'transfer':
       return event.transfer
