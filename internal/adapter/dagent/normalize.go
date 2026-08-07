@@ -71,11 +71,18 @@ func (c *chat) normalize(ev daruntime.Event) {
 			displayName = def.DisplayName()
 			category = def.Category
 		}
-		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
-			ID: call.ID, Name: call.Function.Name, DisplayName: displayName,
-			Category: category, AgentName: e.AgentName, ArgsSummary: summarizeArgs(call),
-			Arguments: presentationArgs(call), State: protocol.ToolStatePending,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolUpdate,
+			Tool: &protocol.ToolActivity{
+				ID:          call.ID,
+				Name:        call.Function.Name,
+				DisplayName: displayName,
+				Category:    category,
+				AgentName:   e.AgentName,
+				ArgsSummary: summarizeArgs(call),
+				Arguments:   presentationArgs(call), State: protocol.ToolStatePending,
+			},
+		})
 
 	case *daruntime.ToolCallConfirmationEvent:
 		c.forgetPartialToolCall(e.ToolCall.ID)
@@ -84,36 +91,65 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.mu.Lock()
 		c.pendingTools[e.ToolCall.ID] = pendingTool{call: e.ToolCall, pattern: pattern}
 		c.mu.Unlock()
-		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
-			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name,
-			DisplayName: e.ToolDefinition.DisplayName(), Category: e.ToolDefinition.Category, AgentName: e.AgentName,
-			ArgsSummary: summarizeArgs(e.ToolCall), Arguments: presentationArgs(e.ToolCall), State: protocol.ToolStateAwaiting,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolUpdate,
+			Tool: &protocol.ToolActivity{
+				ID:          e.ToolCall.ID,
+				Name:        e.ToolCall.Function.Name,
+				DisplayName: e.ToolDefinition.DisplayName(),
+				Category:    e.ToolDefinition.Category,
+				AgentName:   e.AgentName,
+				ArgsSummary: summarizeArgs(e.ToolCall),
+				Arguments:   presentationArgs(e.ToolCall),
+				State:       protocol.ToolStateAwaiting,
+			},
+		})
 		c.emit(protocol.Event{
 			Type: protocol.EventToolConfirmation,
 			Confirmation: &protocol.ToolConfirmationRequest{
-				ToolCallID: e.ToolCall.ID, ToolName: e.ToolCall.Function.Name,
-				DisplayName: e.ToolDefinition.DisplayName(), AgentName: e.AgentName, ArgsSummary: summarizeArgs(e.ToolCall),
-				Pattern: pattern, PatternLabel: toolconfirm.AlwaysAllowLabel(pattern),
-				Metadata: e.Metadata, RejectionReasons: rejectionReasons(),
+				ToolCallID:       e.ToolCall.ID,
+				ToolName:         e.ToolCall.Function.Name,
+				DisplayName:      e.ToolDefinition.DisplayName(),
+				AgentName:        e.AgentName,
+				ArgsSummary:      summarizeArgs(e.ToolCall),
+				Pattern:          pattern,
+				PatternLabel:     toolconfirm.AlwaysAllowLabel(pattern),
+				Metadata:         e.Metadata,
+				RejectionReasons: rejectionReasons(),
 			},
 		})
 
 	case *daruntime.ToolCallEvent:
 		c.forgetPartialToolCall(e.ToolCall.ID)
 		c.closeAssistant()
-		c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: &protocol.ToolActivity{
-			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name,
-			DisplayName: e.ToolDefinition.DisplayName(), Category: e.ToolDefinition.Category, AgentName: e.AgentName,
-			ArgsSummary: summarizeArgs(e.ToolCall), Arguments: presentationArgs(e.ToolCall), State: protocol.ToolStateRunning,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolStart,
+			Tool: &protocol.ToolActivity{
+				ID:          e.ToolCall.ID,
+				Name:        e.ToolCall.Function.Name,
+				DisplayName: e.ToolDefinition.DisplayName(),
+				Category:    e.ToolDefinition.Category,
+				AgentName:   e.AgentName,
+				ArgsSummary: summarizeArgs(e.ToolCall),
+				Arguments:   presentationArgs(e.ToolCall),
+				State:       protocol.ToolStateRunning,
+			},
+		})
 
 	case *daruntime.ToolCallOutputEvent:
-		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
-			ID: e.ToolCallID, Name: e.ToolDefinition.Name, DisplayName: e.ToolDefinition.DisplayName(),
-			Category: e.ToolDefinition.Category, AgentName: e.AgentName, State: protocol.ToolStateRunning,
-			Preview: e.Output, OutputBytes: len(e.Output),
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolUpdate,
+			Tool: &protocol.ToolActivity{
+				ID:          e.ToolCallID,
+				Name:        e.ToolDefinition.Name,
+				DisplayName: e.ToolDefinition.DisplayName(),
+				Category:    e.ToolDefinition.Category,
+				AgentName:   e.AgentName,
+				State:       protocol.ToolStateRunning,
+				Preview:     e.Output,
+				OutputBytes: len(e.Output),
+			},
+		})
 
 	case *daruntime.ToolCallResponseEvent:
 		c.forgetPartialToolCall(e.ToolCallID)
@@ -123,18 +159,35 @@ func (c *chat) normalize(ev daruntime.Event) {
 			state = protocol.ToolStateError
 			isErr = true
 		}
-		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
-			ID: e.ToolCallID, Name: e.ToolDefinition.Name, DisplayName: e.ToolDefinition.DisplayName(),
-			Category: e.ToolDefinition.Category, AgentName: e.AgentName, State: state, Preview: e.Response,
-			Images: toolResultImages(e.Result), OutputBytes: len(e.Response), IsError: isErr,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolEnd,
+			Tool: &protocol.ToolActivity{
+				ID:          e.ToolCallID,
+				Name:        e.ToolDefinition.Name,
+				DisplayName: e.ToolDefinition.DisplayName(),
+				Category:    e.ToolDefinition.Category,
+				AgentName:   e.AgentName,
+				State:       state,
+				Preview:     e.Response,
+				Images:      toolResultImages(e.Result),
+				OutputBytes: len(e.Response),
+				IsError:     isErr,
+			},
+		})
 
 	case *daruntime.HookBlockedEvent:
 		c.forgetPartialToolCall(e.ToolCall.ID)
-		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
-			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name, AgentName: e.AgentName,
-			State: protocol.ToolStateRejected, Preview: e.Message, IsError: true,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventToolEnd,
+			Tool: &protocol.ToolActivity{
+				ID:        e.ToolCall.ID,
+				Name:      e.ToolCall.Function.Name,
+				AgentName: e.AgentName,
+				State:     protocol.ToolStateRejected,
+				Preview:   e.Message,
+				IsError:   true,
+			},
+		})
 		c.notice(protocol.NoticeWarning, "a hook blocked this tool call: "+e.Message, "hook_blocked")
 
 	case *daruntime.ElicitationRequestEvent:
@@ -144,26 +197,40 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.emit(protocol.Event{
 			Type: protocol.EventElicitation,
 			Elicitation: &protocol.ElicitationRequest{
-				ElicitationID: e.ElicitationID, Message: e.Message, Mode: e.Mode,
-				URL: e.URL, AgentName: e.AgentName, Schema: e.Schema,
+				ElicitationID: e.ElicitationID,
+				Message:       e.Message,
+				Mode:          e.Mode,
+				URL:           e.URL,
+				AgentName:     e.AgentName,
+				Schema:        e.Schema,
 			},
 		})
 
 	case *daruntime.AgentSwitchingEvent:
 		c.closeAssistant()
-		c.emit(protocol.Event{Type: protocol.EventTransfer, Transfer: &protocol.Transfer{
-			ID:        fmt.Sprintf("%s-x-%s-%s-%d", c.sess.ID, e.FromAgent, e.ToAgent, time.Now().UnixNano()),
-			FromAgent: e.FromAgent, ToAgent: e.ToAgent, Switching: e.Switching,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventTransfer,
+			Transfer: &protocol.Transfer{
+				ID:        fmt.Sprintf("%s-x-%s-%s-%d", c.sess.ID, e.FromAgent, e.ToAgent, time.Now().UnixNano()),
+				FromAgent: e.FromAgent,
+				ToAgent:   e.ToAgent,
+				Switching: e.Switching,
+			},
+		})
 
 	case *daruntime.TokenUsageEvent:
 		if e.Usage == nil {
 			return
 		}
-		c.emit(protocol.Event{Type: protocol.EventUsage, Usage: &protocol.Usage{
-			InputTokens: e.Usage.InputTokens, OutputTokens: e.Usage.OutputTokens,
-			Cost: e.Usage.Cost, ContextLimit: e.Usage.ContextLimit,
-		}})
+		c.emit(protocol.Event{
+			Type: protocol.EventUsage,
+			Usage: &protocol.Usage{
+				InputTokens:  e.Usage.InputTokens,
+				OutputTokens: e.Usage.OutputTokens,
+				Cost:         e.Usage.Cost,
+				ContextLimit: e.Usage.ContextLimit,
+			},
+		})
 
 	case *daruntime.SessionCompactionEvent:
 		msg := "Context compaction " + e.Status
@@ -270,10 +337,17 @@ func (c *chat) ensureAssistant(agentName string) string {
 	model := c.model
 	c.mu.Unlock()
 
-	c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
-		ID: id, Role: "assistant", AgentName: agentName, Streaming: true, Model: model,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}})
+	c.emit(protocol.Event{
+		Type: protocol.EventMessageItem,
+		Message: &protocol.MessageItem{
+			ID:        id,
+			Role:      "assistant",
+			AgentName: agentName,
+			Streaming: true,
+			Model:     model,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
 	return id
 }
 

@@ -283,7 +283,11 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 	}
 
 	c := &chat{
-		a: a, rt: rt, team: t, sess: sess, agentName: agentName,
+		a:            a,
+		rt:           rt,
+		team:         t,
+		sess:         sess,
+		agentName:    agentName,
 		workingDir:   req.WorkingDir,
 		events:       make(chan protocol.Event, 512),
 		unsaved:      newSession,
