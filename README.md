@@ -27,6 +27,8 @@ Open a folder, hit **New chat**, and type.
   `autonomous` safety modes.
 - **Sessions** — list, resume and search every docker-agent session for the
   current directory; they survive restarts because they are docker-agent's.
+- **Global plugins** — trusted runtime JavaScript modules can add sidebar items,
+  pages, reuse dashboard components, and call the complete backend API.
 - **Works on your phone** — responsive down to 320px, over Tailscale.
 - **One binary** — the frontend is embedded; `make start` serves API and UI from
   a single process bound to `127.0.0.1`.
@@ -74,9 +76,19 @@ Directories you have opened are remembered in the browser and listed under
 If it has since moved or is no longer inside your allowed roots, it is quietly
 forgotten.
 
-**Agents.** Chats use `coder`, docker-agent's built-in coding agent, with its
-`librarian` and `planner` sub-agents. Point `DEFAULT_AGENT` at another built-in
-name, an agent YAML path, or an OCI reference to change that.
+**Agents.** Chats use `dashboard-coder`, a coding agent assembled directly with
+Docker Agent's Go SDK. Its system instruction includes the global plugin
+contract, and its read-only `get_dashboard_developer_documentation` tool returns
+the complete backend API and host-component reference before it writes a plugin.
+Point `DEFAULT_AGENT` at a built-in name, an agent YAML path, or an OCI reference
+to replace it.
+
+**Plugins.** Global plugins live in `~/.cagent/dawui/plugins` by default. Each
+plugin is a browser-native ES module with a `plugin.json` manifest. Valid pages
+appear in the sidebar and reload automatically when their files change. Plugins
+receive the complete API client and the host's React instance, chat components,
+Markdown renderer, tool cards, dialogs, and chat hooks. See
+[`docs/plugins.md`](docs/plugins.md).
 
 **Send and control a turn.**
 
@@ -151,13 +163,14 @@ credential helpers.
 | --- | --- | --- |
 | `PORT` | `4788` | TCP port, validated 1024–65535 |
 | `WORKSPACE_ROOTS` | your home directory | Path-list of directories that may be opened |
-| `DEFAULT_AGENT` | `coder` | Agent used when none is chosen |
+| `DEFAULT_AGENT` | `dashboard-coder` | Agent used when none is chosen |
 | `DEFAULT_SAFETY` | `autonomous` | `strict`, `balanced` or `autonomous` for new chats |
 | `TAILSCALE_HOSTNAMES` | — | Hostnames to accept besides loopback |
 | `ALLOWED_TAILSCALE_USERS` | — | Tailnet logins allowed through Tailscale Serve |
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
 | `DAWUI_WORKSPACE_HISTORY_FILE` | `<data>/dawui-workspaces.json` | Opened-project history path |
 | `DAWUI_CHAT_PREFERENCES_FILE` | `<data>/dawui-chat-preferences.json` | Model and thinking preference path |
+| `DAWUI_PLUGIN_DIR` | `<data>/dawui/plugins` | Global trusted plugin directory |
 | `DAWUI_DEBUG` | — | Debug logging |
 
 The server binds to `127.0.0.1` only; there is no host override.
@@ -240,6 +253,7 @@ Everything stays in docker-agent's own directories, resolved through its
 | Sessions | `~/.cagent/session.db` |
 | Opened projects | `~/.cagent/dawui-workspaces.json` |
 | Model and thinking choices | `~/.cagent/dawui-chat-preferences.json` |
+| Global plugins | `~/.cagent/dawui/plugins/` |
 
 The server keeps the ten most recently opened projects in an owner-only JSON
 file. They appear under **Projects** in every browser connected to the server,

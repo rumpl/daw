@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://daw.local/schemas/plugin-v1.json",
+  "title": "docker-agent dashboard plugin",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "id", "name", "entry", "pages"],
+  "properties": {
+    "apiVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "type": "string", "maxLength": 300 },
+    "version": { "type": "string", "maxLength": 40 },
+    "entry": { "type": "string", "pattern": "^[^.].*\\.(m?js)$" },
+    "style": { "type": "string", "pattern": "^[^.].*\\.css$" },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "label", "sidebar"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+          "path": { "type": "string", "pattern": "^$|^[a-z0-9][a-z0-9/-]*$" },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "sidebar": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
