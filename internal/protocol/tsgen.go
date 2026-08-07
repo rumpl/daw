@@ -34,6 +34,7 @@ var exported = []any{
 	ElicitResolved{},
 	ChatClosed{},
 	Event{},
+	DashboardEvent{},
 	Health{},
 	WorkspaceHint{},
 	Bootstrap{},
@@ -76,6 +77,10 @@ var enums = map[string][]string{
 		string(EventElicitation), string(EventElicitResolved), string(EventTransfer),
 		string(EventUsage), string(EventNotice), string(EventSessionMeta),
 		string(EventGap), string(EventChatClosed),
+	},
+	"DashboardEventType": {
+		string(DashboardEventSnapshot), string(DashboardEventSessionsChanged),
+		string(DashboardEventPluginsChanged), string(DashboardEventGap),
 	},
 }
 

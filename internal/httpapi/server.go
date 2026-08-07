@@ -71,6 +71,8 @@ type Server struct {
 	pluginDir            string
 	preferencesMu        sync.Mutex
 	preferences          chatPreferences
+	events               *dashboardEvents
+	pluginWatcher        *pluginWatcher
 
 	mu         sync.Mutex
 	workspaces map[string]*workspaceEntry
@@ -114,9 +116,13 @@ func New(opts Options) *Server {
 		workspaces:           map[string]*workspaceEntry{},
 		chats:                map[string]*liveChat{},
 		bySession:            map[string]string{},
+		events:               newDashboardEvents(),
 	}
 	s.loadWorkspaceHistory()
 	s.loadChatPreferences()
+	s.pluginWatcher = startPluginWatcher(s.pluginDir, s.events, func(err error) {
+		s.log.Warn("plugin watcher", "error", err)
+	})
 	s.routes()
 	return s
 }
@@ -128,6 +134,7 @@ func (s *Server) routes() {
 	m := s.mux
 	m.HandleFunc("GET /api/health", s.handleHealth)
 	m.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
+	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
@@ -589,6 +596,9 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		return
 	}
 	lc := newLiveChat(chatID, ws.id, c)
+	lc.onIndexChange = func(sessionID, workspaceID, reason string) {
+		s.publishSessionsChanged(workspaceID, sessionID, reason)
+	}
 	lc.generation = 1
 	s.chats[chatID] = lc
 	s.bySession[sessionID] = chatID
@@ -601,6 +611,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		return
 	}
 	go lc.pump(1, c.Events())
+	s.publishSessionsChanged(ws.id, sessionID, "opened")
 
 	s.json(w, http.StatusCreated, protocol.ChatRef{ChatID: chatID, SessionID: sessionID})
 }
@@ -909,12 +920,15 @@ func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 	s.mu.Unlock()
 	if c != nil {
 		c.close(ctx, reason)
+		s.publishSessionsChanged(c.workspaceID, c.chat.SessionID(), reason)
 	}
 }
 
 // Shutdown disposes every live chat and closes the adapter (and with it the
 // single shared session store).
 func (s *Server) Shutdown(ctx context.Context) {
+	s.pluginWatcher.close()
+	s.events.close()
 	s.mu.Lock()
 	ids := make([]string, 0, len(s.chats))
 	for id := range s.chats {
@@ -925,6 +939,85 @@ func (s *Server) Shutdown(ctx context.Context) {
 		s.disposeChat(ctx, id, "server shutting down")
 	}
 	_ = s.adapter.Close()
+}
+
+func (s *Server) publishSessionsChanged(workspaceID, sessionID, reason string) {
+	s.events.publish(protocol.DashboardEvent{
+		Type:         protocol.DashboardEventSessionsChanged,
+		WorkspaceIDs: []string{workspaceID}, SessionIDs: []string{sessionID}, Reason: reason,
+	})
+}
+
+func (s *Server) handleDashboardEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		s.fail(w, http.StatusInternalServerError, "no_streaming", "streaming is unavailable")
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache, no-transform")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	h.Set("Content-Encoding", "identity")
+	w.WriteHeader(http.StatusOK)
+
+	var lastID uint64
+	if value := r.Header.Get("Last-Event-ID"); value != "" {
+		lastID, _ = strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	} else if value := r.URL.Query().Get("lastEventId"); value != "" {
+		lastID, _ = strconv.ParseUint(value, 10, 64)
+	}
+	sub, replay, resumed := s.events.subscribe(lastID)
+	defer s.events.unsubscribe(sub)
+	write := func(ev protocol.DashboardEvent) bool {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return true
+		}
+		if ev.Seq > 0 {
+			if _, err := fmt.Fprintf(w, "id: %d\n", ev.Seq); err != nil {
+				return false
+			}
+		}
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	if resumed {
+		for _, ev := range replay {
+			if !write(ev) {
+				return
+			}
+		}
+	} else {
+		if lastID > 0 && !write(protocol.DashboardEvent{Type: protocol.DashboardEventGap}) {
+			return
+		}
+		if !write(s.events.snapshot()) {
+			return
+		}
+	}
+
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, open := <-sub.ch:
+			if !open || !write(ev) {
+				return
+			}
+		case <-ticker.C:
+			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

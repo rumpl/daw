@@ -322,6 +322,122 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
+type dashboardSSEClient struct {
+	t      *testing.T
+	resp   *http.Response
+	reader *bufio.Reader
+}
+
+func (h *harness) openDashboardSSE(lastEventID uint64) *dashboardSSEClient {
+	h.t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/api/events", nil)
+	if lastEventID > 0 {
+		req.Header.Set("Last-Event-ID", fmt.Sprint(lastEventID))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "text/event-stream" {
+		h.t.Fatalf("dashboard sse: %d %q", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	h.t.Cleanup(func() { resp.Body.Close() })
+	return &dashboardSSEClient{t: h.t, resp: resp, reader: bufio.NewReader(resp.Body)}
+}
+
+func (c *dashboardSSEClient) next(timeout time.Duration) (protocol.DashboardEvent, bool) {
+	c.t.Helper()
+	type result struct {
+		event protocol.DashboardEvent
+		ok    bool
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		var data string
+		for {
+			line, err := c.reader.ReadString('\n')
+			if err != nil {
+				resultCh <- result{}
+				return
+			}
+			line = strings.TrimRight(line, "\r\n")
+			switch {
+			case strings.HasPrefix(line, ":"):
+				continue
+			case strings.HasPrefix(line, "data: "):
+				data = strings.TrimPrefix(line, "data: ")
+			case line == "" && data != "":
+				var event protocol.DashboardEvent
+				if json.Unmarshal([]byte(data), &event) == nil {
+					resultCh <- result{event: event, ok: true}
+				} else {
+					resultCh <- result{}
+				}
+				return
+			}
+		}
+	}()
+	select {
+	case result := <-resultCh:
+		return result.event, result.ok
+	case <-time.After(timeout):
+		return protocol.DashboardEvent{}, false
+	}
+}
+
+func TestDashboardSSESessionChangesAndReplay(t *testing.T) {
+	h := newHarness(t)
+	stream := h.openDashboardSSE(0)
+	initial, ok := stream.next(3 * time.Second)
+	if !ok || initial.Type != protocol.DashboardEventSnapshot {
+		t.Fatalf("expected dashboard snapshot, got %+v", initial)
+	}
+	ref, ws, _ := h.newChat()
+	changed, ok := stream.next(3 * time.Second)
+	if !ok || changed.Type != protocol.DashboardEventSessionsChanged || changed.Reason != "opened" {
+		t.Fatalf("expected opened invalidation, got %+v", changed)
+	}
+	if len(changed.WorkspaceIDs) != 1 || changed.WorkspaceIDs[0] != ws.WorkspaceID ||
+		len(changed.SessionIDs) != 1 || changed.SessionIDs[0] != ref.SessionID {
+		t.Fatalf("unexpected invalidation scope: %+v", changed)
+	}
+
+	resp := h.do(http.MethodDelete, "/api/chats/"+ref.ChatID, nil)
+	resp.Body.Close()
+	closed, ok := stream.next(3 * time.Second)
+	if !ok || closed.Type != protocol.DashboardEventSessionsChanged {
+		t.Fatalf("expected disposed invalidation, got %+v", closed)
+	}
+	stream.resp.Body.Close()
+
+	replay := h.openDashboardSSE(changed.Seq)
+	replayed, ok := replay.next(3 * time.Second)
+	if !ok || replayed.Seq != closed.Seq || replayed.Type != protocol.DashboardEventSessionsChanged {
+		t.Fatalf("expected replayed invalidation, got %+v", replayed)
+	}
+}
+
+func TestDashboardSSEPluginChanges(t *testing.T) {
+	h := newHarness(t)
+	stream := h.openDashboardSSE(0)
+	stream.next(3 * time.Second)
+	dir := filepath.Join(h.pluginDir, "watched")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"apiVersion":1,"id":"watched","name":"Watched","entry":"index.js","pages":[{"id":"main","path":"","label":"Watched","sidebar":true}]}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.js"), []byte("export function mount() {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	event, ok := stream.next(5 * time.Second)
+	if !ok || event.Type != protocol.DashboardEventPluginsChanged || event.Revision == "" {
+		t.Fatalf("expected plugin invalidation, got %+v", event)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // chat lifecycle
 // ---------------------------------------------------------------------------

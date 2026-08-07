@@ -9,6 +9,7 @@ import { Sidebar } from './components/Sidebar';
 import { pluginRoute, sessionRoute } from './routes';
 import { clip } from './safety';
 import { useDashboard } from './useDashboard';
+import { useDashboardEvents } from './useDashboardEvents';
 import { usePlugins } from './usePlugins';
 
 export function Dashboard() {
@@ -30,13 +31,17 @@ export function Dashboard() {
     () => navigate(routePluginId ? pluginRoute(routePluginId, routePluginPath) : '/'),
     [navigate, routePluginId, routePluginPath],
   );
+  const dashboardEvents = useDashboardEvents(true);
   const dashboard = useDashboard({
     sessionId: routeSessionId ?? null,
     workspacePath: routeWorkspacePath,
     openSession,
     leaveSession,
-  });
-  const { catalog: pluginCatalog, loadError: pluginLoadError } = usePlugins(Boolean(dashboard.boot));
+  }, dashboardEvents.sessionsRevision);
+  const { catalog: pluginCatalog, loadError: pluginLoadError } = usePlugins(
+    Boolean(dashboard.boot),
+    dashboardEvents.pluginsRevision,
+  );
   const activePlugin = pluginCatalog.plugins?.find((plugin) => plugin.id === routePluginId) ?? null;
   const openPlugin = useCallback(
     (pluginId: string, path: string) => {

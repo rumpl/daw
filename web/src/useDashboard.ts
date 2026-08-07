@@ -20,7 +20,7 @@ interface DashboardRoute {
   leaveSession: () => void;
 }
 
-export function useDashboard(route: DashboardRoute) {
+export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [bootError, setBootError] = useState('');
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -72,20 +72,15 @@ export function useDashboard(route: DashboardRoute) {
     setLiveSessions(await api.liveSessions());
   }, []);
 
-  // The current chat has an SSE stream, but sessions opened in another tab do
-  // not. Poll this small global index so the cross-project list stays useful
-  // without requiring the user to reopen each project.
+  // Dashboard-wide SSE invalidations keep sessions opened in other tabs and
+  // projects current without polling.
   useEffect(() => {
     if (!boot) return;
     void refreshLiveSessions().catch(() => undefined);
-    const timer = window.setInterval(() => {
-      void refreshLiveSessions().catch(() => undefined);
-    }, 3_000);
-    return () => window.clearInterval(timer);
-  }, [boot, refreshLiveSessions]);
+    if (workspace) void refreshSessions(workspace).catch(() => undefined);
+  }, [boot, refreshLiveSessions, refreshSessions, sessionsRevision, workspace]);
 
-  // SSE makes the selected session's status immediate; polling covers the
-  // other live sessions running elsewhere.
+  // The selected chat stream makes its run state immediate while the global
   useEffect(() => {
     if (!activeSessionId) return;
     const applyRunState = (session: SessionSummary) =>

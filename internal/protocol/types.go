@@ -345,6 +345,30 @@ type Event struct {
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard-wide SSE events
+// ---------------------------------------------------------------------------
+
+// DashboardEventType discriminates low-volume resource invalidations.
+type DashboardEventType string
+
+const (
+	DashboardEventSnapshot        DashboardEventType = "snapshot"
+	DashboardEventSessionsChanged DashboardEventType = "sessions_changed"
+	DashboardEventPluginsChanged  DashboardEventType = "plugins_changed"
+	DashboardEventGap             DashboardEventType = "gap"
+)
+
+// DashboardEvent notifies clients that an authoritative REST resource changed.
+type DashboardEvent struct {
+	Type         DashboardEventType `json:"type"`
+	Seq          uint64             `json:"seq"`
+	WorkspaceIDs []string           `json:"workspaceIds,omitempty"`
+	SessionIDs   []string           `json:"sessionIds,omitempty"`
+	Reason       string             `json:"reason,omitempty"`
+	Revision     string             `json:"revision,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
 // REST payloads
 // ---------------------------------------------------------------------------
 

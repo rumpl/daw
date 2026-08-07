@@ -47,6 +47,11 @@ selection or agent-resolution API.
 
 ### Sessions and live chats
 
+- `GET /api/events[?lastEventId=N]` → dashboard-wide SSE stream
+  - Sends low-volume `snapshot`, `sessions_changed`, `plugins_changed`, and
+    `gap` invalidations. Reconnect with the last applied sequence; clients
+    refresh the corresponding authoritative REST resources.
+
 - `GET /api/sessions/live` → `200 SessionSummary[]`
   - Every session currently owned by this server across all workspaces.
 - `GET /api/workspaces/{workspaceId}/sessions` → `200 SessionSummary[]`

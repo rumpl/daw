@@ -75,7 +75,7 @@ context.ui exposes the dashboard's React instance, render(element, target?), hoo
 
 Plugins run as trusted same-origin code. Use browser JavaScript only: no JSX, TypeScript, npm build, bare module imports, eval, or inline scripts. Relative ES module imports and assets are supported. Build UI under context.root, use textContent for untrusted values, respond to context.signal for cancellation, and clean up event listeners, timers, and subscriptions. Prefix CSS selectors with the plugin id to avoid affecting the dashboard shell.
 
-The dashboard polls for changes and reloads a plugin when its files change. After writing a plugin, verify plugin.json is valid JSON and all referenced files exist. Do not modify dashboard core for a feature that can be implemented as a plugin unless the user explicitly asks for a core change.
+The dashboard watches for changes and reloads a plugin when its files change. After writing a plugin, verify plugin.json is valid JSON and all referenced files exist. Do not modify dashboard core for a feature that can be implemented as a plugin unless the user explicitly asks for a core change.
 </dashboard_plugins>`
 
 // Build creates a fresh SDK team and model/toolset graph for one working

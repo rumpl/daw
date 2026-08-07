@@ -2,7 +2,10 @@ module github.com/rumpl/daw
 
 go 1.26.5
 
-require github.com/docker/docker-agent v1.123.0
+require (
+	github.com/docker/docker-agent v1.123.0
+	github.com/fsnotify/fsnotify v1.10.1
+)
 
 require (
 	charm.land/bubbles/v2 v2.1.1 // indirect
@@ -68,7 +71,6 @@ require (
 	github.com/expr-lang/expr v1.17.8 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.1 // indirect
 	github.com/go-git/go-git/v5 v5.19.2 // indirect

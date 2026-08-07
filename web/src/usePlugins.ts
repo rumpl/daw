@@ -4,7 +4,7 @@ import type { PluginCatalog } from './protocol.gen';
 
 const emptyCatalog: PluginCatalog = { plugins: [], errors: [] };
 
-export function usePlugins(enabled: boolean) {
+export function usePlugins(enabled: boolean, revision = 0) {
   const [catalog, setCatalog] = useState<PluginCatalog>(emptyCatalog);
   const [loadError, setLoadError] = useState('');
   const signature = useRef('');
@@ -24,11 +24,7 @@ export function usePlugins(enabled: boolean) {
     void refresh().catch((cause: unknown) => {
       setLoadError(cause instanceof Error ? cause.message : 'plugins could not be loaded');
     });
-    const timer = window.setInterval(() => {
-      void refresh().catch(() => undefined);
-    }, 3_000);
-    return () => window.clearInterval(timer);
-  }, [enabled, refresh]);
+  }, [enabled, refresh, revision]);
 
   return { catalog, loadError, refresh };
 }

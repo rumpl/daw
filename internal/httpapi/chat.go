@@ -28,9 +28,10 @@ type subscriber struct {
 // event log and its SSE subscribers. Exactly one liveChat may exist per
 // docker-agent session inside this process.
 type liveChat struct {
-	id          string
-	workspaceID string
-	chat        adapter.Chat
+	id            string
+	workspaceID   string
+	chat          adapter.Chat
+	onIndexChange func(sessionID, workspaceID, reason string)
 
 	mu       sync.Mutex
 	seq      uint64
@@ -203,6 +204,16 @@ func (l *liveChat) publish(ev protocol.Event) {
 				close(s.ch)
 			}
 			l.mu.Unlock()
+		}
+	}
+	if l.onIndexChange != nil {
+		switch ev.Type {
+		case protocol.EventRunStatus:
+			l.onIndexChange(l.chat.SessionID(), l.workspaceID, "run_state")
+		case protocol.EventSessionMeta:
+			l.onIndexChange(l.chat.SessionID(), l.workspaceID, "metadata")
+		case protocol.EventMessageItem:
+			l.onIndexChange(l.chat.SessionID(), l.workspaceID, "messages")
 		}
 	}
 }
