@@ -17,6 +17,7 @@ var exported = []any{
 	QueueStatus{}, RunStatus{}, Usage{}, PermissionsView{}, SessionMeta{}, Snapshot{},
 	Delta{}, ItemRef{}, ToolResolved{}, ElicitResolved{}, ChatClosed{}, Event{},
 	Health{}, WorkspaceHint{}, AgentSourceHint{}, Bootstrap{},
+	PluginPage{}, Plugin{}, PluginError{}, PluginCatalog{},
 	OpenWorkspaceRequest{}, Workspace{}, ResolveAgentRequest{}, ToolsetInfo{},
 	AgentDescriptor{}, ResolvedAgent{}, SessionSummary{}, CreateChatRequest{},
 	ResumeChatRequest{}, ChatRef{}, SendMessageRequest{}, Accepted{}, ModelOption{},

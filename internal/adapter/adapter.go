@@ -36,9 +36,9 @@ type Info struct {
 	ModelsAvailable bool
 	ModelsHint      string
 	Notices         []protocol.Notice
-	// BuiltinAgents are the agent names embedded in the matched module
-	// (docker-agent's config.BuiltinAgentNames()). Selecting one needs no
-	// filesystem path and no network fetch.
+	// BuiltinAgents are agent names available without a filesystem path or
+	// network fetch, including docker-agent's embedded agents and agents the
+	// host application assembles directly with the SDK.
 	BuiltinAgents []string
 }
 

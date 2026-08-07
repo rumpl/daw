@@ -224,6 +224,7 @@ export interface Bootstrap {
   dataDir: string;
   cacheDir: string;
   sessionDb: string;
+  pluginDir: string;
   workspaceRoots: Array<string> | null;
   csrfToken: string;
   sandboxed: boolean;
@@ -235,6 +236,35 @@ export interface Bootstrap {
   workspaceHints: Array<WorkspaceHint> | null;
   agentSourceHints: Array<AgentSourceHint> | null;
   notices: Array<Notice> | null;
+}
+
+export interface PluginPage {
+  id: string;
+  path: string;
+  label: string;
+  sidebar: boolean;
+}
+
+export interface Plugin {
+  apiVersion: number;
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  fingerprint: string;
+  entryUrl: string;
+  styleUrl?: string;
+  pages: Array<PluginPage> | null;
+}
+
+export interface PluginError {
+  pluginId?: string;
+  message: string;
+}
+
+export interface PluginCatalog {
+  plugins: Array<Plugin> | null;
+  errors: Array<PluginError> | null;
 }
 
 export interface OpenWorkspaceRequest {

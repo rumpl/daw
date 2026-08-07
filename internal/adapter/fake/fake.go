@@ -73,7 +73,7 @@ func (a *Adapter) Info(context.Context) (adapter.Info, error) {
 		SessionDB:       "/fake/data/cagent/session.db",
 		ModelsAvailable: true,
 		ModelsHint:      "",
-		BuiltinAgents:   []string{"coder", "default"},
+		BuiltinAgents:   []string{"coder", "default", "dashboard-coder"},
 	}, nil
 }
 

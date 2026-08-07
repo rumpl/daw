@@ -37,6 +37,7 @@ import (
 	"github.com/docker/docker-agent/pkg/version"
 
 	"github.com/rumpl/daw/internal/adapter"
+	"github.com/rumpl/daw/internal/dashboardagent"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -123,7 +124,7 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 			Message: "No ~/.config/cagent/config.yaml found. If no model resolves, run `docker agent setup`.",
 		})
 	}
-	info.BuiltinAgents = dacfg.BuiltinAgentNames()
+	info.BuiltinAgents = append(dacfg.BuiltinAgentNames(), dashboardagent.Name)
 	info.ModelsAvailable = true
 	info.ModelsHint = "Models are resolved by docker-agent itself; run `docker agent doctor` if a chat reports none."
 	_ = ctx
@@ -136,7 +137,26 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {
 	rc := &dacfg.RuntimeConfig{}
 	rc.WorkingDir = workingDir
+	if config, err := userconfig.Load(); err == nil && config != nil {
+		rc.ModelsGateway = config.ModelsGateway
+		rc.Providers = config.Providers
+		if config.DefaultModel != nil {
+			model := config.DefaultModel.ModelConfig
+			rc.DefaultModel = &model
+		}
+	}
 	return rc
+}
+
+func (a *Adapter) load(ctx context.Context, ref string, kind protocol.AgentSourceKind, runConfig *dacfg.RuntimeConfig) (*teamloader.LoadResult, error) {
+	if kind == protocol.AgentSourceBuiltin && ref == dashboardagent.Name {
+		return dashboardagent.Build(ctx, runConfig)
+	}
+	src, err := a.source(kind, ref)
+	if err != nil {
+		return nil, err
+	}
+	return teamloader.LoadWithConfig(ctx, src, runConfig, loaderdefaults.Opts()...)
 }
 
 // source builds the config.Source for an agent reference.
@@ -172,12 +192,7 @@ func (a *Adapter) ResolveAgent(ctx context.Context, req adapter.ResolveRequest) 
 	loadCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	src, err := a.source(req.Kind, req.Source)
-	if err != nil {
-		return nil, err
-	}
-	res, err := teamloader.LoadWithConfig(loadCtx, src,
-		a.runtimeConfig(req.WorkingDir), loaderdefaults.Opts()...)
+	res, err := a.load(loadCtx, req.Source, req.Kind, a.runtimeConfig(req.WorkingDir))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
 	}
@@ -304,12 +319,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 // budgets and permissions behave identically.
 func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	runConfig := a.runtimeConfig(req.WorkingDir)
-	src, err := a.source(req.Kind, req.Source)
-	if err != nil {
-		return nil, err
-	}
-	loadRes, err := teamloader.LoadWithConfig(ctx, src, runConfig,
-		loaderdefaults.Opts()...)
+	loadRes, err := a.load(ctx, req.Source, req.Kind, runConfig)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
 	}

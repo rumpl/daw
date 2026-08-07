@@ -20,6 +20,7 @@ import (
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/pathsec"
+	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -41,7 +42,7 @@ type Options struct {
 	Static http.Handler
 	Logger *slog.Logger
 	// DefaultAgent is the agent source used when a request carries no
-	// agentId. Empty means "coder", docker-agent's built-in coding agent.
+	// agentId. Empty means the SDK-built dashboard coding agent.
 	DefaultAgent string
 	// DefaultPosture is the safety mode every new chat starts in. Empty means
 	// protocol.PostureAutonomous, this deployment's configured default (see
@@ -58,6 +59,9 @@ type Options struct {
 	// both as defaults for new chats and as per-session overrides. Empty
 	// disables persistence (primarily useful for tests).
 	ChatPreferencesFile string
+	// PluginDir contains trusted, global browser plugins. It is configured by
+	// the operator and is never selected by a browser request.
+	PluginDir string
 }
 
 // Server is the whole dashboard HTTP surface.
@@ -77,9 +81,10 @@ type Server struct {
 	defaultAgent         string
 	workspaceHistoryFile string
 	chatPreferencesFile  string
+	pluginDir            string
 	preferencesMu        sync.Mutex
 	preferences          chatPreferences
-	// builtins is the set of agent names embedded in the matched module.
+	// builtins is the set of pathless local agents reported by the adapter.
 	// It is populated from the adapter, never from the browser.
 	builtinsOnce sync.Once
 	builtins     map[string]bool
@@ -124,13 +129,14 @@ func New(opts Options) *Server {
 	}
 	defaultAgent := strings.TrimSpace(opts.DefaultAgent)
 	if defaultAgent == "" {
-		defaultAgent = "coder"
+		defaultAgent = "dashboard-coder"
 	}
 	s := &Server{
 		defaultAgent:         defaultAgent,
 		defaultPosture:       defaultPosture,
 		workspaceHistoryFile: strings.TrimSpace(opts.WorkspaceHistoryFile),
 		chatPreferencesFile:  strings.TrimSpace(opts.ChatPreferencesFile),
+		pluginDir:            strings.TrimSpace(opts.PluginDir),
 		mux:                  http.NewServeMux(),
 		adapter:              opts.Adapter,
 		guard:                opts.Guard,
@@ -160,6 +166,8 @@ func (s *Server) routes() {
 	m := s.mux
 	m.HandleFunc("GET /api/health", s.handleHealth)
 	m.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
+	m.HandleFunc("GET /api/plugins", s.handlePlugins)
+	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
 	m.HandleFunc("POST /api/agents/resolve", s.handleResolveAgent)
 	m.HandleFunc("GET /api/sessions/live", s.handleListLiveSessions)
@@ -326,12 +334,39 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, protocol.Bootstrap{
 		AppVersion: s.appVersion, AgentVersion: info.AgentVersion, AgentCommit: info.AgentCommit,
 		ConfigDir: info.ConfigDir, DataDir: info.DataDir, CacheDir: info.CacheDir,
-		SessionDB: info.SessionDB, WorkspaceRoots: s.guard.Roots(), CSRFToken: s.csrf,
+		SessionDB: info.SessionDB, PluginDir: s.pluginDir,
+		WorkspaceRoots: s.guard.Roots(), CSRFToken: s.csrf,
 		Sandboxed: false, DefaultPosture: s.defaultPosture,
 		DefaultAgent: s.defaultAgent, BuiltinAgents: info.BuiltinAgents,
 		ModelsAvailable: info.ModelsAvailable, ModelsHint: info.ModelsHint,
 		WorkspaceHints: wsHints, AgentSourceHints: agHints, Notices: notices,
 	})
+}
+
+func (s *Server) handlePlugins(w http.ResponseWriter, _ *http.Request) {
+	s.json(w, http.StatusOK, plugins.Catalog(s.pluginDir))
+}
+
+func (s *Server) handlePluginAsset(w http.ResponseWriter, r *http.Request) {
+	path, info, err := plugins.Asset(
+		s.pluginDir,
+		r.PathValue("pluginId"),
+		r.PathValue("fingerprint"),
+		r.PathValue("path"),
+	)
+	if err != nil {
+		s.fail(w, http.StatusNotFound, "plugin_asset_not_found", "plugin asset not found")
+		return
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		s.fail(w, http.StatusNotFound, "plugin_asset_not_found", "plugin asset not found")
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Content-Type", plugins.ContentType(path))
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
 func (s *Server) handleOpenWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +457,7 @@ func (s *Server) rememberAgentLocked(src string, kind protocol.AgentSourceKind, 
 	}
 }
 
-// builtinAgents caches the embedded agent names reported by the adapter.
+// builtinAgents caches the pathless local agent names reported by the adapter.
 func (s *Server) builtinAgents(ctx context.Context) map[string]bool {
 	s.builtinsOnce.Do(func() {
 		s.builtins = map[string]bool{}
@@ -438,7 +473,7 @@ func (s *Server) builtinAgents(ctx context.Context) map[string]bool {
 }
 
 // classifyAgentSource decides whether the string names one of docker-agent's
-// embedded agents, a local file we must contain inside an allowed root, or an
+// local SDK/embedded agents, a file we must contain inside an allowed root, or an
 // OCI reference we must not fetch without an explicit user action.
 //
 // The built-in set comes from the matched module, never from the request, so a
@@ -544,7 +579,7 @@ func (s *Server) agent(id string) (*agentEntry, bool) {
 }
 
 // agentOrDefault resolves an explicit agentId, or lazily loads the server's
-// default agent (docker-agent's built-in "coder") when none was supplied, so
+// default SDK-built dashboard coding agent when none was supplied, so
 // the browser never has to pick an agent config to start a chat.
 func (s *Server) agentOrDefault(ctx context.Context, id string) (*agentEntry, error) {
 	if id != "" {

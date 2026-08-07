@@ -22,11 +22,12 @@ import (
 )
 
 type harness struct {
-	t    *testing.T
-	srv  *httptest.Server
-	fake *fake.Adapter
-	csrf string
-	root string
+	t         *testing.T
+	srv       *httptest.Server
+	fake      *fake.Adapter
+	csrf      string
+	root      string
+	pluginDir string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -37,17 +38,19 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	f := fake.New()
+	pluginDir := t.TempDir()
 	s := httpapi.New(httpapi.Options{
 		Adapter: f, Guard: guard, AppVersion: "test",
 		TailscaleHosts: []string{"dash.tailnet.ts.net"},
 		SkippedRoots:   skipped,
+		PluginDir:      pluginDir,
 	})
 	ts := httptest.NewServer(s)
 	t.Cleanup(func() {
 		ts.Close()
 		s.Shutdown(context.Background())
 	})
-	h := &harness{t: t, srv: ts, fake: f, csrf: s.CSRFToken(), root: root}
+	h := &harness{t: t, srv: ts, fake: f, csrf: s.CSRFToken(), root: root, pluginDir: pluginDir}
 	return h
 }
 
@@ -169,6 +172,37 @@ func TestHealthAndBootstrap(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("bootstrap must carry the no-sandbox notice")
+	}
+}
+
+func TestGlobalPluginCatalogAndAssets(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.pluginDir, "hello")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"apiVersion":1,"id":"hello","name":"Hello","entry":"index.js",
+		"pages":[{"id":"main","path":"","label":"Hello","sidebar":true}]
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.js"), []byte("export function mount() {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := decodeJSON[protocol.PluginCatalog](t, h.do(http.MethodGet, "/api/plugins", nil))
+	if len(catalog.Plugins) != 1 || catalog.Plugins[0].ID != "hello" {
+		t.Fatalf("unexpected plugin catalog: %#v", catalog)
+	}
+	resp := h.do(http.MethodGet, catalog.Plugins[0].EntryURL, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plugin asset: %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/javascript") {
+		t.Fatalf("plugin module content type: %q", got)
 	}
 }
 
@@ -1128,8 +1162,8 @@ func TestChatWithoutChoosingAnAgent(t *testing.T) {
 	ref := decodeJSON[protocol.ChatRef](t, resp)
 
 	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	if snap.Meta.AgentSource != "coder" {
-		t.Fatalf("expected the built-in coder agent, got %q", snap.Meta.AgentSource)
+	if snap.Meta.AgentSource != "dashboard-coder" {
+		t.Fatalf("expected the SDK-built dashboard coding agent, got %q", snap.Meta.AgentSource)
 	}
 	// Model and thinking controls must still be available.
 	models := decodeJSON[[]protocol.ModelOption](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID+"/models", nil))
@@ -1145,8 +1179,8 @@ func TestChatWithoutChoosingAnAgent(t *testing.T) {
 func TestBootstrapAdvertisesDefaultAgent(t *testing.T) {
 	h := newHarness(t)
 	b := decodeJSON[protocol.Bootstrap](t, h.do(http.MethodGet, "/api/bootstrap", nil))
-	if b.DefaultAgent != "coder" {
-		t.Fatalf("default agent should be coder, got %q", b.DefaultAgent)
+	if b.DefaultAgent != "dashboard-coder" {
+		t.Fatalf("default agent should be dashboard-coder, got %q", b.DefaultAgent)
 	}
 	if len(b.BuiltinAgents) == 0 {
 		t.Fatal("bootstrap must list the module's built-in agents")

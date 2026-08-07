@@ -397,10 +397,9 @@ type AgentSourceKind string
 const (
 	AgentSourceFile AgentSourceKind = "file"
 	AgentSourceOCI  AgentSourceKind = "oci"
-	// AgentSourceBuiltin is one of docker-agent's own embedded agents
-	// (config.BuiltinAgentNames(), e.g. "coder" and "default"), or a user
-	// alias resolving to one. It needs no path containment check and no
-	// remote fetch: the YAML ships inside the matched module.
+	// AgentSourceBuiltin is one of docker-agent's embedded agents, a user
+	// alias resolving to one, or an agent assembled by this host with the SDK.
+	// It needs no path containment check and no remote fetch.
 	AgentSourceBuiltin AgentSourceKind = "builtin"
 )
 
@@ -426,21 +425,56 @@ type Bootstrap struct {
 	DataDir        string   `json:"dataDir"`
 	CacheDir       string   `json:"cacheDir"`
 	SessionDB      string   `json:"sessionDb"`
+	PluginDir      string   `json:"pluginDir"`
 	WorkspaceRoots []string `json:"workspaceRoots"`
 	CSRFToken      string   `json:"csrfToken"`
 	Sandboxed      bool     `json:"sandboxed"`
 	// DefaultPosture is the safety mode new chats start in on this server.
 	DefaultPosture Posture `json:"defaultPosture"`
 	// DefaultAgent is the agent source used when a chat is created without an
-	// explicit agentId. Normally docker-agent's built-in "coder".
+	// explicit agentId. Normally the dashboard's SDK-built coding agent.
 	DefaultAgent string `json:"defaultAgent"`
-	// BuiltinAgents lists the embedded agents this docker-agent ships.
+	// BuiltinAgents lists agents available without a local path or remote pull.
 	BuiltinAgents    []string          `json:"builtinAgents"`
 	ModelsAvailable  bool              `json:"modelsAvailable"`
 	ModelsHint       string            `json:"modelsHint"`
 	WorkspaceHints   []WorkspaceHint   `json:"workspaceHints"`
 	AgentSourceHints []AgentSourceHint `json:"agentSourceHints"`
 	Notices          []Notice          `json:"notices"`
+}
+
+// PluginPage is one route contributed by a global dashboard plugin.
+type PluginPage struct {
+	ID      string `json:"id"`
+	Path    string `json:"path"`
+	Label   string `json:"label"`
+	Sidebar bool   `json:"sidebar"`
+}
+
+// Plugin describes one valid global plugin. EntryURL and StyleURL are
+// fingerprinted, same-origin assets that can be loaded directly by the browser.
+type Plugin struct {
+	APIVersion  int          `json:"apiVersion"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Version     string       `json:"version"`
+	Fingerprint string       `json:"fingerprint"`
+	EntryURL    string       `json:"entryUrl"`
+	StyleURL    string       `json:"styleUrl,omitempty"`
+	Pages       []PluginPage `json:"pages"`
+}
+
+// PluginError is a bounded discovery diagnostic for one invalid plugin.
+type PluginError struct {
+	PluginID string `json:"pluginId,omitempty"`
+	Message  string `json:"message"`
+}
+
+// PluginCatalog is GET /api/plugins.
+type PluginCatalog struct {
+	Plugins []Plugin      `json:"plugins"`
+	Errors  []PluginError `json:"errors"`
 }
 
 // OpenWorkspaceRequest is POST /api/workspaces/open.

@@ -24,6 +24,7 @@ import (
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/dagent"
 	"github.com/rumpl/daw/internal/adapter/fake"
+	"github.com/rumpl/daw/internal/dashboardagent"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
@@ -114,6 +115,31 @@ func run() error {
 		}
 	}
 
+	pluginDir := strings.TrimSpace(os.Getenv("DAWUI_PLUGIN_DIR"))
+	if pluginDir == "" {
+		if fakeAdapter {
+			pluginDir = filepath.Join(os.TempDir(), "dawui-fake-plugins")
+		} else {
+			info, err := ad.Info(ctx)
+			if err != nil {
+				return fmt.Errorf("docker-agent could not report its data directory: %w", err)
+			}
+			pluginDir = filepath.Join(info.DataDir, "dawui", "plugins")
+		}
+	}
+	pluginDir, err = absoluteUserPath(pluginDir)
+	if err != nil {
+		return fmt.Errorf("invalid DAWUI_PLUGIN_DIR: %w", err)
+	}
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		return fmt.Errorf("creating plugin directory: %w", err)
+	}
+	// The SDK-built coding agent inherits this exact resolved location, so it
+	// never has to guess where global plugins belong.
+	if err := os.Setenv("DAWUI_PLUGIN_DIR", pluginDir); err != nil {
+		return fmt.Errorf("exporting plugin directory: %w", err)
+	}
+
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,
 		DefaultAgent:         strings.TrimSpace(os.Getenv("DEFAULT_AGENT")),
@@ -127,6 +153,7 @@ func run() error {
 		SkippedRoots:         skipped,
 		WorkspaceHistoryFile: workspaceHistoryFile,
 		ChatPreferencesFile:  chatPreferencesFile,
+		PluginDir:            pluginDir,
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
@@ -152,7 +179,8 @@ func run() error {
 	fmt.Printf("docker-agent dashboard listening on http://%s\n", addr)
 	fmt.Printf("  workspace roots: %s\n", strings.Join(guard.Roots(), ", "))
 	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
-	fmt.Printf("  default agent: %s\n", cmp.Or(strings.TrimSpace(os.Getenv("DEFAULT_AGENT")), "coder (built-in)"))
+	fmt.Printf("  default agent: %s\n", cmp.Or(strings.TrimSpace(os.Getenv("DEFAULT_AGENT")), dashboardagent.Name+" (SDK-built)"))
+	fmt.Printf("  global plugins: %s\n", pluginDir)
 	fmt.Printf("  default safety mode for new chats: %s\n", defaultPosture)
 	if defaultPosture == protocol.PostureAutonomous {
 		fmt.Println("  -> autonomous: EVERY tool call is auto-approved. Set DEFAULT_SAFETY=strict to require confirmation.")
@@ -174,6 +202,17 @@ func run() error {
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+func absoluteUserPath(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+	return filepath.Abs(path)
 }
 
 func currentUser() string {
