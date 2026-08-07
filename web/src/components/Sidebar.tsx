@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import type { Bootstrap, SessionSummary, Workspace } from '../protocol.gen';
+import type { Bootstrap, Plugin, PluginError, SessionSummary, Workspace } from '../protocol.gen';
 import { clip } from '../safety';
 
 interface SidebarProps {
@@ -9,6 +9,10 @@ interface SidebarProps {
   sessions: SessionSummary[];
   liveSessions: SessionSummary[];
   recentWorkspaces: string[];
+  plugins: Plugin[];
+  pluginErrors: PluginError[];
+  activePluginId: string | null;
+  activePluginPath: string;
   workspacePath: string;
   busy: boolean;
   drawerRef: RefObject<HTMLDivElement | null>;
@@ -17,6 +21,7 @@ interface SidebarProps {
   onNewChat: () => void;
   onResumeChat: (sessionId: string, workspacePath?: string) => void;
   onCloseLiveSession: (sessionId: string, chatId: string) => void;
+  onOpenPlugin: (pluginId: string, path: string) => void;
 }
 
 function projectLabel(path: string) {
@@ -29,6 +34,10 @@ export function Sidebar({
   sessions,
   liveSessions,
   recentWorkspaces,
+  plugins,
+  pluginErrors,
+  activePluginId,
+  activePluginPath,
   workspacePath,
   busy,
   drawerRef,
@@ -37,6 +46,7 @@ export function Sidebar({
   onNewChat,
   onResumeChat,
   onCloseLiveSession,
+  onOpenPlugin,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'sessions' | 'live'>('sessions');
   const [sessionFilter, setSessionFilter] = useState('');
@@ -193,6 +203,33 @@ export function Sidebar({
       <button type="button" className="block new-chat-button" onClick={onNewChat} disabled={!workspace || busy}>
         New chat
       </button>
+
+      {plugins.some((plugin) => plugin.pages?.some((page) => page.sidebar)) ? (
+        <nav className="plugin-navigation" aria-label="Plugins">
+          <p className="sidebar-heading">Plugins</p>
+          <ul>
+            {plugins.flatMap((plugin) =>
+              (plugin.pages ?? []).filter((page) => page.sidebar).map((page) => (
+                <li key={`${plugin.id}:${page.id}`}>
+                  <button
+                    type="button"
+                    aria-current={activePluginId === plugin.id && activePluginPath === page.path ? 'page' : undefined}
+                    title={plugin.description || plugin.name}
+                    onClick={() => onOpenPlugin(plugin.id, page.path)}
+                  >
+                    {clip(page.label, 60)}
+                  </button>
+                </li>
+              )),
+            )}
+          </ul>
+        </nav>
+      ) : null}
+      {pluginErrors.length > 0 ? (
+        <p className="plugin-discovery-error" title={pluginErrors.map((error) => `${error.pluginId}: ${error.message}`).join('\n')}>
+          {pluginErrors.length} invalid plugin{pluginErrors.length === 1 ? '' : 's'}
+        </p>
+      ) : null}
 
       <div className="sidebar-tabs" role="tablist" aria-label="Chat navigation">
         <button

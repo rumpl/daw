@@ -9,6 +9,7 @@ import type {
   CommandInfo,
   ElicitationReply,
   ModelOption,
+  PluginCatalog,
   ResolvedAgent,
   SessionSummary,
   Snapshot,
@@ -33,7 +34,11 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+export async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET' && method !== 'HEAD') headers[CSRF_HEADER] = csrfToken;
@@ -44,6 +49,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
     redirect: 'error',
+    signal: options.signal,
   });
 
   const text = await res.text();
@@ -63,6 +69,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
+  request,
   setCsrfToken(token: string): void {
     csrfToken = token;
   },
@@ -73,6 +80,9 @@ export const api = {
     const b = await request<Bootstrap>('GET', '/api/bootstrap');
     csrfToken = b.csrfToken;
     return b;
+  },
+  plugins(): Promise<PluginCatalog> {
+    return request<PluginCatalog>('GET', '/api/plugins');
   },
   openWorkspace(path: string): Promise<Workspace> {
     return request<Workspace>('POST', '/api/workspaces/open', { path });
@@ -90,7 +100,7 @@ export const api = {
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
   },
-  // agentId may be '' — the server then uses its default agent ("coder").
+  // agentId may be '' — the server then uses its SDK-built default agent.
   createChat(workspaceId: string, agentId = '', agentName = ''): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats', { workspaceId, agentId, agentName });
   },

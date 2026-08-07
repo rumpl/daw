@@ -4,13 +4,18 @@ import { ChatHeader } from './components/ChatHeader';
 import { Composer } from './components/Composer';
 import { Conversation } from './components/Conversation';
 import { PendingDialogs } from './components/PendingDialogs';
+import { PluginPage } from './components/PluginPage';
 import { Sidebar } from './components/Sidebar';
-import { sessionRoute } from './routes';
+import { pluginRoute, sessionRoute } from './routes';
 import { clip } from './safety';
 import { useDashboard } from './useDashboard';
+import { usePlugins } from './usePlugins';
 
 export function Dashboard() {
-  const { sessionId: routeSessionId } = useParams<{ sessionId: string }>();
+  const params = useParams<{ sessionId: string; pluginId: string; '*': string }>();
+  const routeSessionId = params.sessionId;
+  const routePluginId = params.pluginId ?? null;
+  const routePluginPath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '');
   const location = useLocation();
   const navigate = useNavigate();
   const routeWorkspacePath = useMemo(
@@ -21,13 +26,25 @@ export function Dashboard() {
     (sessionId: string, workspacePath: string) => navigate(sessionRoute(sessionId, workspacePath)),
     [navigate],
   );
-  const leaveSession = useCallback(() => navigate('/'), [navigate]);
+  const leaveSession = useCallback(
+    () => navigate(routePluginId ? pluginRoute(routePluginId, routePluginPath) : '/'),
+    [navigate, routePluginId, routePluginPath],
+  );
   const dashboard = useDashboard({
     sessionId: routeSessionId ?? null,
     workspacePath: routeWorkspacePath,
     openSession,
     leaveSession,
   });
+  const { catalog: pluginCatalog, loadError: pluginLoadError } = usePlugins(Boolean(dashboard.boot));
+  const activePlugin = pluginCatalog.plugins?.find((plugin) => plugin.id === routePluginId) ?? null;
+  const openPlugin = useCallback(
+    (pluginId: string, path: string) => {
+      dashboard.setDrawerOpen(false);
+      navigate(pluginRoute(pluginId, path));
+    },
+    [dashboard.setDrawerOpen, navigate],
+  );
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
 
@@ -64,7 +81,7 @@ export function Dashboard() {
   return (
     <div className="app">
       <a className="skip" href="#main">
-        Skip to conversation
+        Skip to main content
       </a>
 
       {dashboard.drawerOpen ? (
@@ -82,6 +99,10 @@ export function Dashboard() {
           sessions={dashboard.sessions}
           liveSessions={dashboard.liveSessions}
           recentWorkspaces={dashboard.recentWorkspaces}
+          plugins={pluginCatalog.plugins ?? []}
+          pluginErrors={pluginCatalog.errors ?? []}
+          activePluginId={routePluginId}
+          activePluginPath={routePluginPath}
           workspacePath={dashboard.workspacePath}
           busy={dashboard.busyAction}
           drawerRef={drawerRef}
@@ -90,10 +111,23 @@ export function Dashboard() {
           onNewChat={dashboard.newChat}
           onResumeChat={dashboard.resumeChat}
           onCloseLiveSession={dashboard.closeLiveSession}
+          onOpenPlugin={openPlugin}
         />
       </aside>
 
       <main id="main" className="main">
+        {routePluginId ? (
+          <PluginPage
+            boot={dashboard.boot}
+            plugin={activePlugin}
+            routePath={routePluginPath}
+            workspace={dashboard.workspace}
+            menuButton={menuButton}
+            drawerOpen={dashboard.drawerOpen}
+            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)}
+          />
+        ) : (
+          <>
         <ChatHeader
           hasChat={Boolean(dashboard.chatId)}
           state={dashboard.state}
@@ -168,13 +202,20 @@ export function Dashboard() {
             onStop={dashboard.abort}
           />
         ) : null}
+          </>
+        )}
+        {pluginLoadError ? (
+          <p className="banner banner-error" role="alert">
+            {clip(pluginLoadError, 300)}
+          </p>
+        ) : null}
       </main>
 
-      <PendingDialogs
+      {!routePluginId ? <PendingDialogs
         state={dashboard.state}
         onToolDecision={dashboard.decideTool}
         onElicitationAnswer={dashboard.answerElicitation}
-      />
+      /> : null}
     </div>
   );
 }

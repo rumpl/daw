@@ -2,7 +2,7 @@ import { createRef } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { Bootstrap, SessionSummary, Workspace } from '../protocol.gen';
+import type { Bootstrap, Plugin, SessionSummary, Workspace } from '../protocol.gen';
 import { Sidebar } from './Sidebar';
 
 const workspace: Workspace = {
@@ -25,6 +25,17 @@ const liveSession: SessionSummary = {
   runState: 'running',
 };
 
+const plugin: Plugin = {
+  apiVersion: 1,
+  id: 'system-info',
+  name: 'System info',
+  description: 'Shows system information',
+  version: '1.0.0',
+  fingerprint: 'abc123',
+  entryUrl: '/api/plugins/system-info/assets/abc123/index.js',
+  pages: [{ id: 'overview', path: '', label: 'System info', sidebar: true }],
+};
+
 const boot = {
   agentVersion: 'test',
   workspaceRoots: ['/code'],
@@ -32,6 +43,35 @@ const boot = {
 } as unknown as Bootstrap;
 
 describe('Sidebar', () => {
+  it('opens a global plugin from its contributed sidebar item', async () => {
+    const onOpenPlugin = vi.fn();
+    render(
+      <Sidebar
+        boot={boot}
+        workspace={workspace}
+        sessions={[]}
+        liveSessions={[]}
+        recentWorkspaces={[]}
+        plugins={[plugin]}
+        pluginErrors={[]}
+        activePluginId={null}
+        activePluginPath=""
+        workspacePath={workspace.path}
+        busy={false}
+        drawerRef={createRef<HTMLDivElement>()}
+        onWorkspacePathChange={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onNewChat={vi.fn()}
+        onResumeChat={vi.fn()}
+        onCloseLiveSession={vi.fn()}
+        onOpenPlugin={onOpenPlugin}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'System info' }));
+    expect(onOpenPlugin).toHaveBeenCalledWith('system-info', '');
+  });
+
   it('opens a live session from another project directly', async () => {
     const onResumeChat = vi.fn();
     const onCloseLiveSession = vi.fn();
@@ -42,6 +82,10 @@ describe('Sidebar', () => {
         sessions={[]}
         liveSessions={[liveSession]}
         recentWorkspaces={[]}
+        plugins={[]}
+        pluginErrors={[]}
+        activePluginId={null}
+        activePluginPath=""
         workspacePath={workspace.path}
         busy={false}
         drawerRef={createRef<HTMLDivElement>()}
@@ -50,6 +94,7 @@ describe('Sidebar', () => {
         onNewChat={vi.fn()}
         onResumeChat={onResumeChat}
         onCloseLiveSession={onCloseLiveSession}
+        onOpenPlugin={vi.fn()}
       />,
     );
 
