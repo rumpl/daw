@@ -7,8 +7,6 @@ import { join } from 'node:path';
 const workspaceRoot = join(homedir(), '.dawui-e2e');
 mkdirSync(workspaceRoot, { recursive: true });
 const workspace = mkdtempSync(join(workspaceRoot, 'ws-'));
-const agentFile = join(workspace, 'agent.yaml');
-writeFileSync(agentFile, 'agents:\n  root:\n    model: fake\n');
 
 const pluginRoot = process.env.E2E_PLUGIN_DIR ?? join(homedir(), '.dawui-e2e', 'plugins');
 const pluginDir = join(pluginRoot, 'system-info');

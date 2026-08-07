@@ -99,7 +99,7 @@ $(BIN):
 ## screenshots: capture desktop + mobile UI screenshots against the fake adapter
 screenshots: build
 	@pkill -f 'bin/dawui' 2>/dev/null || true
-	@PORT=4797 DAWUI_FAKE_ADAPTER=1 DAWUI_FAKE_DELAY_MS=30 WORKSPACE_ROOTS="$$HOME" ./$(BIN) & \
+	@PORT=4797 DAWUI_FAKE_ADAPTER=1 DAWUI_FAKE_DELAY_MS=30 ./$(BIN) & \
 	 sleep 2; cd e2e && node screenshot.mjs; kill %1 2>/dev/null || true
 	@echo "wrote /tmp/uishots/desktop.png and /tmp/uishots/mobile.png"
 

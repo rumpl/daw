@@ -6,8 +6,8 @@ import { join } from 'node:path';
 // install chromium` is the only download required.
 //
 // The suite always runs against the *production binary* with the deterministic
-// fake docker-agent adapter, so it never spends model tokens, never pulls an
-// OCI agent image and never starts a Docker sandbox VM.
+// fake docker-agent adapter, so it never spends model tokens or starts a Docker
+// sandbox VM.
 const PORT = process.env.E2E_PORT ?? '4799';
 
 export default defineConfig({
@@ -36,7 +36,6 @@ export default defineConfig({
       PORT,
       DAWUI_FAKE_ADAPTER: '1',
       DAWUI_FAKE_DELAY_MS: '120',
-      WORKSPACE_ROOTS: process.env.E2E_ROOT ?? process.env.HOME ?? '/tmp',
       DAWUI_PLUGIN_DIR: process.env.E2E_PLUGIN_DIR ?? join(homedir(), '.dawui-e2e', 'plugins'),
     },
   },

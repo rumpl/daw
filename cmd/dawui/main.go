@@ -6,7 +6,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -24,10 +23,8 @@ import (
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/dagent"
 	"github.com/rumpl/daw/internal/adapter/fake"
-	"github.com/rumpl/daw/internal/dashboardagent"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
-	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/webassets"
 )
 
@@ -61,9 +58,9 @@ func run() error {
 		return err
 	}
 
-	guard, skipped, err := pathsec.NewGuard(pathsec.DefaultRoots(os.Getenv("WORKSPACE_ROOTS")))
+	guard, _, err := pathsec.NewGuard(pathsec.HomeRoots())
 	if err != nil {
-		return fmt.Errorf("no usable workspace root: set WORKSPACE_ROOTS to one or more existing directories")
+		return fmt.Errorf("the home directory is not usable as a workspace root: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -87,11 +84,6 @@ func run() error {
 			return fmt.Errorf("docker-agent could not be initialized: %w", err)
 		}
 		ad = real
-	}
-
-	defaultPosture, err := resolveDefaultPosture(os.Getenv("DEFAULT_SAFETY"))
-	if err != nil {
-		return err
 	}
 
 	// The real dashboard keeps its project MRU and chat control preferences
@@ -142,15 +134,12 @@ func run() error {
 
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,
-		DefaultAgent:         strings.TrimSpace(os.Getenv("DEFAULT_AGENT")),
-		DefaultPosture:       defaultPosture,
 		Guard:                guard,
 		AppVersion:           appVersion,
 		TailscaleHosts:       splitList(os.Getenv("TAILSCALE_HOSTNAMES")),
 		AllowedTSUsers:       splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
 		Static:               webassets.Handler(),
 		Logger:               log,
-		SkippedRoots:         skipped,
 		WorkspaceHistoryFile: workspaceHistoryFile,
 		ChatPreferencesFile:  chatPreferencesFile,
 		PluginDir:            pluginDir,
@@ -177,14 +166,10 @@ func run() error {
 		log.Warn("frontend assets are not built into this binary; run `make build`")
 	}
 	fmt.Printf("docker-agent dashboard listening on http://%s\n", addr)
-	fmt.Printf("  workspace roots: %s\n", strings.Join(guard.Roots(), ", "))
+	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
 	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
-	fmt.Printf("  default agent: %s\n", cmp.Or(strings.TrimSpace(os.Getenv("DEFAULT_AGENT")), dashboardagent.Name+" (SDK-built)"))
 	fmt.Printf("  global plugins: %s\n", pluginDir)
-	fmt.Printf("  default safety mode for new chats: %s\n", defaultPosture)
-	if defaultPosture == protocol.PostureAutonomous {
-		fmt.Println("  -> autonomous: EVERY tool call is auto-approved. Set DEFAULT_SAFETY=strict to require confirmation.")
-	}
+	fmt.Println("  new chats are autonomous: EVERY tool call is auto-approved")
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()
@@ -220,22 +205,6 @@ func currentUser() string {
 		return u
 	}
 	return "the current user"
-}
-
-// resolveDefaultPosture validates DEFAULT_SAFETY. It selects the safety mode
-// new chats start in, using docker-agent's own three mode names. The default
-// for this deployment is autonomous (auto-approve every tool call), which is a
-// deliberate, documented choice for a single-user localhost dashboard; set
-// DEFAULT_SAFETY=strict to require confirmation for every tool call.
-func resolveDefaultPosture(v string) (protocol.Posture, error) {
-	switch p := protocol.Posture(strings.ToLower(strings.TrimSpace(v))); p {
-	case "":
-		return protocol.PostureAutonomous, nil
-	case protocol.PostureStrict, protocol.PostureBalanced, protocol.PostureAutonomous:
-		return p, nil
-	default:
-		return "", fmt.Errorf("DEFAULT_SAFETY must be strict, balanced or autonomous, got %q", v)
-	}
 }
 
 // resolvePort validates the PORT override. Only 1024-65535 is accepted so the

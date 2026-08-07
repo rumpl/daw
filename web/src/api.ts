@@ -10,7 +10,6 @@ import type {
   ElicitationReply,
   ModelOption,
   PluginCatalog,
-  ResolvedAgent,
   SessionSummary,
   Snapshot,
   SessionMeta,
@@ -87,25 +86,17 @@ export const api = {
   openWorkspace(path: string): Promise<Workspace> {
     return request<Workspace>('POST', '/api/workspaces/open', { path });
   },
-  resolveAgent(source: string, workspaceId: string, allowRemoteFetch = false): Promise<ResolvedAgent> {
-    return request<ResolvedAgent>('POST', '/api/agents/resolve', {
-      source,
-      workspaceId,
-      allowRemoteFetch,
-    });
-  },
   liveSessions(): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', '/api/sessions/live');
   },
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
   },
-  // agentId may be '' — the server then uses its SDK-built default agent.
-  createChat(workspaceId: string, agentId = '', agentName = ''): Promise<ChatRef> {
-    return request<ChatRef>('POST', '/api/chats', { workspaceId, agentId, agentName });
+  createChat(workspaceId: string): Promise<ChatRef> {
+    return request<ChatRef>('POST', '/api/chats', { workspaceId });
   },
-  resumeChat(workspaceId: string, agentId: string, sessionId: string): Promise<ChatRef> {
-    return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, agentId, sessionId });
+  resumeChat(workspaceId: string, sessionId: string): Promise<ChatRef> {
+    return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, sessionId });
   },
   snapshot(chatId: string): Promise<Snapshot> {
     return request<Snapshot>('GET', `/api/chats/${encodeURIComponent(chatId)}`);

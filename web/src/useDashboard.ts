@@ -161,7 +161,7 @@ export function useDashboard(route: DashboardRoute) {
       if (!nextWorkspace || nextWorkspace.path !== path) {
         nextWorkspace = await applyWorkspace(path, true);
       }
-      const ref = await api.resumeChat(nextWorkspace.workspaceId, '', sessionId);
+      const ref = await api.resumeChat(nextWorkspace.workspaceId, sessionId);
       setChatId(ref.chatId);
       setActiveSessionId(ref.sessionId);
       setDrawerOpen(false);
@@ -221,7 +221,7 @@ export function useDashboard(route: DashboardRoute) {
         workspace?.path === targetWorkspacePath
           ? workspace
           : await applyWorkspace(targetWorkspacePath, false);
-      const ref = await api.resumeChat(nextWorkspace.workspaceId, '', targetSessionId);
+      const ref = await api.resumeChat(nextWorkspace.workspaceId, targetSessionId);
       await activateChat(ref.chatId, ref.sessionId, nextWorkspace);
     });
   }, [

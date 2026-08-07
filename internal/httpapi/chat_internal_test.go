@@ -8,7 +8,7 @@ import (
 )
 
 func testChat() *liveChat {
-	c := newLiveChat("chat1", "ws1", "ag1", nil)
+	c := newLiveChat("chat1", "ws1", nil)
 	c.generation = 1
 	return c
 }

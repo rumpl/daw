@@ -41,8 +41,6 @@ type chat struct {
 	sess       *session.Session
 	agentName  string
 	workingDir string
-	source     string
-	kind       protocol.AgentSourceKind
 
 	events chan protocol.Event
 
@@ -138,12 +136,6 @@ func (c *chat) Meta() protocol.SessionMeta {
 	if len(levels) == 0 {
 		levels = c.supportedThinkingLevels()
 	}
-	var subs []string
-	if ag, err := c.team.Agent(c.agentName); err == nil && ag != nil {
-		for _, s := range ag.SubAgents() {
-			subs = append(subs, s.Name())
-		}
-	}
 	checker := c.team.Permissions()
 	view := viewFromChecker(checker, posture, c.sess.IsToolsApproved(), grants)
 	view.AgentsIgnore = ignore
@@ -155,8 +147,8 @@ func (c *chat) Meta() protocol.SessionMeta {
 
 	return protocol.SessionMeta{
 		SessionID: c.sess.ID, Title: c.sess.TitleSnapshot(),
-		WorkingDir: c.workingDir, AgentSource: c.source, AgentName: c.agentName,
-		SubAgents: subs, Model: model, ThinkingLevel: thinking, ThinkingLevels: levels,
+		WorkingDir: c.workingDir, AgentName: c.agentName,
+		Model: model, ThinkingLevel: thinking, ThinkingLevels: levels,
 		Permissions: view, CreatedAt: c.sess.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

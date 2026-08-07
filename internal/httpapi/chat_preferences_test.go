@@ -79,7 +79,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 
 	first.workspaces["ws"] = &workspaceEntry{id: "ws", path: root}
 	recorder := httptest.NewRecorder()
-	first.openChat(recorder, httptest.NewRequest("POST", "/api/chats", nil), "ws", "", "", "")
+	first.openChat(recorder, httptest.NewRequest("POST", "/api/chats", nil), "ws", "")
 	if recorder.Code != 201 {
 		t.Fatalf("open new chat: %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -110,7 +110,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	secondFake.Seed(ref.SessionID, "Existing", root, nil)
 	second.workspaces["ws"] = &workspaceEntry{id: "ws", path: root}
 	recorder = httptest.NewRecorder()
-	second.openChat(recorder, httptest.NewRequest("POST", "/api/chats/resume", nil), "ws", "", "", ref.SessionID)
+	second.openChat(recorder, httptest.NewRequest("POST", "/api/chats/resume", nil), "ws", ref.SessionID)
 	if recorder.Code != 201 {
 		t.Fatalf("resume chat: %d %s", recorder.Code, recorder.Body.String())
 	}

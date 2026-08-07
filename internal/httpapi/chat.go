@@ -30,7 +30,6 @@ type subscriber struct {
 type liveChat struct {
 	id          string
 	workspaceID string
-	agentID     string
 	chat        adapter.Chat
 
 	mu       sync.Mutex
@@ -52,9 +51,9 @@ type liveChat struct {
 	idem       map[string]protocol.Accepted
 }
 
-func newLiveChat(id, workspaceID, agentID string, c adapter.Chat) *liveChat {
+func newLiveChat(id, workspaceID string, c adapter.Chat) *liveChat {
 	return &liveChat{
-		id: id, workspaceID: workspaceID, agentID: agentID, chat: c,
+		id: id, workspaceID: workspaceID, chat: c,
 		subs:     map[*subscriber]struct{}{},
 		index:    map[string]int{},
 		pendingC: map[string]protocol.ToolConfirmationRequest{},
@@ -74,7 +73,6 @@ func (l *liveChat) hydrate(ctx context.Context) error {
 	meta := l.chat.Meta()
 	meta.ChatID = l.id
 	meta.WorkspaceID = l.workspaceID
-	meta.AgentID = l.agentID
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -279,7 +277,6 @@ func (l *liveChat) applyLocked(ev *protocol.Event) {
 			m := *ev.Meta
 			m.ChatID = l.id
 			m.WorkspaceID = l.workspaceID
-			m.AgentID = l.agentID
 			l.meta = m
 			ev.Meta = &m
 		}

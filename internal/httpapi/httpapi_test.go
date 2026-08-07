@@ -33,7 +33,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	root := t.TempDir()
-	guard, skipped, err := pathsec.NewGuard([]string{root})
+	guard, _, err := pathsec.NewGuard([]string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,6 @@ func newHarness(t *testing.T) *harness {
 	s := httpapi.New(httpapi.Options{
 		Adapter: f, Guard: guard, AppVersion: "test",
 		TailscaleHosts: []string{"dash.tailnet.ts.net"},
-		SkippedRoots:   skipped,
 		PluginDir:      pluginDir,
 	})
 	ts := httptest.NewServer(s)
@@ -100,21 +99,6 @@ func (h *harness) openWorkspace() protocol.Workspace {
 	return decodeJSON[protocol.Workspace](h.t, resp)
 }
 
-func (h *harness) resolveAgent(ws protocol.Workspace, name string) protocol.ResolvedAgent {
-	h.t.Helper()
-	p := filepath.Join(h.root, name)
-	if err := os.WriteFile(p, []byte("agents:\n  root: {}\n"), 0o600); err != nil {
-		h.t.Fatal(err)
-	}
-	resp := h.do(http.MethodPost, "/api/agents/resolve",
-		protocol.ResolveAgentRequest{Source: p, WorkspaceID: ws.WorkspaceID})
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		h.t.Fatalf("resolve agent: %d %s", resp.StatusCode, body)
-	}
-	return decodeJSON[protocol.ResolvedAgent](h.t, resp)
-}
-
 // setStrict switches a chat to the confirm-everything mode, for tests that
 // exercise the confirmation dialog (the server default auto-approves).
 func (h *harness) setStrict(chatID string) {
@@ -128,17 +112,16 @@ func (h *harness) setStrict(chatID string) {
 	}
 }
 
-func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace, protocol.ResolvedAgent) {
+func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace, struct{}) {
 	h.t.Helper()
 	ws := h.openWorkspace()
-	ag := h.resolveAgent(ws, "agent.yaml")
 	resp := h.do(http.MethodPost, "/api/chats",
-		protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID, AgentID: ag.AgentID})
+		protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID})
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		h.t.Fatalf("create chat: %d %s", resp.StatusCode, body)
 	}
-	return decodeJSON[protocol.ChatRef](h.t, resp), ws, ag
+	return decodeJSON[protocol.ChatRef](h.t, resp), ws, struct{}{}
 }
 
 // ---------------------------------------------------------------------------
@@ -160,9 +143,6 @@ func TestHealthAndBootstrap(t *testing.T) {
 	}
 	if b.Sandboxed {
 		t.Fatal("bootstrap must never claim to be sandboxed")
-	}
-	if len(b.WorkspaceRoots) == 0 {
-		t.Fatal("bootstrap must report workspace roots")
 	}
 	found := false
 	for _, n := range b.Notices {
@@ -219,32 +199,11 @@ func TestWorkspaceContainmentEnforcedByAPI(t *testing.T) {
 	}
 }
 
-func TestAgentSourceContainment(t *testing.T) {
+func TestAgentResolutionEndpointDoesNotExist(t *testing.T) {
 	h := newHarness(t)
-	ws := h.openWorkspace()
-	outside := filepath.Join(t.TempDir(), "evil.yaml")
-	if err := os.WriteFile(outside, []byte("agents: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	resp := h.do(http.MethodPost, "/api/agents/resolve",
-		protocol.ResolveAgentRequest{Source: outside, WorkspaceID: ws.WorkspaceID})
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403 for agent outside roots, got %d", resp.StatusCode)
-	}
-}
-
-func TestOCIRequiresExplicitFetch(t *testing.T) {
-	h := newHarness(t)
-	ws := h.openWorkspace()
-	resp := h.do(http.MethodPost, "/api/agents/resolve",
-		protocol.ResolveAgentRequest{Source: "docker.io/some/agent:latest", WorkspaceID: ws.WorkspaceID})
-	if resp.StatusCode != http.StatusPreconditionRequired {
-		t.Fatalf("expected 428 without explicit confirmation, got %d", resp.StatusCode)
-	}
-	resp = h.do(http.MethodPost, "/api/agents/resolve", protocol.ResolveAgentRequest{
-		Source: "docker.io/some/agent:latest", WorkspaceID: ws.WorkspaceID, AllowRemoteFetch: true})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 with explicit confirmation, got %d", resp.StatusCode)
+	resp := h.do(http.MethodPost, "/api/agents/resolve", map[string]string{"source": "anything"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected removed agent resolution endpoint to return 404, got %d", resp.StatusCode)
 	}
 }
 
@@ -383,9 +342,8 @@ func TestSecurityHeaders(t *testing.T) {
 func TestSessionIDValidatedAgainstFreshListing(t *testing.T) {
 	h := newHarness(t)
 	ws := h.openWorkspace()
-	ag := h.resolveAgent(ws, "agent.yaml")
 	resp := h.do(http.MethodPost, "/api/chats/resume", protocol.ResumeChatRequest{
-		WorkspaceID: ws.WorkspaceID, AgentID: ag.AgentID, SessionID: "../../etc/passwd"})
+		WorkspaceID: ws.WorkspaceID, SessionID: "../../etc/passwd"})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 for an unlisted session id, got %d", resp.StatusCode)
 	}
@@ -394,7 +352,6 @@ func TestSessionIDValidatedAgainstFreshListing(t *testing.T) {
 func TestResumeRestoresStoredHistory(t *testing.T) {
 	h := newHarness(t)
 	ws := h.openWorkspace()
-	ag := h.resolveAgent(ws, "agent.yaml")
 	h.fake.Seed("sess-seeded", "Older chat", ws.Path, []protocol.Item{
 		{Kind: protocol.ItemKindMessage, Message: &protocol.MessageItem{ID: "m1", Role: "user", Text: "hello from before"}},
 		{Kind: protocol.ItemKindMessage, Message: &protocol.MessageItem{ID: "m2", Role: "assistant", Text: "hi"}},
@@ -406,7 +363,7 @@ func TestResumeRestoresStoredHistory(t *testing.T) {
 	}
 
 	resp := h.do(http.MethodPost, "/api/chats/resume", protocol.ResumeChatRequest{
-		WorkspaceID: ws.WorkspaceID, AgentID: ag.AgentID, SessionID: "sess-seeded"})
+		WorkspaceID: ws.WorkspaceID, SessionID: "sess-seeded"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("resume: %d", resp.StatusCode)
 	}
@@ -507,13 +464,12 @@ func TestLiveSessionsListsEveryProject(t *testing.T) {
 func TestSingleOwnership(t *testing.T) {
 	h := newHarness(t)
 	ws := h.openWorkspace()
-	ag := h.resolveAgent(ws, "agent.yaml")
 	h.fake.Seed("sess-own", "Owned", ws.Path, nil)
 
 	first := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats/resume",
-		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, AgentID: ag.AgentID, SessionID: "sess-own"}))
+		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, SessionID: "sess-own"}))
 	second := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats/resume",
-		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, AgentID: ag.AgentID, SessionID: "sess-own"}))
+		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, SessionID: "sess-own"}))
 	if first.ChatID != second.ChatID {
 		t.Fatalf("second open created a second writer: %s vs %s", first.ChatID, second.ChatID)
 	}
@@ -963,22 +919,18 @@ func TestConfigChangesRequireIdleAndAutoApproveConfirmation(t *testing.T) {
 	}
 }
 
-// TestConfiguredDefaultPostureApplies: this deployment is configured to start
-// new chats in autonomous mode, and that must be what the session really gets.
-func TestConfiguredDefaultPostureApplies(t *testing.T) {
+// TestNewChatsAreAutonomous verifies the fixed initial posture.
+func TestNewChatsAreAutonomous(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
 	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
 	if snap.Meta.Permissions.Posture != protocol.PostureAutonomous {
-		t.Fatalf("new chats must use the configured default posture, got %q", snap.Meta.Permissions.Posture)
+		t.Fatalf("new chats must be autonomous, got %q", snap.Meta.Permissions.Posture)
 	}
 	if !snap.Meta.Permissions.AutoApproveAll {
 		t.Fatal("autonomous must report auto-approve honestly")
 	}
 	b := decodeJSON[protocol.Bootstrap](t, h.do(http.MethodGet, "/api/bootstrap", nil))
-	if b.DefaultPosture != protocol.PostureAutonomous {
-		t.Fatalf("bootstrap must advertise the default posture, got %q", b.DefaultPosture)
-	}
 	var warned bool
 	for _, n := range b.Notices {
 		if n.Code == "default_autonomous" {
@@ -1157,14 +1109,11 @@ func TestChatWithoutChoosingAnAgent(t *testing.T) {
 	resp := h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID})
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected a chat with no agentId to work, got %d %s", resp.StatusCode, body)
+		t.Fatalf("expected workspace-only chat creation to work, got %d %s", resp.StatusCode, body)
 	}
 	ref := decodeJSON[protocol.ChatRef](t, resp)
 
 	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	if snap.Meta.AgentSource != "dashboard-coder" {
-		t.Fatalf("expected the SDK-built dashboard coding agent, got %q", snap.Meta.AgentSource)
-	}
 	// Model and thinking controls must still be available.
 	models := decodeJSON[[]protocol.ModelOption](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID+"/models", nil))
 	if len(models) == 0 {
@@ -1175,32 +1124,17 @@ func TestChatWithoutChoosingAnAgent(t *testing.T) {
 	}
 }
 
-// TestBootstrapAdvertisesDefaultAgent so the UI never has to guess.
-func TestBootstrapAdvertisesDefaultAgent(t *testing.T) {
+func TestBootstrapDoesNotAdvertiseAgents(t *testing.T) {
 	h := newHarness(t)
-	b := decodeJSON[protocol.Bootstrap](t, h.do(http.MethodGet, "/api/bootstrap", nil))
-	if b.DefaultAgent != "dashboard-coder" {
-		t.Fatalf("default agent should be dashboard-coder, got %q", b.DefaultAgent)
-	}
-	if len(b.BuiltinAgents) == 0 {
-		t.Fatal("bootstrap must list the module's built-in agents")
+	b := decodeJSON[map[string]any](t, h.do(http.MethodGet, "/api/bootstrap", nil))
+	for _, field := range []string{"defaultAgent", "builtinAgents", "agentSourceHints", "defaultPosture", "workspaceRoots"} {
+		if _, exists := b[field]; exists {
+			t.Fatalf("bootstrap must not expose obsolete %q", field)
+		}
 	}
 }
 
-// TestBuiltinNameIsNotAPathBypass: only names the *adapter* reports as
-// built-in skip containment; a lookalike is still treated as a path/OCI ref.
-func TestBuiltinNameIsNotAPathBypass(t *testing.T) {
-	h := newHarness(t)
-	ws := h.openWorkspace()
-	resp := h.do(http.MethodPost, "/api/agents/resolve",
-		protocol.ResolveAgentRequest{Source: "coder/../../etc/passwd", WorkspaceID: ws.WorkspaceID})
-	if resp.StatusCode == http.StatusOK {
-		t.Fatal("a lookalike built-in name must not bypass containment")
-	}
-}
-
-// TestResumeWithoutAgentUsesDefault keeps resume as easy as new.
-func TestResumeWithoutAgentUsesDefault(t *testing.T) {
+func TestResumeUsesDashboardAgent(t *testing.T) {
 	h := newHarness(t)
 	ws := h.openWorkspace()
 	h.fake.Seed("sess-default", "Older", ws.Path, nil)
@@ -1208,7 +1142,7 @@ func TestResumeWithoutAgentUsesDefault(t *testing.T) {
 		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, SessionID: "sess-default"})
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("resume without an agentId: %d %s", resp.StatusCode, body)
+		t.Fatalf("resume with the dashboard agent: %d %s", resp.StatusCode, body)
 	}
 }
 

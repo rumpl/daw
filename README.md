@@ -73,15 +73,14 @@ agent's `WorkingDir` — where its tools read and write. Then press **New chat**
 
 Directories you have opened are remembered in the browser and listed under
 **Recent**, and the last one reopens automatically next time you load the page.
-If it has since moved or is no longer inside your allowed roots, it is quietly
+If it has since moved or is no longer inside your home directory, it is quietly
 forgotten.
 
-**Agents.** Chats use `dashboard-coder`, a coding agent assembled directly with
-Docker Agent's Go SDK. Its system instruction includes the global plugin
+**Agent.** Every chat uses `dashboard-coder`, the coding agent assembled directly
+with Docker Agent's Go SDK. Its system instruction includes the global plugin
 contract, and its read-only `get_dashboard_developer_documentation` tool returns
 the complete backend API and host-component reference before it writes a plugin.
-Point `DEFAULT_AGENT` at a built-in name, an agent YAML path, or an OCI reference
-to replace it.
+The dashboard does not accept or resolve alternate agent configurations.
 
 **Plugins.** Global plugins live in `~/.cagent/dawui/plugins` by default. Each
 plugin is a browser-native ES module with a `plugin.json` manifest. Valid pages
@@ -134,12 +133,12 @@ independently and always win over the mode.
 
 | Mode | Behaviour |
 | --- | --- |
-| `autonomous` | auto-approves every tool call *(default — see `DEFAULT_SAFETY`)* |
+| `autonomous` | auto-approves every tool call *(new chats always start here)* |
 | `balanced` | auto-approves calls classified safe, asks on destructive and unknown ones |
 | `strict` | asks before every tool call, including read-only ones |
 
-New chats start in the configured default; resumed sessions keep the mode stored
-with the session.
+New chats always start autonomous; resumed sessions keep the mode stored with
+the session. You can change the active chat's mode from the header while idle.
 
 When a confirmation dialog appears, the permission pattern it shows you is
 exactly the pattern granted if you choose always-allow — it comes from
@@ -162,9 +161,6 @@ credential helpers.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `4788` | TCP port, validated 1024–65535 |
-| `WORKSPACE_ROOTS` | your home directory | Path-list of directories that may be opened |
-| `DEFAULT_AGENT` | `dashboard-coder` | Agent used when none is chosen |
-| `DEFAULT_SAFETY` | `autonomous` | `strict`, `balanced` or `autonomous` for new chats |
 | `TAILSCALE_HOSTNAMES` | — | Hostnames to accept besides loopback |
 | `ALLOWED_TAILSCALE_USERS` | — | Tailnet logins allowed through Tailscale Serve |
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
@@ -173,13 +169,8 @@ credential helpers.
 | `DAWUI_PLUGIN_DIR` | `<data>/dawui/plugins` | Global trusted plugin directory |
 | `DAWUI_DEBUG` | — | Debug logging |
 
-The server binds to `127.0.0.1` only; there is no host override.
-
-To open directories outside your home directory:
-
-```bash
-WORKSPACE_ROOTS="$HOME:/Volumes/code:/opt/projects" make start
-```
+The server binds to `127.0.0.1` only; there is no host override. Workspaces are
+limited to your home directory.
 
 ---
 
@@ -215,7 +206,7 @@ internal/adapter          the typed docker-agent seam
 internal/adapter/dagent   the real adapter: embeds the docker-agent SDK
 internal/adapter/fake     deterministic fake agent used by the tests
 internal/httpapi          routing, security, chat ownership, SSE, reducer
-internal/pathsec          filesystem containment for directories and configs
+internal/pathsec          filesystem containment for working directories
 internal/webassets        the built frontend, embedded with embed.FS
 web/                      React + Vite + strict TypeScript
 e2e/                      Playwright
@@ -229,8 +220,8 @@ buffer and `Last-Event-ID` resume, so reconnecting never duplicates content.
 Only one runtime ever drives a session inside this process; a second browser
 attaches to the same live chat.
 
-The browser gets opaque IDs for directories and agent sources and never sends
-paths back. Mutations carry a per-process CSRF token in a custom header, the
+The browser submits a working directory once, then uses its opaque ID for later
+calls. Mutations carry a per-process CSRF token in a custom header, the
 `Host` must be loopback or an explicitly configured Tailscale name, and
 forwarded headers are trusted only from a loopback peer. Markdown is rendered
 without raw HTML, links are restricted to `http`, `https` and `mailto`, and
@@ -258,7 +249,7 @@ Everything stays in docker-agent's own directories, resolved through its
 The server keeps the ten most recently opened projects in an owner-only JSON
 file. They appear under **Projects** in every browser connected to the server,
 so a project opened on desktop is available when you visit from your phone.
-Paths are revalidated against `WORKSPACE_ROOTS` before they are advertised.
+Paths are revalidated against your home directory before they are advertised.
 Model and thinking choices use the same owner-only, atomic-file persistence.
 
 Sessions are created lazily on the first message, exactly like the CLI. In the
@@ -295,9 +286,8 @@ confirmation first and spends tokens.
 | Symptom | Fix |
 | --- | --- |
 | `port 4788 already in use` | `lsof -nP -iTCP:4788 -sTCP:LISTEN`, or set `PORT` |
-| `outside the allowed workspace roots` | Add it to `WORKSPACE_ROOTS` and restart |
+| `that path is outside your home directory` | Move or clone the project under your home directory |
 | No models listed | Run `docker agent setup` or `docker agent doctor` |
 | `the agent is busy` | Model, thinking and mode changes need an idle agent; use Steer or Follow-up |
 | Blank page | The frontend isn't built into the binary: `make build` |
 | Reconnecting badge | The server restarted; the client resnapshots automatically |
-| A remote agent won't load | Pulling an OCI agent needs explicit confirmation in the UI |

@@ -19,7 +19,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,8 +29,6 @@ import (
 	"github.com/docker/docker-agent/pkg/runtime/jscommands"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/session/sqlitestore"
-	"github.com/docker/docker-agent/pkg/teamloader"
-	loaderdefaults "github.com/docker/docker-agent/pkg/teamloader/defaults"
 	"github.com/docker/docker-agent/pkg/tools/mcp/keyringstore"
 	"github.com/docker/docker-agent/pkg/userconfig"
 	"github.com/docker/docker-agent/pkg/version"
@@ -124,7 +121,6 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 			Message: "No ~/.config/cagent/config.yaml found. If no model resolves, run `docker agent setup`.",
 		})
 	}
-	info.BuiltinAgents = append(dacfg.BuiltinAgentNames(), dashboardagent.Name)
 	info.ModelsAvailable = true
 	info.ModelsHint = "Models are resolved by docker-agent itself; run `docker agent doctor` if a chat reports none."
 	_ = ctx
@@ -146,137 +142,6 @@ func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {
 		}
 	}
 	return rc
-}
-
-func (a *Adapter) load(ctx context.Context, ref string, kind protocol.AgentSourceKind, runConfig *dacfg.RuntimeConfig) (*teamloader.LoadResult, error) {
-	if kind == protocol.AgentSourceBuiltin && ref == dashboardagent.Name {
-		return dashboardagent.Build(ctx, runConfig)
-	}
-	src, err := a.source(kind, ref)
-	if err != nil {
-		return nil, err
-	}
-	return teamloader.LoadWithConfig(ctx, src, runConfig, loaderdefaults.Opts()...)
-}
-
-// source builds the config.Source for an agent reference.
-//
-// Built-ins go through docker-agent's own ResolveSources so that embedded
-// agents AND user aliases pointing at them resolve exactly as `docker agent
-// run coder` resolves them.
-func (a *Adapter) source(kind protocol.AgentSourceKind, ref string) (dacfg.Source, error) {
-	switch kind {
-	case protocol.AgentSourceOCI:
-		return dacfg.NewOCISource(ref), nil
-	case protocol.AgentSourceBuiltin:
-		sources, err := dacfg.ResolveSources(ref, a.runtimeConfig("").EnvProvider())
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
-		}
-		for _, src := range sources {
-			return src, nil
-		}
-		return nil, fmt.Errorf("%w: built-in agent %q resolved to nothing", adapter.ErrInvalidAgent, ref)
-	default:
-		return dacfg.NewFileSource(ref), nil
-	}
-}
-
-// ResolveAgent loads the team through the CLI's own loader so agent YAML,
-// sub-agents, toolsets, models and warnings resolve identically, then reports
-// what the configuration declares *before* it is ever run.
-func (a *Adapter) ResolveAgent(ctx context.Context, req adapter.ResolveRequest) (*protocol.ResolvedAgent, error) {
-	if req.Kind == protocol.AgentSourceOCI && !req.AllowRemoteFetch {
-		return nil, adapter.ErrRemoteFetch
-	}
-	loadCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-
-	res, err := a.load(loadCtx, req.Source, req.Kind, a.runtimeConfig(req.WorkingDir))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
-	}
-	t := res.Team
-	defer func() {
-		// Resolution is a preview: stop the toolsets it started.
-		if err := t.StopToolSets(context.WithoutCancel(ctx)); err != nil {
-			a.log.Debug("stopping preview toolsets", "error", err)
-		}
-	}()
-
-	out := &protocol.ResolvedAgent{
-		Source: req.Source, Kind: req.Kind, Label: label(req.Source),
-	}
-	defaultAgent, _ := t.DefaultAgent()
-	for _, name := range t.AgentNames() {
-		ag, err := t.Agent(name)
-		if err != nil || ag == nil {
-			continue
-		}
-		d := protocol.AgentDescriptor{
-			Name: ag.Name(), Description: ag.Description(),
-			IsDefault: defaultAgent != nil && defaultAgent.Name() == ag.Name(),
-		}
-		if m := ag.Model(ctx); m != nil {
-			d.Model = m.ID().String()
-		}
-		for _, sub := range ag.SubAgents() {
-			d.SubAgents = append(d.SubAgents, sub.Name())
-		}
-		out.Agents = append(out.Agents, d)
-		out.Warnings = append(out.Warnings, ag.DrainWarnings()...)
-	}
-
-	// Declared toolsets are a trust signal: show them before the first run.
-	if cfg, ok := t.AgentConfig(agentNameOrDefault(t, "")); ok {
-		for _, ts := range cfg.Toolsets {
-			info := protocol.ToolsetInfo{Kind: ts.Type}
-			switch ts.Type {
-			case "shell":
-				info.Detail = "runs shell commands on this host as your user"
-			case "filesystem":
-				info.Detail = "reads and writes files"
-			case "mcp":
-				info.Detail = "external MCP server"
-				info.Command = strings.TrimSpace(ts.Command + " " + strings.Join(ts.Args, " "))
-				if ts.Remote.URL != "" {
-					info.Command = ts.Remote.URL
-				}
-			default:
-				info.Detail = ts.Type
-			}
-			out.Toolsets = append(out.Toolsets, info)
-		}
-	}
-
-	checker := t.Permissions()
-	if a.globalPerms != nil && !a.globalPerms.IsEmpty() {
-		checker = permissions.Merge(checker, a.globalPerms)
-	}
-	// A resolve preview reports the config's own patterns; the effective mode
-	// is a per-session property and is reported by the chat itself.
-	out.Permissions = viewFromChecker(checker, "", false, nil)
-	return out, nil
-}
-
-func agentNameOrDefault(t interface {
-	AgentNames() []string
-}, name string) string {
-	if name != "" {
-		return name
-	}
-	names := t.AgentNames()
-	if len(names) > 0 {
-		return names[0]
-	}
-	return ""
-}
-
-func label(src string) string {
-	if i := strings.LastIndexAny(src, "/\\"); i >= 0 {
-		return src[i+1:]
-	}
-	return src
 }
 
 func viewFromChecker(c *permissions.Checker, posture protocol.Posture, autoApproveAll bool, grants []string) protocol.PermissionsView {
@@ -319,7 +184,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 // budgets and permissions behave identically.
 func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	runConfig := a.runtimeConfig(req.WorkingDir)
-	loadRes, err := a.load(ctx, req.Source, req.Kind, runConfig)
+	loadRes, err := dashboardagent.Build(ctx, runConfig)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
 	}
@@ -336,7 +201,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		agentsIgnore = true
 	}
 
-	ag, err := t.AgentOrDefault(req.AgentName)
+	ag, err := t.AgentOrDefault("")
 	if err != nil {
 		_ = t.StopToolSets(context.WithoutCancel(ctx))
 		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
@@ -406,7 +271,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 
 	c := &chat{
 		a: a, rt: rt, team: t, sess: sess, agentName: agentName,
-		workingDir: req.WorkingDir, source: req.Source, kind: req.Kind,
+		workingDir:   req.WorkingDir,
 		events:       make(chan protocol.Event, 512),
 		unsaved:      newSession,
 		pendingTools: map[string]pendingTool{},
@@ -416,7 +281,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		run:          protocol.RunStatus{State: protocol.RunStateIdle},
 	}
 	// An empty posture means "keep whatever safety mode this session already
-	// carries" (resume). A new chat is given the server's configured default.
+	// carries" (resume). A new chat starts autonomous.
 	if req.Posture != "" {
 		c.applyPosture(req.Posture)
 	} else {

@@ -41,16 +41,6 @@ type Options struct {
 	// Static serves the built frontend; nil disables the UI (API-only tests).
 	Static http.Handler
 	Logger *slog.Logger
-	// DefaultAgent is the agent source used when a request carries no
-	// agentId. Empty means the SDK-built dashboard coding agent.
-	DefaultAgent string
-	// DefaultPosture is the safety mode every new chat starts in. Empty means
-	// protocol.PostureAutonomous, this deployment's configured default (see
-	// DEFAULT_SAFETY in the README). Resumed sessions keep their own stored
-	// mode and are never silently re-scoped by this value.
-	DefaultPosture protocol.Posture
-	// SkippedRoots are configured roots that could not be canonicalized.
-	SkippedRoots []string
 	// WorkspaceHistoryFile persists successfully opened project paths so the
 	// list is shared by every browser connected to this server. Empty disables
 	// persistence (primarily useful for tests).
@@ -76,38 +66,22 @@ type Server struct {
 	static               http.Handler
 	log                  *slog.Logger
 	started              time.Time
-	skippedRoots         []string
-	defaultPosture       protocol.Posture
-	defaultAgent         string
 	workspaceHistoryFile string
 	chatPreferencesFile  string
 	pluginDir            string
 	preferencesMu        sync.Mutex
 	preferences          chatPreferences
-	// builtins is the set of pathless local agents reported by the adapter.
-	// It is populated from the adapter, never from the browser.
-	builtinsOnce sync.Once
-	builtins     map[string]bool
 
 	mu         sync.Mutex
 	workspaces map[string]*workspaceEntry
-	agents     map[string]*agentEntry
 	chats      map[string]*liveChat
 	bySession  map[string]string // sessionId -> chatId (canonical ownership)
 	hintsWS    []protocol.WorkspaceHint
-	hintsAgent []protocol.AgentSourceHint
 }
 
 type workspaceEntry struct {
 	id   string
 	path string
-}
-
-type agentEntry struct {
-	id       string
-	source   string
-	kind     protocol.AgentSourceKind
-	resolved *protocol.ResolvedAgent
 }
 
 // New builds the server and registers every route.
@@ -123,17 +97,7 @@ func New(opts Options) *Server {
 			users[u] = true
 		}
 	}
-	defaultPosture := opts.DefaultPosture
-	if defaultPosture == "" {
-		defaultPosture = protocol.PostureAutonomous
-	}
-	defaultAgent := strings.TrimSpace(opts.DefaultAgent)
-	if defaultAgent == "" {
-		defaultAgent = "dashboard-coder"
-	}
 	s := &Server{
-		defaultAgent:         defaultAgent,
-		defaultPosture:       defaultPosture,
 		workspaceHistoryFile: strings.TrimSpace(opts.WorkspaceHistoryFile),
 		chatPreferencesFile:  strings.TrimSpace(opts.ChatPreferencesFile),
 		pluginDir:            strings.TrimSpace(opts.PluginDir),
@@ -147,9 +111,7 @@ func New(opts Options) *Server {
 		static:               opts.Static,
 		log:                  log,
 		started:              time.Now(),
-		skippedRoots:         opts.SkippedRoots,
 		workspaces:           map[string]*workspaceEntry{},
-		agents:               map[string]*agentEntry{},
 		chats:                map[string]*liveChat{},
 		bySession:            map[string]string{},
 	}
@@ -169,7 +131,6 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
-	m.HandleFunc("POST /api/agents/resolve", s.handleResolveAgent)
 	m.HandleFunc("GET /api/sessions/live", s.handleListLiveSessions)
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions", s.handleListSessions)
 	m.HandleFunc("POST /api/chats", s.handleCreateChat)
@@ -223,14 +184,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// postureForOpen returns the posture to apply when opening a chat: the
-// configured default for a new session, and "" (keep the session's own stored
-// safety mode) when resuming.
-func postureForOpen(def protocol.Posture, resumeID string) protocol.Posture {
+// postureForOpen starts new sessions autonomous and keeps a resumed session's
+// stored policy.
+func postureForOpen(resumeID string) protocol.Posture {
 	if resumeID != "" {
 		return ""
 	}
-	return def
+	return protocol.PostureAutonomous
 }
 
 func isMutation(method string) bool {
@@ -307,24 +267,14 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	wsHints := append([]protocol.WorkspaceHint(nil), s.hintsWS...)
-	agHints := append([]protocol.AgentSourceHint(nil), s.hintsAgent...)
 	s.mu.Unlock()
 
 	notices := append([]protocol.Notice(nil), info.Notices...)
-	for _, sk := range s.skippedRoots {
-		notices = append(notices, protocol.Notice{
-			ID: "root:" + sk, Level: protocol.NoticeWarning,
-			Message: fmt.Sprintf("Configured workspace root %q was skipped (missing or not a directory).", sk),
-			Code:    "workspace_root_skipped"})
-	}
-	if s.defaultPosture == protocol.PostureAutonomous {
-		notices = append(notices, protocol.Notice{
-			ID: "default-autonomous", Level: protocol.NoticeWarning, Code: "default_autonomous",
-			Message: "This server starts every new chat in autonomous mode: every tool call, " +
-				"including shell commands, is auto-approved and runs on this host as your user. " +
-				"Set DEFAULT_SAFETY=strict to require confirmation again.",
-		})
-	}
+	notices = append(notices, protocol.Notice{
+		ID: "default-autonomous", Level: protocol.NoticeWarning, Code: "default_autonomous",
+		Message: "This server starts every new chat in autonomous mode: every tool call, " +
+			"including shell commands, is auto-approved and runs on this host as your user.",
+	})
 	notices = append(notices, protocol.Notice{
 		ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
 		Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
@@ -335,11 +285,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		AppVersion: s.appVersion, AgentVersion: info.AgentVersion, AgentCommit: info.AgentCommit,
 		ConfigDir: info.ConfigDir, DataDir: info.DataDir, CacheDir: info.CacheDir,
 		SessionDB: info.SessionDB, PluginDir: s.pluginDir,
-		WorkspaceRoots: s.guard.Roots(), CSRFToken: s.csrf,
-		Sandboxed: false, DefaultPosture: s.defaultPosture,
-		DefaultAgent: s.defaultAgent, BuiltinAgents: info.BuiltinAgents,
+		CSRFToken: s.csrf, Sandboxed: false,
 		ModelsAvailable: info.ModelsAvailable, ModelsHint: info.ModelsHint,
-		WorkspaceHints: wsHints, AgentSourceHints: agHints, Notices: notices,
+		WorkspaceHints: wsHints, Notices: notices,
 	})
 }
 
@@ -411,11 +359,9 @@ func (s *Server) failPath(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pathsec.ErrOutsideRoots):
 		s.fail(w, http.StatusForbidden, "outside_roots",
-			"that path is outside the allowed workspace roots (see WORKSPACE_ROOTS)")
+			"that path is outside your home directory")
 	case errors.Is(err, pathsec.ErrNotDirectory):
 		s.fail(w, http.StatusBadRequest, "not_a_directory", "that path is not a directory")
-	case errors.Is(err, pathsec.ErrNotFile):
-		s.fail(w, http.StatusBadRequest, "not_a_file", "that path is not a regular file")
 	case errors.Is(err, pathsec.ErrNotAbsolute):
 		s.fail(w, http.StatusBadRequest, "not_absolute", "the path must be absolute")
 	default:
@@ -445,192 +391,11 @@ func (s *Server) rememberWorkspaceLocked(path string) {
 	}
 }
 
-func (s *Server) rememberAgentLocked(src string, kind protocol.AgentSourceKind, label string) {
-	for _, h := range s.hintsAgent {
-		if h.Source == src {
-			return
-		}
-	}
-	s.hintsAgent = append([]protocol.AgentSourceHint{{Source: src, Kind: kind, Label: label}}, s.hintsAgent...)
-	if len(s.hintsAgent) > 10 {
-		s.hintsAgent = s.hintsAgent[:10]
-	}
-}
-
-// builtinAgents caches the pathless local agent names reported by the adapter.
-func (s *Server) builtinAgents(ctx context.Context) map[string]bool {
-	s.builtinsOnce.Do(func() {
-		s.builtins = map[string]bool{}
-		info, err := s.adapter.Info(ctx)
-		if err != nil {
-			return
-		}
-		for _, n := range info.BuiltinAgents {
-			s.builtins[n] = true
-		}
-	})
-	return s.builtins
-}
-
-// classifyAgentSource decides whether the string names one of docker-agent's
-// local SDK/embedded agents, a file we must contain inside an allowed root, or an
-// OCI reference we must not fetch without an explicit user action.
-//
-// The built-in set comes from the matched module, never from the request, so a
-// browser cannot invent a "built-in" name to bypass path containment.
-func (s *Server) classifyAgentSource(ctx context.Context, src string) protocol.AgentSourceKind {
-	ref := strings.TrimSpace(src)
-	if s.builtinAgents(ctx)[ref] {
-		return protocol.AgentSourceBuiltin
-	}
-	if strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "~") || strings.HasPrefix(ref, ".") {
-		return protocol.AgentSourceFile
-	}
-	if strings.HasSuffix(ref, ".yaml") || strings.HasSuffix(ref, ".yml") {
-		return protocol.AgentSourceFile
-	}
-	return protocol.AgentSourceOCI
-}
-
-func (s *Server) handleResolveAgent(w http.ResponseWriter, r *http.Request) {
-	req, ok := decode[protocol.ResolveAgentRequest](w, r, s)
-	if !ok {
-		return
-	}
-	if strings.TrimSpace(req.Source) == "" {
-		s.fail(w, http.StatusBadRequest, "invalid_source", "an agent source is required")
-		return
-	}
-	workingDir := ""
-	if req.WorkspaceID != "" {
-		ws, ok := s.workspace(req.WorkspaceID)
-		if !ok {
-			s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
-			return
-		}
-		workingDir = ws.path
-	}
-
-	kind := s.classifyAgentSource(r.Context(), req.Source)
-	source := req.Source
-	if kind == protocol.AgentSourceFile {
-		canon, err := s.guard.ResolveFile(req.Source)
-		if err != nil {
-			s.failPath(w, err)
-			return
-		}
-		source = canon
-	} else if !req.AllowRemoteFetch {
-		s.fail(w, http.StatusPreconditionRequired, "confirm_remote_fetch",
-			"pulling a remote agent image is an explicit trust decision; confirm to continue")
-		return
-	}
-
-	resolved, err := s.adapter.ResolveAgent(r.Context(), adapter.ResolveRequest{
-		Source: source, Kind: kind, WorkingDir: workingDir, AllowRemoteFetch: req.AllowRemoteFetch,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, adapter.ErrRemoteFetch):
-			s.fail(w, http.StatusPreconditionRequired, "confirm_remote_fetch",
-				"pulling a remote agent image is an explicit trust decision; confirm to continue")
-		default:
-			s.log.Warn("resolve agent failed", "error", err)
-			s.fail(w, http.StatusBadRequest, "agent_load_failed",
-				"that agent configuration could not be loaded")
-		}
-		return
-	}
-
-	s.mu.Lock()
-	var entry *agentEntry
-	for _, e := range s.agents {
-		if e.source == source {
-			entry = e
-			break
-		}
-	}
-	if entry == nil {
-		entry = &agentEntry{id: newOpaqueID("ag"), source: source, kind: kind}
-		s.agents[entry.id] = entry
-	}
-	entry.resolved = resolved
-	s.rememberAgentLocked(source, kind, resolved.Label)
-	s.mu.Unlock()
-
-	resolved.AgentID = entry.id
-	resolved.Source = source
-	resolved.Kind = kind
-	s.json(w, http.StatusOK, resolved)
-}
-
 func (s *Server) workspace(id string) (*workspaceEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.workspaces[id]
 	return e, ok
-}
-
-func (s *Server) agent(id string) (*agentEntry, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	e, ok := s.agents[id]
-	return e, ok
-}
-
-// agentOrDefault resolves an explicit agentId, or lazily loads the server's
-// default SDK-built dashboard coding agent when none was supplied, so
-// the browser never has to pick an agent config to start a chat.
-func (s *Server) agentOrDefault(ctx context.Context, id string) (*agentEntry, error) {
-	if id != "" {
-		e, ok := s.agent(id)
-		if !ok {
-			return nil, adapter.ErrNotFound
-		}
-		return e, nil
-	}
-
-	kind := s.classifyAgentSource(ctx, s.defaultAgent)
-	s.mu.Lock()
-	for _, e := range s.agents {
-		if e.source == s.defaultAgent {
-			s.mu.Unlock()
-			return e, nil
-		}
-	}
-	s.mu.Unlock()
-
-	// A non-builtin DEFAULT_AGENT still has to satisfy containment: it is
-	// operator configuration, but it is still a path.
-	source := s.defaultAgent
-	if kind == protocol.AgentSourceFile {
-		canon, err := s.guard.ResolveFile(source)
-		if err != nil {
-			return nil, err
-		}
-		source = canon
-	}
-
-	resolved, err := s.adapter.ResolveAgent(ctx, adapter.ResolveRequest{
-		Source: source, Kind: kind,
-		// A configured default is the operator's own explicit choice.
-		AllowRemoteFetch: kind == protocol.AgentSourceOCI,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, e := range s.agents {
-		if e.source == source {
-			return e, nil
-		}
-	}
-	entry := &agentEntry{id: newOpaqueID("ag"), source: source, kind: kind, resolved: resolved}
-	s.agents[entry.id] = entry
-	resolved.AgentID = entry.id
-	return entry, nil
 }
 
 // handleListLiveSessions returns every session currently owned by this server,
@@ -717,7 +482,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.AgentID, req.AgentName, "")
+	s.openChat(w, r, req.WorkspaceID, "")
 }
 
 func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
@@ -754,24 +519,13 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = ws
-	s.openChat(w, r, req.WorkspaceID, req.AgentID, "", req.SessionID)
+	s.openChat(w, r, req.WorkspaceID, req.SessionID)
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, agentID, agentName, resumeID string) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID string) {
 	ws, ok := s.workspace(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
-		return
-	}
-	ag, err := s.agentOrDefault(r.Context(), agentID)
-	if err != nil {
-		if errors.Is(err, adapter.ErrNotFound) {
-			s.fail(w, http.StatusNotFound, "unknown_agent", "unknown agent source")
-			return
-		}
-		s.log.Warn("resolving default agent", "error", err)
-		s.fail(w, http.StatusFailedDependency, "default_agent_failed",
-			"docker-agent's built-in agent could not be loaded; check `docker agent doctor`")
 		return
 	}
 
@@ -794,11 +548,10 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, a
 	chatID := newOpaqueID("chat")
 	preference := s.chatPreference(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
-		ChatID: chatID, WorkingDir: ws.path, Source: ag.source, Kind: ag.kind,
-		AgentName: agentName, ResumeSessionID: resumeID,
-		// New chats start in the server's configured default safety mode.
-		// Resumed sessions keep the mode stored with the session.
-		Posture:       postureForOpen(s.defaultPosture, resumeID),
+		ChatID: chatID, WorkingDir: ws.path, ResumeSessionID: resumeID,
+		// New chats are always autonomous. Resumed sessions keep the mode
+		// stored with the session.
+		Posture:       postureForOpen(resumeID),
 		Model:         preference.Model,
 		ThinkingLevel: preference.ThinkingLevel,
 	})
@@ -842,7 +595,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, a
 		s.fail(w, http.StatusConflict, "session_in_use", "that session is already open in this server")
 		return
 	}
-	lc := newLiveChat(chatID, ws.id, ag.id, c)
+	lc := newLiveChat(chatID, ws.id, c)
 	lc.generation = 1
 	s.chats[chatID] = lc
 	s.bySession[sessionID] = chatID
@@ -855,13 +608,6 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, a
 		return
 	}
 	go lc.pump(1, c.Events())
-
-	if resolved := ag.resolved; resolved != nil {
-		for _, warn := range resolved.Warnings {
-			lc.publish(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
-				ID: "load:" + warn, Level: protocol.NoticeWarning, Message: warn, Code: "load_warning"}})
-		}
-	}
 
 	s.json(w, http.StatusCreated, protocol.ChatRef{ChatID: chatID, SessionID: sessionID})
 }
@@ -1028,7 +774,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	meta := c.chat.Meta()
 	meta.ChatID = c.id
 	meta.WorkspaceID = c.workspaceID
-	meta.AgentID = c.agentID
 	c.publish(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
 	s.json(w, http.StatusOK, meta)
 }

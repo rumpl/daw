@@ -100,9 +100,8 @@ const (
 	// "yolo"): auto-approve EVERY tool call. Only custom deny/ask rules and
 	// preempt hooks still gate.
 	//
-	// This is the configured default for new chats in this deployment (see
-	// DEFAULT_SAFETY in the README). It means shell commands and MCP tools
-	// run immediately on this host with the server user's permissions.
+	// This is always the initial mode for new dashboard chats. It means shell
+	// commands and MCP tools run immediately with the server user's permissions.
 	PostureAutonomous Posture = "autonomous"
 )
 
@@ -278,10 +277,7 @@ type SessionMeta struct {
 	Title          string          `json:"title"`
 	WorkspaceID    string          `json:"workspaceId"`
 	WorkingDir     string          `json:"workingDir"`
-	AgentID        string          `json:"agentId"`
-	AgentSource    string          `json:"agentSource"`
 	AgentName      string          `json:"agentName"`
-	SubAgents      []string        `json:"subAgents"`
 	Model          string          `json:"model"`
 	ThinkingLevel  string          `json:"thinkingLevel"`
 	ThinkingLevels []string        `json:"thinkingLevels"`
@@ -391,56 +387,28 @@ type Health struct {
 	Uptime int64  `json:"uptimeSeconds"`
 }
 
-// AgentSourceKind distinguishes a local YAML file from an OCI reference.
-type AgentSourceKind string
-
-const (
-	AgentSourceFile AgentSourceKind = "file"
-	AgentSourceOCI  AgentSourceKind = "oci"
-	// AgentSourceBuiltin is one of docker-agent's embedded agents, a user
-	// alias resolving to one, or an agent assembled by this host with the SDK.
-	// It needs no path containment check and no remote fetch.
-	AgentSourceBuiltin AgentSourceKind = "builtin"
-)
-
 // WorkspaceHint is a previously-validated workspace offered in bootstrap.
 type WorkspaceHint struct {
 	Path  string `json:"path"`
 	Label string `json:"label"`
 }
 
-// AgentSourceHint is a previously-seen agent source offered in bootstrap.
-type AgentSourceHint struct {
-	Source string          `json:"source"`
-	Kind   AgentSourceKind `json:"kind"`
-	Label  string          `json:"label"`
-}
-
 // Bootstrap is GET /api/bootstrap: non-secret app and docker-agent status.
 type Bootstrap struct {
-	AppVersion     string   `json:"appVersion"`
-	AgentVersion   string   `json:"agentVersion"`
-	AgentCommit    string   `json:"agentCommit"`
-	ConfigDir      string   `json:"configDir"`
-	DataDir        string   `json:"dataDir"`
-	CacheDir       string   `json:"cacheDir"`
-	SessionDB      string   `json:"sessionDb"`
-	PluginDir      string   `json:"pluginDir"`
-	WorkspaceRoots []string `json:"workspaceRoots"`
-	CSRFToken      string   `json:"csrfToken"`
-	Sandboxed      bool     `json:"sandboxed"`
-	// DefaultPosture is the safety mode new chats start in on this server.
-	DefaultPosture Posture `json:"defaultPosture"`
-	// DefaultAgent is the agent source used when a chat is created without an
-	// explicit agentId. Normally the dashboard's SDK-built coding agent.
-	DefaultAgent string `json:"defaultAgent"`
-	// BuiltinAgents lists agents available without a local path or remote pull.
-	BuiltinAgents    []string          `json:"builtinAgents"`
-	ModelsAvailable  bool              `json:"modelsAvailable"`
-	ModelsHint       string            `json:"modelsHint"`
-	WorkspaceHints   []WorkspaceHint   `json:"workspaceHints"`
-	AgentSourceHints []AgentSourceHint `json:"agentSourceHints"`
-	Notices          []Notice          `json:"notices"`
+	AppVersion      string          `json:"appVersion"`
+	AgentVersion    string          `json:"agentVersion"`
+	AgentCommit     string          `json:"agentCommit"`
+	ConfigDir       string          `json:"configDir"`
+	DataDir         string          `json:"dataDir"`
+	CacheDir        string          `json:"cacheDir"`
+	SessionDB       string          `json:"sessionDb"`
+	PluginDir       string          `json:"pluginDir"`
+	CSRFToken       string          `json:"csrfToken"`
+	Sandboxed       bool            `json:"sandboxed"`
+	ModelsAvailable bool            `json:"modelsAvailable"`
+	ModelsHint      string          `json:"modelsHint"`
+	WorkspaceHints  []WorkspaceHint `json:"workspaceHints"`
+	Notices         []Notice        `json:"notices"`
 }
 
 // PluginPage is one route contributed by a global dashboard plugin.
@@ -492,43 +460,6 @@ type Workspace struct {
 	AgentsIgnore bool     `json:"agentsIgnore"`
 }
 
-// ResolveAgentRequest is POST /api/agents/resolve.
-type ResolveAgentRequest struct {
-	Source      string `json:"source"`
-	WorkspaceID string `json:"workspaceId"`
-	// AllowRemoteFetch must be explicitly true for an OCI reference; it is
-	// the user's deliberate "yes, pull this" action.
-	AllowRemoteFetch bool `json:"allowRemoteFetch"`
-}
-
-// ToolsetInfo describes one declared toolset of an agent config.
-type ToolsetInfo struct {
-	Kind    string `json:"kind"`
-	Detail  string `json:"detail"`
-	Command string `json:"command"`
-}
-
-// AgentDescriptor describes one agent in a resolved team.
-type AgentDescriptor struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Model       string   `json:"model"`
-	SubAgents   []string `json:"subAgents"`
-	IsDefault   bool     `json:"isDefault"`
-}
-
-// ResolvedAgent is the result of POST /api/agents/resolve.
-type ResolvedAgent struct {
-	AgentID     string            `json:"agentId"`
-	Source      string            `json:"source"`
-	Kind        AgentSourceKind   `json:"kind"`
-	Label       string            `json:"label"`
-	Agents      []AgentDescriptor `json:"agents"`
-	Toolsets    []ToolsetInfo     `json:"toolsets"`
-	Warnings    []string          `json:"warnings"`
-	Permissions PermissionsView   `json:"permissions"`
-}
-
 // SessionSummary is one row of the session list.
 type SessionSummary struct {
 	SessionID  string    `json:"sessionId"`
@@ -541,23 +472,15 @@ type SessionSummary struct {
 	RunState   *RunState `json:"runState,omitempty"`
 }
 
-// CreateChatRequest is POST /api/chats.
-//
-// AgentID may be empty: the server then uses its configured default agent
-// (docker-agent's built-in "coder" unless DEFAULT_AGENT says otherwise), so a
-// browser never has to choose an agent config to start working.
+// CreateChatRequest is POST /api/chats. Every chat uses the dashboard's
+// single SDK-built coding agent.
 type CreateChatRequest struct {
 	WorkspaceID string `json:"workspaceId"`
-	AgentID     string `json:"agentId"`
-	AgentName   string `json:"agentName"`
 }
 
 // ResumeChatRequest is POST /api/chats/resume.
-// ResumeChatRequest resumes a listed session. AgentID may be empty, meaning
-// the server's default agent.
 type ResumeChatRequest struct {
 	WorkspaceID string `json:"workspaceId"`
-	AgentID     string `json:"agentId"`
 	SessionID   string `json:"sessionId"`
 }
 

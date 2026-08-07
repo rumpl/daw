@@ -171,7 +171,6 @@ export function Sidebar({
               </form>
             )}
 
-            <p className="hint small">Allowed roots: {clip((boot.workspaceRoots ?? []).join(', '), 200)}</p>
           </div>
         </div>,
         document.body,

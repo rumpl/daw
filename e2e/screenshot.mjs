@@ -1,11 +1,10 @@
 import { chromium } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const root = join(homedir(), '.dawui-shots');
 mkdirSync(root, { recursive: true });
-writeFileSync(join(root, 'agent.yaml'), 'agents:\n  root: {}\n');
 
 const base = 'http://127.0.0.1:4797';
 const b = await chromium.launch();

@@ -116,30 +116,6 @@ func TestSymlinkWithinRootAllowed(t *testing.T) {
 	}
 }
 
-func TestResolveFile(t *testing.T) {
-	root := t.TempDir()
-	f := filepath.Join(root, "agent.yaml")
-	if err := os.WriteFile(f, []byte("agents: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	g := mustGuard(t, root)
-	if _, err := g.ResolveFile(f); err != nil {
-		t.Fatalf("ResolveFile: %v", err)
-	}
-	if _, err := g.ResolveFile(root); !errors.Is(err, pathsec.ErrNotFile) {
-		t.Fatalf("expected ErrNotFile for a directory, got %v", err)
-	}
-	// An agent config outside the roots is refused: an agent config is
-	// executable configuration.
-	outside := filepath.Join(t.TempDir(), "evil.yaml")
-	if err := os.WriteFile(outside, []byte("agents: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := g.ResolveFile(outside); !errors.Is(err, pathsec.ErrOutsideRoots) {
-		t.Fatalf("expected ErrOutsideRoots, got %v", err)
-	}
-}
-
 func TestRelativeAndMissingRejected(t *testing.T) {
 	root := t.TempDir()
 	g := mustGuard(t, root)

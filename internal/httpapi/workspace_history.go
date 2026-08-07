@@ -23,8 +23,8 @@ type workspaceHistory struct {
 }
 
 // loadWorkspaceHistory restores the server-wide project list. Every stored
-// path is resolved again: deleted projects and paths no longer covered by
-// WORKSPACE_ROOTS are not advertised to browsers.
+// path is resolved again: deleted projects and paths outside the user's home
+// directory are not advertised to browsers.
 func (s *Server) loadWorkspaceHistory() {
 	if s.workspaceHistoryFile == "" {
 		return

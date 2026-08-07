@@ -3,23 +3,17 @@
 #
 # This script is NEVER run by `make test` or `make test-e2e`. It sends one real
 # prompt to a real model through the real docker-agent runtime and therefore
-# SPENDS MODEL TOKENS. It does not start a sandbox VM and does not pull an OCI
-# agent image: pass a local agent YAML.
+# SPENDS MODEL TOKENS. It does not start a sandbox VM and always uses the
+# dashboard's SDK-built coding agent.
 #
 # Usage:
-#   scripts/smoke-real.sh /abs/path/to/workspace /abs/path/to/agent.yaml
+#   scripts/smoke-real.sh /abs/path/to/workspace
 #
 set -euo pipefail
 
 WORKSPACE="${1:-$PWD}"
-AGENT="${2:-}"
 PORT="${PORT:-4788}"
 BASE="http://127.0.0.1:${PORT}"
-
-if [[ -z "$AGENT" ]]; then
-  echo "usage: $0 <workspace-dir> <agent.yaml>" >&2
-  exit 2
-fi
 
 read -r -p "This sends a REAL prompt to a REAL model and will spend tokens. Continue? [y/N] " ans
 [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "aborted"; exit 1; }
@@ -35,11 +29,8 @@ post() { curl -fsS -X POST "$BASE$1" -H "X-DAW-CSRF: $TOKEN" -H 'Content-Type: a
 echo "==> open workspace"
 WSID=$(post /api/workspaces/open "{\"path\":\"$WORKSPACE\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["workspaceId"])')
 
-echo "==> resolve agent"
-AGID=$(post /api/agents/resolve "{\"source\":\"$AGENT\",\"workspaceId\":\"$WSID\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["agentId"])')
-
 echo "==> create chat"
-CHAT=$(post /api/chats "{\"workspaceId\":\"$WSID\",\"agentId\":\"$AGID\",\"agentName\":\"\"}")
+CHAT=$(post /api/chats "{\"workspaceId\":\"$WSID\"}")
 CHATID=$(echo "$CHAT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["chatId"])')
 echo "$CHAT"
 

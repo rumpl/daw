@@ -1,6 +1,6 @@
 // Package fake is a deterministic docker-agent adapter used by every default
 // test (Go, Vitest fixtures and Playwright). It never contacts a model
-// provider, never pulls an OCI image and never starts a sandbox.
+// provider or starts a sandbox.
 //
 // It replays a scripted turn whose shape mirrors the real runtime's event
 // order: stream start -> reasoning -> assistant deltas -> tool call ->
@@ -73,40 +73,7 @@ func (a *Adapter) Info(context.Context) (adapter.Info, error) {
 		SessionDB:       "/fake/data/cagent/session.db",
 		ModelsAvailable: true,
 		ModelsHint:      "",
-		BuiltinAgents:   []string{"coder", "default", "dashboard-coder"},
 	}, nil
-}
-
-// ResolveAgent pretends to load a team. A source containing "broken" fails; a
-// source containing "warn" loads with a warning.
-func (a *Adapter) ResolveAgent(_ context.Context, req adapter.ResolveRequest) (*protocol.ResolvedAgent, error) {
-	if req.Kind == protocol.AgentSourceOCI && !req.AllowRemoteFetch {
-		return nil, adapter.ErrRemoteFetch
-	}
-	if strings.Contains(req.Source, "broken") {
-		return nil, fmt.Errorf("%w: invalid yaml at line 3", adapter.ErrInvalidAgent)
-	}
-	res := &protocol.ResolvedAgent{
-		Source: req.Source,
-		Kind:   req.Kind,
-		Label:  labelFor(req.Source),
-		Agents: []protocol.AgentDescriptor{
-			{Name: "root", Description: "Fake root agent", Model: "fake/model-a", SubAgents: []string{"helper"}, IsDefault: true},
-			{Name: "helper", Description: "Fake sub-agent", Model: "fake/model-a"},
-		},
-		Toolsets: []protocol.ToolsetInfo{
-			{Kind: "filesystem", Detail: "read/write inside the working directory"},
-			{Kind: "shell", Detail: "runs commands as your user", Command: "sh -c"},
-		},
-		Permissions: protocol.PermissionsView{
-			Allow: []string{"read_file", "list_files"},
-			Deny:  []string{"rm*"},
-		},
-	}
-	if strings.Contains(req.Source, "warn") {
-		res.Warnings = []string{"toolset \"mcp:example\" failed to start: connection refused"}
-	}
-	return res, nil
 }
 
 // ListSessions returns stored sessions, newest first.
@@ -133,13 +100,6 @@ func sortSummaries(s []protocol.SessionSummary) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
-}
-
-func labelFor(src string) string {
-	if i := strings.LastIndexByte(src, '/'); i >= 0 {
-		return src[i+1:]
-	}
-	return src
 }
 
 // Seed inserts a pre-existing session so resume paths can be tested.
@@ -169,7 +129,7 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		id := a.nextID("sess")
 		st = &storedSession{
 			id: id, title: "New chat", workingDir: req.WorkingDir, createdAt: a.now(),
-			agentName: orDefault(req.AgentName, "root"), model: "fake/model-a",
+			agentName: "root", model: "fake/model-a",
 			thinking: "medium", posture: req.Posture,
 		}
 		a.sessions[id] = st
@@ -178,8 +138,8 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		st.posture = protocol.PostureStrict
 	}
 	if req.Posture != "" {
-		// A new chat takes the server's configured default posture; on resume
-		// the server sends "" so the stored mode is kept.
+		// A new chat is autonomous; on resume the server sends "" so the
+		// stored mode is kept.
 		st.posture = req.Posture
 	}
 	// Mirror the production adapter's best-effort startup restoration. Unknown
@@ -193,20 +153,13 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		st.thinking = req.ThinkingLevel
 	}
 	c := &chat{
-		a: a, st: st, req: req,
+		a: a, st: st,
 		events:  make(chan protocol.Event, 256),
 		pending: map[string]chan reply{},
 	}
 	c.run = protocol.RunStatus{State: protocol.RunStateIdle,
 		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8}}
 	return c, nil
-}
-
-func orDefault(v, d string) string {
-	if v == "" {
-		return d
-	}
-	return v
 }
 
 // Close releases the fake store.
@@ -220,9 +173,8 @@ type reply struct {
 }
 
 type chat struct {
-	a   *Adapter
-	st  *storedSession
-	req adapter.OpenRequest
+	a  *Adapter
+	st *storedSession
 
 	mu       sync.Mutex
 	events   chan protocol.Event
@@ -250,9 +202,7 @@ func (c *chat) meta() protocol.SessionMeta {
 		SessionID:      c.st.id,
 		Title:          c.st.title,
 		WorkingDir:     c.st.workingDir,
-		AgentSource:    c.req.Source,
 		AgentName:      c.st.agentName,
-		SubAgents:      []string{"helper"},
 		Model:          c.st.model,
 		ThinkingLevel:  c.st.thinking,
 		ThinkingLevels: []string{"none", "low", "medium", "high"},

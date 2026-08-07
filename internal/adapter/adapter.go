@@ -1,8 +1,8 @@
 // Package adapter defines the narrow, typed seam between the HTTP server and
 // docker-agent. The production implementation (internal/adapter/dagent) embeds
 // the matched docker-agent Go SDK; internal/adapter/fake is a deterministic
-// stand-in so every API, UI and e2e test runs without a model token, a Docker
-// sandbox, or an OCI pull.
+// stand-in so every API, UI and e2e test runs without a model token or a
+// Docker sandbox.
 package adapter
 
 import (
@@ -19,9 +19,8 @@ var (
 	ErrBusy         = errors.New("chat is busy")
 	ErrUnsupported  = errors.New("operation not supported by this runtime")
 	ErrNoModel      = errors.New("no model could be resolved")
-	ErrRemoteFetch  = errors.New("remote agent fetch requires explicit confirmation")
 	ErrSessionInUse = errors.New("session is already open in this server")
-	ErrInvalidAgent = errors.New("agent source could not be loaded")
+	ErrInvalidAgent = errors.New("agent could not be loaded")
 	ErrClosed       = errors.New("chat is closed")
 )
 
@@ -36,29 +35,12 @@ type Info struct {
 	ModelsAvailable bool
 	ModelsHint      string
 	Notices         []protocol.Notice
-	// BuiltinAgents are agent names available without a filesystem path or
-	// network fetch, including docker-agent's embedded agents and agents the
-	// host application assembles directly with the SDK.
-	BuiltinAgents []string
-}
-
-// ResolveRequest asks the adapter to load and describe an agent source. Path
-// containment has already been enforced by the caller; Source is either an
-// absolute local YAML path or an OCI reference.
-type ResolveRequest struct {
-	Source           string
-	Kind             protocol.AgentSourceKind
-	WorkingDir       string
-	AllowRemoteFetch bool
 }
 
 // OpenRequest opens (or resumes) exactly one live chat.
 type OpenRequest struct {
 	ChatID          string
 	WorkingDir      string
-	Source          string
-	Kind            protocol.AgentSourceKind
-	AgentName       string
 	ResumeSessionID string
 	Posture         protocol.Posture
 	// Model and ThinkingLevel are dashboard preferences restored from disk.
@@ -73,7 +55,6 @@ type OpenRequest struct {
 // session store.
 type Adapter interface {
 	Info(ctx context.Context) (Info, error)
-	ResolveAgent(ctx context.Context, req ResolveRequest) (*protocol.ResolvedAgent, error)
 	// ListSessions returns sessions from docker-agent's own store. When
 	// workingDir is non-empty the list is filtered to that directory.
 	ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error)

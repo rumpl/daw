@@ -29,24 +29,21 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
   - No setup required. Liveness and process uptime.
 - `GET /api/bootstrap` → `200 Bootstrap`
   - Initializes the API client CSRF token and returns paths, defaults, notices,
-    built-in/pathless agents, workspace hints, and model availability.
+    workspace hints, and model availability.
 - `GET /api/plugins` → `200 PluginCatalog`
   - Lists all valid global plugins plus validation diagnostics.
 - `GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}` → asset bytes
   - URL comes from `Plugin.entryUrl`/`styleUrl`. It is immutable and may be
     cached for one year. A stale fingerprint or invalid path returns 404.
 
-### Workspaces and agents
+### Workspaces
 
 - `POST /api/workspaces/open`
-  - Body: `{path: string}` where path is absolute and inside `WORKSPACE_ROOTS`.
+  - Body: `{path: string}` where path is absolute and inside the server user's home directory.
   - Returns `200 Workspace`. The opaque `workspaceId` is used in later calls.
-- `POST /api/agents/resolve`
-  - Body: `{source: string, workspaceId: string, allowRemoteFetch: boolean}`.
-  - Returns `200 ResolvedAgent`.
-  - Local YAML must be inside an allowed root. OCI sources initially return
-    `428 code=confirm_remote_fetch`; repeat with `allowRemoteFetch: true` only
-    after explicit user approval. Pathless SDK/built-in agents need neither.
+
+Every chat uses the dashboard's SDK-built coding agent. There is no agent
+selection or agent-resolution API.
 
 ### Sessions and live chats
 
@@ -55,11 +52,9 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - `GET /api/workspaces/{workspaceId}/sessions` → `200 SessionSummary[]`
   - Stored sessions for one opened workspace, including live status.
 - `POST /api/chats`
-  - Body: `{workspaceId: string, agentId: string, agentName: string}`.
-  - Empty `agentId` selects `dashboard-coder`; empty `agentName` selects the
-    team's default agent. Returns `201 ChatRef`.
+  - Body: `{workspaceId: string}`. Returns `201 ChatRef`.
 - `POST /api/chats/resume`
-  - Body: `{workspaceId: string, agentId: string, sessionId: string}`.
+  - Body: `{workspaceId: string, sessionId: string}`.
   - Returns `201 ChatRef`. A session can have only one live runtime in this
     server; attaching to an already-live session returns that owner.
 - `GET /api/chats/{id}` → `200 Snapshot`
@@ -111,21 +106,17 @@ type ToolState = "pending" | "awaiting_confirmation" | "running" |
 type Posture = "strict" | "balanced" | "autonomous";
 type ToolDecision = "approve" | "approveSession" | "approveAlways" | "reject";
 type ElicitationAction = "accept" | "decline" | "cancel";
-type AgentSourceKind = "file" | "oci" | "builtin";
 
 interface Health { status: string; uptimeSeconds: number }
 interface APIError { error: string; code: string; details?: string }
 interface Notice { id: string; level: "info"|"warning"|"error"; message: string; code: string }
 interface WorkspaceHint { path: string; label: string }
-interface AgentSourceHint { source: string; kind: AgentSourceKind; label: string }
 interface Bootstrap {
   appVersion: string; agentVersion: string; agentCommit: string;
   configDir: string; dataDir: string; cacheDir: string; sessionDb: string;
-  pluginDir: string; workspaceRoots: string[] | null; csrfToken: string;
-  sandboxed: boolean; defaultPosture: Posture; defaultAgent: string;
-  builtinAgents: string[] | null; modelsAvailable: boolean; modelsHint: string;
-  workspaceHints: WorkspaceHint[] | null;
-  agentSourceHints: AgentSourceHint[] | null; notices: Notice[] | null;
+  pluginDir: string; csrfToken: string; sandboxed: boolean;
+  modelsAvailable: boolean; modelsHint: string;
+  workspaceHints: WorkspaceHint[] | null; notices: Notice[] | null;
 }
 interface Workspace {
   workspaceId: string; path: string; label: string; notices: Notice[] | null;
@@ -135,16 +126,6 @@ interface PermissionsView {
   posture: Posture; allow: string[] | null; ask: string[] | null;
   deny: string[] | null; autoApproveAll: boolean; agentsIgnore: boolean;
   sessionGrants: string[] | null;
-}
-interface ToolsetInfo { kind: string; detail: string; command: string }
-interface AgentDescriptor {
-  name: string; description: string; model: string;
-  subAgents: string[] | null; isDefault: boolean;
-}
-interface ResolvedAgent {
-  agentId: string; source: string; kind: AgentSourceKind; label: string;
-  agents: AgentDescriptor[] | null; toolsets: ToolsetInfo[] | null;
-  warnings: string[] | null; permissions: PermissionsView;
 }
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
@@ -161,8 +142,7 @@ interface Usage {
 }
 interface SessionMeta {
   chatId: string; sessionId: string; title: string; workspaceId: string;
-  workingDir: string; agentId: string; agentSource: string; agentName: string;
-  subAgents: string[] | null; model: string; thinkingLevel: string;
+  workingDir: string; agentName: string; model: string; thinkingLevel: string;
   thinkingLevels: string[] | null; permissions: PermissionsView; createdAt: string;
 }
 interface MessageItem {
@@ -307,12 +287,10 @@ interface DashboardAPI {
   bootstrap(): Promise<Bootstrap>;
   plugins(): Promise<PluginCatalog>;
   openWorkspace(path:string): Promise<Workspace>;
-  resolveAgent(source:string, workspaceId:string,
-    allowRemoteFetch?:boolean): Promise<ResolvedAgent>;
   liveSessions(): Promise<SessionSummary[]>;
   sessions(workspaceId:string): Promise<SessionSummary[]>;
-  createChat(workspaceId:string, agentId?:string, agentName?:string): Promise<ChatRef>;
-  resumeChat(workspaceId:string, agentId:string, sessionId:string): Promise<ChatRef>;
+  createChat(workspaceId:string): Promise<ChatRef>;
+  resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
   send(chatId:string, text:string, mode:DeliveryMode,
     idempotencyKey:string): Promise<Accepted>;

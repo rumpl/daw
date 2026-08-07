@@ -38,7 +38,6 @@ const plugin: Plugin = {
 
 const boot = {
   agentVersion: 'test',
-  workspaceRoots: ['/code'],
   workspaceHints: [],
 } as unknown as Bootstrap;
 
