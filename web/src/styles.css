@@ -111,7 +111,7 @@ select {
   width: var(--sidebar-w); min-width: var(--sidebar-w);
   border-right: 1px solid var(--rule);
   background: var(--bg-alt);
-  /* The sidebar itself never scrolls: only the session list does. */
+  /* The sidebar itself never scrolls: the global and project session lists do. */
   display: flex; flex-direction: column; overflow: hidden;
 }
 .sidebar-inner {
@@ -130,6 +130,9 @@ select {
   font-size: 10.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: .08em; color: var(--fg-faint); margin: 0 0 8px;
 }
+.sidebar h2 .section-count {
+  margin-left: 4px; color: var(--ok); font-variant-numeric: tabular-nums;
+}
 .sidebar form { display: flex; gap: 6px; }
 .sidebar form input { flex: 1; }
 
@@ -144,7 +147,13 @@ select {
   color: var(--fg-faint); font-size: 11px; white-space: nowrap;
 }
 
-/* The one scrollable region. */
+.sidebar section.live-sessions { padding-bottom: 10px; }
+.live-session-list {
+  list-style: none; margin: 8px -8px 0 0; padding: 0 8px 0 0;
+  max-height: 150px; overflow-y: auto; overscroll-behavior: contain;
+}
+
+/* The project session list consumes the remaining sidebar height. */
 .sidebar section.sessions {
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column;
@@ -162,16 +171,18 @@ select {
   /* Keep the scrollbar clear of the labels. */
   margin-right: -8px; padding-right: 8px;
 }
-.session-list button {
+.session-list button, .live-session-list button {
   width: 100%; text-align: left; display: block;
   padding: 6px 8px; border: 0; background: transparent;
 }
-.session-list button:hover:not([disabled]) { background: var(--bg); }
+.session-list button:hover:not([disabled]),
+.live-session-list button:hover:not([disabled]) { background: var(--bg); }
 .session-title {
   display: block; font-size: 13px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.session-meta { display: block; font-size: 11px; color: var(--fg-faint); }
+.session-meta, .session-project { display: block; font-size: 11px; color: var(--fg-faint); }
+.session-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-dot {
   width: 5px; height: 5px; border-radius: 50%; background: var(--ok);
   display: inline-block; margin-right: 5px; vertical-align: 1px;
@@ -421,6 +432,17 @@ select {
 .md a { color: var(--accent); text-underline-offset: 2px; }
 .md hr { border: 0; border-top: 1px solid var(--rule); margin: 1em 0; }
 .md-blocked-link, .md-blocked-image { color: var(--fg-faint); font-style: italic; }
+
+/* mermaid diagrams */
+.md-mermaid { margin: .7em 0; overflow-x: auto; text-align: center; }
+.md-mermaid svg { max-width: 100%; height: auto; }
+.md-mermaid-loading { color: var(--fg-faint); font-size: 12.5px; text-align: left; padding: 8px 0; }
+.md-mermaid-error { text-align: left; }
+.md-mermaid-error-msg { color: var(--danger); font-size: 12.5px; margin: 0 0 4px; }
+
+/* katex math: allow long block equations to scroll instead of clipping */
+.md .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; margin: .6em 0; }
+.md .katex { font-size: 1.05em; }
 
 /* --- composer -------------------------------------------------------------- */
 

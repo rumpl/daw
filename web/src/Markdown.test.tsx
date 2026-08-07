@@ -42,4 +42,27 @@ describe('Markdown rendering', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.textContent).toContain('[image: alt]');
   });
+
+  it('renders inline LaTeX math via KaTeX', () => {
+    const { container } = render(<Markdown>{'Euler: $e^{i\\pi} + 1 = 0$'}</Markdown>);
+    expect(container.querySelector('.katex')).not.toBeNull();
+  });
+
+  it('renders block LaTeX math via KaTeX', () => {
+    const { container } = render(<Markdown>{'$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$'}</Markdown>);
+    expect(container.querySelector('.katex-display')).not.toBeNull();
+  });
+
+  it('routes a mermaid fence to the diagram renderer, not a code block', () => {
+    const { container } = render(<Markdown>{'```mermaid\ngraph TD; A-->B;\n```'}</Markdown>);
+    // The mermaid fence must not fall through to the plain code-block path.
+    expect(container.querySelector('pre.md-pre')).toBeNull();
+    expect(container.querySelector('.md-mermaid')).not.toBeNull();
+  });
+
+  it('keeps a non-mermaid code fence as a plain code block', () => {
+    const { container } = render(<Markdown>{'```js\nconst a = 1;\n```'}</Markdown>);
+    expect(container.querySelector('pre.md-pre')).not.toBeNull();
+    expect(container.querySelector('.md-mermaid')).toBeNull();
+  });
 });
