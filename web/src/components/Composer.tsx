@@ -6,8 +6,9 @@ export type SendMode = 'normal' | 'steer' | 'followUp';
 
 /**
  * Composer: growing multiline input with a persisted draft. On desktop Enter
- * sends and Shift+Enter inserts a newline; an explicit Send button is always
- * present so touch devices never depend on a keyboard behaviour.
+ * sends, Shift+Enter inserts a newline, and while a turn is running Alt+Enter
+ * queues a follow-up. An explicit Send button is present while idle so touch
+ * devices never depend on keyboard behaviour.
  */
 export function Composer({
   draft,
@@ -58,7 +59,7 @@ export function Composer({
         setMenuIndex((i) => (i - 1 + matches.length) % matches.length);
         return;
       }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.altKey)) {
         const picked = matches[menuIndex];
         if (picked) {
           e.preventDefault();
@@ -75,7 +76,7 @@ export function Composer({
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      submit(busy ? 'followUp' : 'normal');
+      submit(busy ? (e.altKey ? 'followUp' : 'steer') : 'normal');
     }
   };
 
@@ -115,24 +116,16 @@ export function Composer({
           value={draft}
           rows={1}
           disabled={disabled}
-          placeholder={busy ? 'Steer or queue a follow-up…' : 'Send a message…'}
+          placeholder={busy ? 'Enter to steer · Alt+Enter for follow-up…' : 'Send a message…'}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
 
         <div className="composer-actions">
           {busy ? (
-            <>
-              <button type="button" onClick={() => submit('steer')} disabled={disabled || !draft.trim()}>
-                Steer
-              </button>
-              <button type="button" onClick={() => submit('followUp')} disabled={disabled || !draft.trim()}>
-                Follow-up
-              </button>
-              <button type="button" className="danger" onClick={onStop}>
-                {run.state === 'stopping' ? 'Stopping…' : 'Stop'}
-              </button>
-            </>
+            <button type="button" className="danger" onClick={onStop}>
+              {run.state === 'stopping' ? 'Stopping…' : 'Stop'}
+            </button>
           ) : (
             <button type="submit" className="primary send-btn" disabled={disabled || !draft.trim()}>
               Send
@@ -145,6 +138,12 @@ export function Composer({
         {busy && (run.queue.steerDepth > 0 || run.queue.followUpDepth > 0) ? (
           <span className="queue-pill" aria-live="polite">
             {run.queue.steerDepth} steer · {run.queue.followUpDepth} follow-up queued
+          </span>
+        ) : busy ? (
+          <span>
+            <span className="kbd">Enter</span> steer · <span className="kbd">Alt</span>+
+            <span className="kbd">Enter</span> follow-up · <span className="kbd">Shift</span>+
+            <span className="kbd">Enter</span> newline
           </span>
         ) : (
           <span>

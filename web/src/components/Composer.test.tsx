@@ -45,12 +45,25 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
-  it('replaces Send with Stop and shows steer/follow-up while running', () => {
+  it('steers on Enter and queues a follow-up on Alt+Enter while running', async () => {
+    const user = userEvent.setup();
+    const { onSend } = setup(running, 'adjust course');
+    const box = screen.getByLabelText('Message');
+    await user.click(box);
+
+    await user.keyboard('{Enter}');
+    expect(onSend).toHaveBeenLastCalledWith('adjust course', 'steer');
+
+    await user.keyboard('{Alt>}{Enter}{/Alt}');
+    expect(onSend).toHaveBeenLastCalledWith('adjust course', 'followUp');
+  });
+
+  it('shows only Stop as an action while running', () => {
     setup(running, 'hi');
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Follow-up' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Follow-up' })).toBeNull();
     expect(screen.getByText(/1 steer · 2 follow-up queued/)).toBeInTheDocument();
   });
 
