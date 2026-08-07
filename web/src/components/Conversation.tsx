@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import type { Item, MessageItem, Notice, Transfer, Summary } from '../protocol.gen';
+import type { Item, MessageItem, Notice, QueueStatus, Transfer, Summary } from '../protocol.gen';
 import { Markdown } from '../Markdown';
 import { clip } from '../safety';
 import { itemKey } from '../reducer';
@@ -78,7 +78,7 @@ const Row = memo(function Row({ item }: { item: Item }) {
   }
 });
 
-export function Conversation({ items, empty }: { items: Item[]; empty: React.ReactNode }) {
+export function Conversation({ items, queue, empty }: { items: Item[]; queue?: QueueStatus; empty: React.ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState(true);
 
@@ -102,6 +102,23 @@ export function Conversation({ items, empty }: { items: Item[]; empty: React.Rea
         {items.map((item) => (
           <Row key={itemKey(item)} item={item} />
         ))}
+        {queue && ((queue.steer?.length ?? 0) > 0 || (queue.followUps?.length ?? 0) > 0) ? (
+          <section className="pending-queue" aria-label="Pending messages">
+            <header>Pending</header>
+            {(queue.steer ?? []).map((message) => (
+              <article className="queued-message" key={`steer:${message.id}`}>
+                <span>Steer</span>
+                <pre>{message.text}</pre>
+              </article>
+            ))}
+            {(queue.followUps ?? []).map((message) => (
+              <article className="queued-message" key={`followUp:${message.id}`}>
+                <span>Follow-up</span>
+                <pre>{message.text}</pre>
+              </article>
+            ))}
+          </section>
+        ) : null}
       </div>
       {!pinned ? (
         <button

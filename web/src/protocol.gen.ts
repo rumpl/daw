@@ -99,11 +99,18 @@ export interface ElicitationRequest {
   schema?: unknown;
 }
 
+export interface QueuedMessage {
+  id: string;
+  text: string;
+}
+
 export interface QueueStatus {
   steerDepth: number;
   steerCapacity: number;
   followUpDepth: number;
   followUpCapacity: number;
+  steer: Array<QueuedMessage> | null;
+  followUps: Array<QueuedMessage> | null;
 }
 
 export interface RunStatus {

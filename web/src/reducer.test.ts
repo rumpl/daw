@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applySnapshot, initialChatState, itemKey, reduce } from './reducer';
 import type { Event, Snapshot } from './protocol.gen';
 
-const emptyQueue = { steerDepth: 0, steerCapacity: 8, followUpDepth: 0, followUpCapacity: 8 };
+const emptyQueue = { steerDepth: 0, steerCapacity: 8, followUpDepth: 0, followUpCapacity: 8, steer: [], followUps: [] };
 
 function ev(partial: Partial<Event> & Pick<Event, 'type'>): Event {
   return { seq: 0, ...partial } as Event;

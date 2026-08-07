@@ -205,12 +205,20 @@ type ElicitationRequest struct {
 // Status
 // ---------------------------------------------------------------------------
 
-// QueueStatus mirrors runtime.QueueStatus.
+// QueuedMessage is a pending user message visible before docker-agent consumes it.
+type QueuedMessage struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// QueueStatus is the current content and capacity of the runtime queues.
 type QueueStatus struct {
-	SteerDepth       int `json:"steerDepth"`
-	SteerCapacity    int `json:"steerCapacity"`
-	FollowUpDepth    int `json:"followUpDepth"`
-	FollowUpCapacity int `json:"followUpCapacity"`
+	SteerDepth       int             `json:"steerDepth"`
+	SteerCapacity    int             `json:"steerCapacity"`
+	FollowUpDepth    int             `json:"followUpDepth"`
+	FollowUpCapacity int             `json:"followUpCapacity"`
+	Steer            []QueuedMessage `json:"steer"`
+	FollowUps        []QueuedMessage `json:"followUps"`
 }
 
 // RunStatus is the current turn state plus queue depths.

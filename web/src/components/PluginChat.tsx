@@ -61,6 +61,7 @@ export function PluginChat({ chatId }: { chatId: string }) {
       {error ? <p className="banner banner-error" role="alert">{clip(error, 300)}</p> : null}
       <Conversation
         items={state.items}
+        queue={state.run.queue}
         empty={<><h2>Say something</h2><p>This chat has no messages yet.</p></>}
       />
       <Composer

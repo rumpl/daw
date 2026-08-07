@@ -170,6 +170,7 @@ export function Dashboard() {
 
         <Conversation
           items={dashboard.state.items}
+          queue={dashboard.state.run.queue}
           empty={
             !dashboard.workspace ? (
               <>

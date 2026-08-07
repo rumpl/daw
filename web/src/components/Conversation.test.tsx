@@ -35,6 +35,26 @@ describe('Conversation', () => {
     expect(container.querySelector('.msg-streaming pre')).toBeNull();
   });
 
+  it('renders pending steer and follow-up messages', () => {
+    const { container } = render(
+      <Conversation
+        items={[assistantMessage({ text: 'Working' })]}
+        queue={{
+          steerDepth: 1,
+          steerCapacity: 5,
+          followUpDepth: 1,
+          followUpCapacity: 20,
+          steer: [{ id: 's1', text: 'change direction' }],
+          followUps: [{ id: 'f1', text: 'then run tests' }],
+        }}
+        empty={null}
+      />,
+    );
+
+    expect(container.querySelector('.pending-queue')).toHaveTextContent('Steerchange direction');
+    expect(container.querySelector('.pending-queue')).toHaveTextContent('Follow-upthen run tests');
+  });
+
   it('does not render user messages as Markdown', () => {
     const { container } = render(
       <Conversation

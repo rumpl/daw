@@ -34,6 +34,8 @@ const emptyQueue: QueueStatus = {
   steerCapacity: 0,
   followUpDepth: 0,
   followUpCapacity: 0,
+  steer: [],
+  followUps: [],
 };
 
 export function initialChatState(): ChatState {

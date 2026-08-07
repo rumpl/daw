@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { Composer } from './Composer';
 import type { RunStatus } from '../protocol.gen';
 
-const idle: RunStatus = { state: 'idle', runId: '', queue: { steerDepth: 0, steerCapacity: 8, followUpDepth: 0, followUpCapacity: 8 } };
-const running: RunStatus = { state: 'running', runId: 'r1', queue: { steerDepth: 1, steerCapacity: 8, followUpDepth: 2, followUpCapacity: 8 } };
+const idle: RunStatus = { state: 'idle', runId: '', queue: { steerDepth: 0, steerCapacity: 8, followUpDepth: 0, followUpCapacity: 8, steer: [], followUps: [] } };
+const running: RunStatus = { state: 'running', runId: 'r1', queue: { steerDepth: 1, steerCapacity: 8, followUpDepth: 2, followUpCapacity: 8, steer: [{ id: 's1', text: 'steer' }], followUps: [{ id: 'f1', text: 'one' }, { id: 'f2', text: 'two' }] } };
 
 function setup(run: RunStatus, draft = '') {
   const onSend = vi.fn();

@@ -220,6 +220,8 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		modelSwitcher.ModelsStore = ms
 	}
 
+	steerQueue := newObservableQueue(protocol.DeliverySteer, 5)
+	followQueue := newObservableQueue(protocol.DeliveryFollowUp, 20)
 	rt, err := daruntime.New(ctx, t,
 		daruntime.WithSessionStore(a.store),
 		daruntime.WithCurrentAgent(agentName),
@@ -228,6 +230,8 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		daruntime.WithBudget(loadRes.Budget),
 		daruntime.WithNamedBudgets(loadRes.Budgets, loadRes.AgentBudgets),
 		daruntime.WithRetryOnRateLimit(),
+		daruntime.WithSteerQueue(steerQueue),
+		daruntime.WithFollowUpQueue(followQueue),
 	)
 	if err != nil {
 		_ = t.StopToolSets(context.WithoutCancel(ctx))
@@ -289,7 +293,11 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		pendingElic:  map[string]struct{}{},
 		agentsIgnore: agentsIgnore,
 		run:          protocol.RunStatus{State: protocol.RunStateIdle},
+		steerQueue:   steerQueue,
+		followQueue:  followQueue,
 	}
+	steerQueue.setOnChange(c.queueChanged)
+	followQueue.setOnChange(c.queueChanged)
 	c.refreshQueue()
 	c.startBackgroundBridges()
 	c.collectWarnings(ag)

@@ -174,8 +174,8 @@ type chat struct {
 	cancel   context.CancelFunc
 	pending  map[string]chan reply
 	genID    int
-	steer    []string
-	followUp []string
+	steer    []protocol.QueuedMessage
+	followUp []protocol.QueuedMessage
 	toolN    int
 	msgN     int
 }
@@ -249,7 +249,9 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 			c.mu.Unlock()
 			return "", false, fmt.Errorf("%w: steer requires a running turn", adapter.ErrBusy)
 		}
-		c.steer = append(c.steer, text)
+		queued := protocol.QueuedMessage{ID: fmt.Sprintf("steer-%d", c.msgN+len(c.steer)+1), Text: text}
+		c.steer = append(c.steer, queued)
+		c.run.Queue.Steer = append([]protocol.QueuedMessage(nil), c.steer...)
 		c.run.Queue.SteerDepth = len(c.steer)
 		run := c.run
 		c.mu.Unlock()
@@ -260,7 +262,9 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 			c.mu.Unlock()
 			return "", false, fmt.Errorf("%w: follow-up requires a running turn", adapter.ErrBusy)
 		}
-		c.followUp = append(c.followUp, text)
+		queued := protocol.QueuedMessage{ID: fmt.Sprintf("followUp-%d", c.msgN+len(c.followUp)+1), Text: text}
+		c.followUp = append(c.followUp, queued)
+		c.run.Queue.FollowUps = append([]protocol.QueuedMessage(nil), c.followUp...)
 		c.run.Queue.FollowUpDepth = len(c.followUp)
 		run := c.run
 		c.mu.Unlock()
@@ -546,14 +550,14 @@ func (c *chat) settle(gen int, runID string) {
 	// consumed by the turn, follow-ups become the next turn's prompt.
 	next := ""
 	if len(c.followUp) > 0 {
-		next, c.followUp = c.followUp[0], c.followUp[1:]
+		next, c.followUp = c.followUp[0].Text, c.followUp[1:]
 	}
 	c.steer = nil
 	c.run = protocol.RunStatus{
 		State: protocol.RunStateIdle,
 		Queue: protocol.QueueStatus{
 			SteerCapacity: 8, FollowUpCapacity: 8,
-			FollowUpDepth: len(c.followUp),
+			FollowUpDepth: len(c.followUp), FollowUps: append([]protocol.QueuedMessage(nil), c.followUp...),
 		},
 	}
 	run := c.run
@@ -578,6 +582,8 @@ func (c *chat) Abort() {
 		c.followUp = nil
 		c.run.Queue.SteerDepth = 0
 		c.run.Queue.FollowUpDepth = 0
+		c.run.Queue.Steer = nil
+		c.run.Queue.FollowUps = nil
 	}
 	cancel := c.cancel
 	run := c.run

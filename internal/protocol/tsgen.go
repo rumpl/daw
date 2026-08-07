@@ -22,6 +22,7 @@ var exported = []any{
 	RejectionReason{},
 	ToolConfirmationRequest{},
 	ElicitationRequest{},
+	QueuedMessage{},
 	QueueStatus{},
 	RunStatus{},
 	Usage{},

@@ -64,6 +64,8 @@ type chat struct {
 	userSeq      int
 	curAssistant string
 	noticeSeq    int
+	steerQueue   *observableQueue
+	followQueue  *observableQueue
 }
 
 func (c *chat) SessionID() string { return c.sess.ID }
@@ -123,6 +125,8 @@ func (c *chat) Meta() protocol.SessionMeta {
 	c.mu.Unlock()
 
 	ctx := context.Background()
+	c.steerQueue.clear()
+	c.followQueue.clear()
 	if model == "" {
 		if ag, err := c.team.Agent(c.agentName); err == nil && ag != nil {
 			if m := ag.Model(ctx); m != nil {
@@ -319,7 +323,6 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 		if err := c.rt.Steer(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
 			return "", false, err
 		}
-		c.refreshQueue()
 		return c.runID(), true, nil
 	case protocol.DeliveryFollowUp:
 		if state != protocol.RunStateRunning {
@@ -328,7 +331,6 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 		if err := c.rt.FollowUp(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
 			return "", false, err
 		}
-		c.refreshQueue()
 		return c.runID(), true, nil
 	}
 
@@ -352,6 +354,7 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 	c.run = protocol.RunStatus{State: protocol.RunStateRunning, RunID: runID}
 	c.curAssistant = ""
 	c.mu.Unlock()
+	c.refreshQueue()
 
 	// Persist the session row on the first real prompt (lazy creation).
 	c.mu.Lock()
@@ -434,13 +437,19 @@ func (c *chat) settle(gen uint64) {
 }
 
 func (c *chat) refreshQueue() {
-	qs := c.rt.QueueStatus()
+	steer, steerCapacity := c.steerQueue.snapshot()
+	followUps, followUpCapacity := c.followQueue.snapshot()
 	c.mu.Lock()
 	c.run.Queue = protocol.QueueStatus{
-		SteerDepth: qs.SteerDepth, SteerCapacity: qs.SteerCapacity,
-		FollowUpDepth: qs.FollowupDepth, FollowUpCapacity: qs.FollowupCapacity,
+		SteerDepth: len(steer), SteerCapacity: steerCapacity, Steer: steer,
+		FollowUpDepth: len(followUps), FollowUpCapacity: followUpCapacity, FollowUps: followUps,
 	}
 	c.mu.Unlock()
+}
+
+func (c *chat) queueChanged() {
+	c.refreshQueue()
+	c.publishRun()
 }
 
 func (c *chat) publishRun() {
