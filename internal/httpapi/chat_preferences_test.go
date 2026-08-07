@@ -1,10 +1,9 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -25,7 +24,7 @@ func newPreferenceTestServer(t *testing.T, root, preferencesFile string) *Server
 		Adapter:             fake.New(),
 		Guard:               guard,
 		ChatPreferencesFile: preferencesFile,
-		Logger:              slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:              slog.New(slog.DiscardHandler),
 	})
 }
 
@@ -80,7 +79,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 
 	first.workspaces.Add("ws", root)
 	recorder := httptest.NewRecorder()
-	first.openChat(recorder, httptest.NewRequest("POST", "/api/chats", nil), "ws", "")
+	first.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "")
 	if recorder.Code != 201 {
 		t.Fatalf("open new chat: %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -102,7 +101,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	if bound := first.preferences.Get(ref.SessionID); bound.Model != "fake/model-b" || bound.ThinkingLevel != "high" {
 		t.Fatalf("inherited defaults were not bound to the new session: %+v", bound)
 	}
-	first.Shutdown(context.Background())
+	first.Shutdown(t.Context())
 
 	// Simulate docker-agent loading the same session with its configured
 	// defaults. The fresh server must layer the sidecar choices back on.
@@ -111,7 +110,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	secondFake.Seed(ref.SessionID, "Existing", root, nil)
 	second.workspaces.Add("ws", root)
 	recorder = httptest.NewRecorder()
-	second.openChat(recorder, httptest.NewRequest("POST", "/api/chats/resume", nil), "ws", ref.SessionID)
+	second.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats/resume", http.NoBody), "ws", ref.SessionID)
 	if recorder.Code != 201 {
 		t.Fatalf("resume chat: %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -129,7 +128,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	if meta.Model != "fake/model-b" || meta.ThinkingLevel != "high" {
 		t.Fatalf("resumed chat did not restore its preferences: %+v", meta)
 	}
-	second.Shutdown(context.Background())
+	second.Shutdown(t.Context())
 }
 
 func TestChatPreferencesMergeIndependentControls(t *testing.T) {

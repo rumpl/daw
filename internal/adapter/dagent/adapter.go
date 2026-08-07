@@ -32,7 +32,6 @@ import (
 	"github.com/docker/docker-agent/pkg/tools/mcp/keyringstore"
 	"github.com/docker/docker-agent/pkg/userconfig"
 	"github.com/docker/docker-agent/pkg/version"
-
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/dashboardagent"
 	"github.com/rumpl/daw/internal/protocol"
@@ -186,7 +185,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 	runConfig := a.runtimeConfig(req.WorkingDir)
 	loadRes, err := dashboardagent.Build(ctx, runConfig)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
+		return nil, fmt.Errorf("%w: %w", adapter.ErrInvalidAgent, err)
 	}
 	t := loadRes.Team
 
@@ -204,7 +203,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 	ag, err := t.AgentOrDefault("")
 	if err != nil {
 		_ = t.StopToolSets(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("%w: %v", adapter.ErrInvalidAgent, err)
+		return nil, fmt.Errorf("%w: %w", adapter.ErrInvalidAgent, err)
 	}
 	agentName := ag.Name()
 

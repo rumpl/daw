@@ -9,7 +9,6 @@ import (
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
-
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -19,7 +18,6 @@ import (
 // invented. Unhandled events are ignored rather than guessed at.
 func (c *chat) normalize(ev daruntime.Event) {
 	switch e := ev.(type) {
-
 	case *daruntime.StreamStartedEvent:
 		c.publishRun()
 

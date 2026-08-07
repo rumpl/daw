@@ -26,17 +26,19 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	wsHints := s.workspaces.Hints()
 
 	notices := append([]protocol.Notice(nil), info.Notices...)
-	notices = append(notices, protocol.Notice{
-		ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
-		Message: "Every tool call, including shell commands, is auto-approved and runs " +
-			"on this host as your user.",
-	})
-	notices = append(notices, protocol.Notice{
-		ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
-		Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
-			"with your user's permissions. There is no sandbox. Use `docker agent run --sandbox` " +
-			"in a terminal if you need isolation.",
-	})
+	notices = append(notices,
+		protocol.Notice{
+			ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
+			Message: "Every tool call, including shell commands, is auto-approved and runs " +
+				"on this host as your user.",
+		},
+		protocol.Notice{
+			ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
+			Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
+				"with your user's permissions. There is no sandbox. Use `docker agent run --sandbox` " +
+				"in a terminal if you need isolation.",
+		},
+	)
 
 	s.json(w, http.StatusOK, protocol.Bootstrap{
 		AppVersion: s.appVersion, AgentVersion: info.AgentVersion, AgentCommit: info.AgentCommit,

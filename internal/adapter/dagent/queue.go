@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
-
 	"github.com/rumpl/daw/internal/protocol"
 )
 

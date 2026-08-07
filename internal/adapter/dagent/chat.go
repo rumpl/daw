@@ -3,6 +3,7 @@ package dagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,7 +19,6 @@ import (
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
-
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
 )
@@ -615,7 +615,7 @@ func (c *chat) SetModel(ctx context.Context, ref string) error {
 		return err
 	}
 	if err := c.rt.SetAgentModel(ctx, c.agentName, ref); err != nil {
-		if err == daruntime.ErrUnsupported {
+		if errors.Is(err, daruntime.ErrUnsupported) {
 			return adapter.ErrUnsupported
 		}
 		return err
@@ -649,7 +649,7 @@ func (c *chat) SetThinking(ctx context.Context, level string) error {
 	}
 	applied, err := c.rt.SetAgentThinkingLevel(ctx, c.agentName, l)
 	if err != nil {
-		if err == daruntime.ErrUnsupported {
+		if errors.Is(err, daruntime.ErrUnsupported) {
 			return adapter.ErrUnsupported
 		}
 		return err

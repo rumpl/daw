@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -138,8 +139,7 @@ func GenerateTypeScript() string {
 	for _, v := range exported {
 		t := reflect.TypeOf(v)
 		fmt.Fprintf(&b, "export interface %s {\n", t.Name())
-		for i := range t.NumField() {
-			f := t.Field(i)
+		for f := range t.Fields() {
 			if !f.IsExported() {
 				continue
 			}
@@ -172,10 +172,5 @@ func GenerateTypeScript() string {
 }
 
 func slicesContains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, v)
 }

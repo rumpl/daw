@@ -5,12 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +47,7 @@ func newHarness(t *testing.T) *harness {
 	ts := httptest.NewServer(s)
 	t.Cleanup(func() {
 		ts.Close()
-		s.Shutdown(context.Background())
+		s.Shutdown(context.WithoutCancel(t.Context()))
 	})
 	h := &harness{t: t, srv: ts, fake: f, csrf: s.CSRFToken(), root: root, pluginDir: pluginDir}
 	return h
@@ -63,7 +63,7 @@ func (h *harness) do(method, path string, body any, mutate ...func(*http.Request
 		}
 		rdr = bytes.NewReader(buf)
 	}
-	req, err := http.NewRequest(method, h.srv.URL+path, rdr)
+	req, err := http.NewRequestWithContext(h.t.Context(), method, h.srv.URL+path, rdr)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -77,6 +77,7 @@ func (h *harness) do(method, path string, body any, mutate ...func(*http.Request
 	if err != nil {
 		h.t.Fatal(err)
 	}
+	h.t.Cleanup(func() { resp.Body.Close() })
 	return resp
 }
 
@@ -93,22 +94,24 @@ func decodeJSON[T any](t *testing.T, resp *http.Response) T {
 func (h *harness) openWorkspace() protocol.Workspace {
 	h.t.Helper()
 	resp := h.do(http.MethodPost, "/api/workspaces/open", protocol.OpenWorkspaceRequest{Path: h.root})
+	h.t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusOK {
 		h.t.Fatalf("open workspace: %d", resp.StatusCode)
 	}
 	return decodeJSON[protocol.Workspace](h.t, resp)
 }
 
-func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace, struct{}) {
+func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace) {
 	h.t.Helper()
 	ws := h.openWorkspace()
 	resp := h.do(http.MethodPost, "/api/chats",
 		protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID})
+	h.t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		h.t.Fatalf("create chat: %d %s", resp.StatusCode, body)
 	}
-	return decodeJSON[protocol.ChatRef](h.t, resp), ws, struct{}{}
+	return decodeJSON[protocol.ChatRef](h.t, resp), ws
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +119,7 @@ func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace, struct{}) {
 func TestHealthAndBootstrap(t *testing.T) {
 	h := newHarness(t)
 	resp := h.do(http.MethodGet, "/api/health", nil)
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("health: %d", resp.StatusCode)
 	}
@@ -124,7 +128,9 @@ func TestHealthAndBootstrap(t *testing.T) {
 		t.Fatalf("status %q", hl.Status)
 	}
 
-	b := decodeJSON[protocol.Bootstrap](t, h.do(http.MethodGet, "/api/bootstrap", nil))
+	bootstrapResp := h.do(http.MethodGet, "/api/bootstrap", nil)
+	t.Cleanup(func() { bootstrapResp.Body.Close() })
+	b := decodeJSON[protocol.Bootstrap](t, bootstrapResp)
 	if b.CSRFToken == "" {
 		t.Fatal("bootstrap must issue a CSRF token")
 	}
@@ -159,7 +165,9 @@ func TestGlobalPluginCatalogAndAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	catalog := decodeJSON[protocol.PluginCatalog](t, h.do(http.MethodGet, "/api/plugins", nil))
+	catalogResp := h.do(http.MethodGet, "/api/plugins", nil)
+	t.Cleanup(func() { catalogResp.Body.Close() })
+	catalog := decodeJSON[protocol.PluginCatalog](t, catalogResp)
 	if len(catalog.Plugins) != 1 || catalog.Plugins[0].ID != "hello" {
 		t.Fatalf("unexpected plugin catalog: %#v", catalog)
 	}
@@ -177,6 +185,7 @@ func TestWorkspaceContainmentEnforcedByAPI(t *testing.T) {
 	h := newHarness(t)
 	outside := t.TempDir()
 	resp := h.do(http.MethodPost, "/api/workspaces/open", protocol.OpenWorkspaceRequest{Path: outside})
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 for path outside roots, got %d", resp.StatusCode)
 	}
@@ -189,6 +198,7 @@ func TestWorkspaceContainmentEnforcedByAPI(t *testing.T) {
 func TestAgentResolutionEndpointDoesNotExist(t *testing.T) {
 	h := newHarness(t)
 	resp := h.do(http.MethodPost, "/api/agents/resolve", map[string]string{"source": "anything"})
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected removed agent resolution endpoint to return 404, got %d", resp.StatusCode)
 	}
@@ -196,13 +206,14 @@ func TestAgentResolutionEndpointDoesNotExist(t *testing.T) {
 
 func TestUnknownFieldsRejected(t *testing.T) {
 	h := newHarness(t)
-	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/api/workspaces/open",
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, h.srv.URL+"/api/workspaces/open",
 		strings.NewReader(`{"path":"/tmp","surprise":1}`))
 	req.Header.Set(httpapi.CSRFHeader, h.csrf)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for unknown field, got %d", resp.StatusCode)
 	}
@@ -210,10 +221,11 @@ func TestUnknownFieldsRejected(t *testing.T) {
 
 func TestRequestBodyLimit(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	big := strings.Repeat("a", 300*1024)
 	resp := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
 		protocol.SendMessageRequest{Text: big, Mode: protocol.DeliveryNormal})
+	t.Cleanup(func() { resp.Body.Close() })
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413, got %d", resp.StatusCode)
 	}
@@ -330,9 +342,9 @@ type dashboardSSEClient struct {
 
 func (h *harness) openDashboardSSE(lastEventID uint64) *dashboardSSEClient {
 	h.t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/api/events", nil)
+	req, _ := http.NewRequestWithContext(h.t.Context(), http.MethodGet, h.srv.URL+"/api/events", http.NoBody)
 	if lastEventID > 0 {
-		req.Header.Set("Last-Event-ID", fmt.Sprint(lastEventID))
+		req.Header.Set("Last-Event-ID", strconv.FormatUint(lastEventID, 10))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -392,7 +404,7 @@ func TestDashboardSSESessionChangesAndReplay(t *testing.T) {
 	if !ok || initial.Type != protocol.DashboardEventSnapshot {
 		t.Fatalf("expected dashboard snapshot, got %+v", initial)
 	}
-	ref, ws, _ := h.newChat()
+	ref, ws := h.newChat()
 	changed, ok := stream.next(3 * time.Second)
 	if !ok || changed.Type != protocol.DashboardEventSessionsChanged || changed.Reason != "opened" {
 		t.Fatalf("expected opened invalidation, got %+v", changed)
@@ -549,7 +561,11 @@ func TestLiveSessionsListsEveryProject(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("executing session was never marked running: %+v", live)
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-time.After(10 * time.Millisecond):
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		}
 	}
 
 	resp = h.do(http.MethodDelete, "/api/chats/"+refs[0].ChatID, nil)
@@ -597,9 +613,9 @@ type sseClient struct {
 
 func (h *harness) openSSE(chatID string, lastEventID uint64) *sseClient {
 	h.t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, h.srv.URL+"/api/chats/"+chatID+"/events", nil)
+	req, _ := http.NewRequestWithContext(h.t.Context(), http.MethodGet, h.srv.URL+"/api/chats/"+chatID+"/events", http.NoBody)
 	if lastEventID > 0 {
-		req.Header.Set("Last-Event-ID", fmt.Sprint(lastEventID))
+		req.Header.Set("Last-Event-ID", strconv.FormatUint(lastEventID, 10))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -682,7 +698,7 @@ func (c *sseClient) collect(until func(protocol.Event) bool, timeout time.Durati
 
 func TestSSESnapshotOnConnect(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	ev, ok := sse.next(3 * time.Second)
 	if !ok || ev.Type != protocol.EventSnapshot {
@@ -695,7 +711,7 @@ func TestSSESnapshotOnConnect(t *testing.T) {
 
 func TestFullTurnStreamsAndSettles(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second) // snapshot
 
@@ -740,7 +756,7 @@ func TestFullTurnStreamsAndSettles(t *testing.T) {
 
 func TestToolConfirmationRoundTrip(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
@@ -790,7 +806,7 @@ func TestToolConfirmationRoundTrip(t *testing.T) {
 
 func TestUnknownConfirmationRejected(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	resp := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
 		protocol.ToolConfirmationReply{ToolCallID: "nope", Decision: protocol.DecisionApprove})
 	if resp.StatusCode != http.StatusNotFound {
@@ -800,7 +816,7 @@ func TestUnknownConfirmationRejected(t *testing.T) {
 
 func TestElicitationCorrelatedByID(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
@@ -835,7 +851,7 @@ func TestElicitationCorrelatedByID(t *testing.T) {
 func TestSteerFollowUpAndAbort(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Delay = 60 * time.Millisecond
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
@@ -873,13 +889,15 @@ func TestSteerFollowUpAndAbort(t *testing.T) {
 func TestAbortSettles(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Delay = 200 * time.Millisecond
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
 		protocol.SendMessageRequest{Text: "/notool slow", Mode: protocol.DeliveryNormal}).Body.Close()
-	time.Sleep(100 * time.Millisecond)
+	sse.collect(func(e protocol.Event) bool {
+		return e.Type == protocol.EventRunStatus && e.Run != nil && e.Run.State == protocol.RunStateRunning
+	}, 3*time.Second)
 	if r := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/abort", nil); r.StatusCode != http.StatusAccepted {
 		t.Fatalf("abort: %d", r.StatusCode)
 	}
@@ -897,7 +915,7 @@ func TestAbortSettles(t *testing.T) {
 
 func TestIdempotentSubmission(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	key := "abc-123"
 	r1 := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
 		protocol.SendMessageRequest{Text: "/notool hi", Mode: protocol.DeliveryNormal, IdempotencyKey: key}))
@@ -910,7 +928,7 @@ func TestIdempotentSubmission(t *testing.T) {
 
 func TestReconnectReplayWithoutDuplicates(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
@@ -953,7 +971,7 @@ func TestReconnectReplayWithoutDuplicates(t *testing.T) {
 
 func TestReconnectBeyondBufferResnapshots(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 999999)
 	ev, ok := sse.next(3 * time.Second)
 	if !ok || ev.Type != protocol.EventGap {
@@ -967,7 +985,7 @@ func TestReconnectBeyondBufferResnapshots(t *testing.T) {
 
 func TestToolPreviewIsBounded(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
@@ -985,7 +1003,7 @@ func TestToolPreviewIsBounded(t *testing.T) {
 
 func TestConfigChanges(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 
 	model := "fake/model-b"
 	resp := h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
@@ -1017,7 +1035,7 @@ func TestBootstrapWarnsThatToolsAreAutoApproved(t *testing.T) {
 
 func TestToolsRunWithoutConfirmationDialog(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
@@ -1046,7 +1064,7 @@ func TestToolsRunWithoutConfirmationDialog(t *testing.T) {
 
 func TestRetitleCompactStatsAndDispose(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 
 	if r := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/retitle",
 		protocol.RetitleRequest{Title: "Renamed"}); r.StatusCode != http.StatusOK {
@@ -1075,7 +1093,7 @@ func TestRetitleCompactStatsAndDispose(t *testing.T) {
 // blocked on a dialog nobody can answer.
 func TestDisposeCancelsPendingDialogs(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
+	ref, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
@@ -1104,7 +1122,7 @@ func TestErrorShapeHasNoInternals(t *testing.T) {
 func TestNoSecretsInResponses(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-secret-value-must-not-leak")
 	h := newHarness(t)
-	ref, ws, _ := h.newChat()
+	ref, ws := h.newChat()
 	paths := []string{
 		"/api/health", "/api/bootstrap",
 		"/api/workspaces/" + ws.WorkspaceID + "/sessions",

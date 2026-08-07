@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +50,7 @@ func TestWorkspaceHistoryPersistsAndIsSharedThroughBootstrap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/workspaces/open", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/workspaces/open", bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +68,11 @@ func TestWorkspaceHistoryPersistsAndIsSharedThroughBootstrap(t *testing.T) {
 	}
 	bootstrap := func(ts *httptest.Server) protocol.Bootstrap {
 		t.Helper()
-		resp, err := http.Get(ts.URL + "/api/bootstrap")
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/api/bootstrap", http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +86,7 @@ func TestWorkspaceHistoryPersistsAndIsSharedThroughBootstrap(t *testing.T) {
 	stop := func(s *Server, ts *httptest.Server) {
 		t.Helper()
 		ts.Close()
-		s.Shutdown(context.Background())
+		s.Shutdown(t.Context())
 	}
 
 	s1, ts1 := start()

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -178,10 +179,8 @@ func validAssetPath(value string, extensions ...string) error {
 		return errors.New("must be a relative path inside the plugin")
 	}
 	ext := strings.ToLower(filepath.Ext(value))
-	for _, allowed := range extensions {
-		if ext == allowed {
-			return nil
-		}
+	if slices.Contains(extensions, ext) {
+		return nil
 	}
 	return fmt.Errorf("must use one of these extensions: %s", strings.Join(extensions, ", "))
 }

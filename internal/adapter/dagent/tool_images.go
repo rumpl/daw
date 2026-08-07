@@ -7,7 +7,6 @@ import (
 
 	dachat "github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/tools"
-
 	"github.com/rumpl/daw/internal/protocol"
 )
 

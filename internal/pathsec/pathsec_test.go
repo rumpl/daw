@@ -97,12 +97,12 @@ func TestSymlinkWithinRootAllowed(t *testing.T) {
 		t.Skip("symlink semantics differ on windows")
 	}
 	root := t.TempDir()
-	real := filepath.Join(root, "real")
-	if err := os.Mkdir(real, 0o755); err != nil {
+	realDir := filepath.Join(root, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realDir, link); err != nil {
 		t.Fatal(err)
 	}
 	g := mustGuard(t, root)
@@ -110,7 +110,7 @@ func TestSymlinkWithinRootAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveDir: %v", err)
 	}
-	canonReal, _ := filepath.EvalSymlinks(real)
+	canonReal, _ := filepath.EvalSymlinks(realDir)
 	if got != canonReal {
 		t.Fatalf("got %q want %q", got, canonReal)
 	}

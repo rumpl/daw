@@ -79,11 +79,11 @@ func run() error {
 		f.Seed("seeded-session-1", "Earlier conversation", os.Getenv("DAWUI_FAKE_WORKSPACE"), nil)
 		ad = f
 	} else {
-		real, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
+		realAdapter, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
 		if err != nil {
 			return fmt.Errorf("docker-agent could not be initialized: %w", err)
 		}
-		ad = real
+		ad = realAdapter
 	}
 
 	// The real dashboard keeps its project MRU and chat control preferences
@@ -146,7 +146,7 @@ func run() error {
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
-	ln, err := net.Listen("tcp4", addr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", addr)
 	if err != nil {
 		if isAddrInUse(err) {
 			return fmt.Errorf("port %d on %s is already in use (EADDRINUSE). "+

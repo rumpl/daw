@@ -410,7 +410,7 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	case strings.Contains(prompt, "/notool"):
 		// plain text turn
 	default:
-		if !c.toolTurn(ctx, runID, strings.Contains(prompt, "/confirm")) {
+		if !c.toolTurn(ctx, strings.Contains(prompt, "/confirm")) {
 			return
 		}
 	}
@@ -441,7 +441,7 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	c.emit(protocol.Event{Type: protocol.EventUsage, Usage: &usage})
 }
 
-func (c *chat) toolTurn(ctx context.Context, runID string, requireConfirmation bool) bool {
+func (c *chat) toolTurn(ctx context.Context, requireConfirmation bool) bool {
 	c.mu.Lock()
 	c.toolN++
 	id := fmt.Sprintf("%s-tool-%d", c.st.id, c.toolN)

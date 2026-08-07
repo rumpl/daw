@@ -12,7 +12,6 @@ import (
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
-
 	"github.com/rumpl/daw/internal/protocol"
 )
 
