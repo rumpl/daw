@@ -392,7 +392,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 			session.WithMaxOldToolCallTokens(ag.MaxOldToolCallTokens()),
 			session.WithMaxToolResultTokens(ag.MaxToolResultTokens()),
 			session.WithWorkingDir(req.WorkingDir),
-			session.WithTitle("New chat"),
+			session.WithTitle(placeholderTitle),
 		)
 		// Like the CLI, the session row is created lazily on the first real
 		// message so browsing the dashboard never litters the user's store

@@ -364,6 +364,12 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 		CreatedAt: time.Now().UTC().Format(time.RFC3339)}})
 	c.publishRun()
 
+	// Generate a session title from the first user message(s), exactly as the
+	// CLI/TUI do: a one-shot LLM call over the recent user messages, run in
+	// parallel with the turn so it never delays the response. This only fires
+	// while the session still carries the placeholder title.
+	c.maybeGenerateTitle(runCtx)
+
 	go c.runLoop(runCtx, gen, runID)
 	return runID, false, nil
 }
@@ -717,6 +723,81 @@ func (c *chat) Retitle(ctx context.Context, title string) error {
 	meta := c.Meta()
 	c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
 	return nil
+}
+
+// placeholderTitle is the title a brand-new session carries until either the
+// user renames it or one is generated. It matches OpenChat's WithTitle and is
+// treated as "no title yet", exactly as the CLI treats an empty title.
+const placeholderTitle = "New chat"
+
+// titleMessageWindow bounds how many recent user messages feed the generator,
+// matching docker-agent's own session-title prompt (up to 2 messages).
+const titleMessageWindow = 2
+
+// maybeGenerateTitle mirrors the CLI/TUI behaviour: after the first prompt on a
+// session that still carries the placeholder title, generate a concise title
+// from the recent user messages with a one-shot LLM call. It runs in the
+// background so it never blocks the turn, and on success persists the title and
+// emits a session-meta event so the browser updates live.
+func (c *chat) maybeGenerateTitle(ctx context.Context) {
+	if strings.TrimSpace(c.sess.TitleSnapshot()) != placeholderTitle {
+		return
+	}
+	gen := c.rt.TitleGenerator(ctx)
+	if gen == nil {
+		return
+	}
+	userMessages := c.recentUserMessages(titleMessageWindow)
+	if len(userMessages) == 0 {
+		return
+	}
+
+	// Detach from the run context: title generation must survive the turn
+	// completing (or being aborted) and carries its own timeout inside the SDK.
+	genCtx := context.WithoutCancel(ctx)
+	go func() {
+		defer func() { _ = recover() }()
+		title, err := gen.Generate(genCtx, c.sess.ID, userMessages)
+		if err != nil {
+			c.a.log.Debug("generating session title", "session", c.sess.ID, "error", err)
+			return
+		}
+		if strings.TrimSpace(title) == "" {
+			return
+		}
+		// Don't clobber a title the user set (or one another run generated)
+		// while this call was in flight.
+		if strings.TrimSpace(c.sess.TitleSnapshot()) != placeholderTitle {
+			return
+		}
+		if err := c.rt.UpdateSessionTitle(genCtx, c.sess, title); err != nil {
+			c.a.log.Debug("persisting generated title", "session", c.sess.ID, "error", err)
+			return
+		}
+		meta := c.Meta()
+		c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
+	}()
+}
+
+// recentUserMessages returns up to n most-recent explicit user message texts,
+// oldest-first, skipping implicit/system/tool messages. This is the same
+// signal docker-agent feeds its title generator.
+func (c *chat) recentUserMessages(n int) []string {
+	items := c.sess.MessagesSnapshot()
+	var msgs []string
+	for _, it := range items {
+		m := it.Message
+		if m == nil || m.Implicit || m.Message.Role != dachat.MessageRoleUser {
+			continue
+		}
+		if text := strings.TrimSpace(m.Message.Content); text != "" {
+			msgs = append(msgs, text)
+		}
+	}
+	if len(msgs) > n {
+		msgs = msgs[len(msgs)-n:]
+	}
+	return msgs
 }
 
 func (c *chat) Compact(ctx context.Context) error {
