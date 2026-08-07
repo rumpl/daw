@@ -15,14 +15,14 @@ import (
 // Errors returned across the seam. The HTTP layer maps these onto status codes
 // and never leaks raw Go error strings to the browser.
 var (
-	ErrNotFound      = errors.New("not found")
-	ErrBusy          = errors.New("chat is busy")
-	ErrUnsupported   = errors.New("operation not supported by this runtime")
-	ErrNoModel       = errors.New("no model could be resolved")
-	ErrRemoteFetch   = errors.New("remote agent fetch requires explicit confirmation")
-	ErrSessionInUse  = errors.New("session is already open in this server")
-	ErrInvalidAgent  = errors.New("agent source could not be loaded")
-	ErrClosed        = errors.New("chat is closed")
+	ErrNotFound     = errors.New("not found")
+	ErrBusy         = errors.New("chat is busy")
+	ErrUnsupported  = errors.New("operation not supported by this runtime")
+	ErrNoModel      = errors.New("no model could be resolved")
+	ErrRemoteFetch  = errors.New("remote agent fetch requires explicit confirmation")
+	ErrSessionInUse = errors.New("session is already open in this server")
+	ErrInvalidAgent = errors.New("agent source could not be loaded")
+	ErrClosed       = errors.New("chat is closed")
 )
 
 // Info is the non-secret status shown in the bootstrap payload.
@@ -61,6 +61,12 @@ type OpenRequest struct {
 	AgentName       string
 	ResumeSessionID string
 	Posture         protocol.Posture
+	// Model and ThinkingLevel are dashboard preferences restored from disk.
+	// Adapters apply them, in that order, before publishing startup metadata.
+	// Empty values leave the agent or resumed session's own configuration in
+	// place. A stale or unsupported preference is ignored by the adapter.
+	Model         string
+	ThinkingLevel string
 }
 
 // Adapter is the process-wide docker-agent facade. It owns the single shared

@@ -182,6 +182,16 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		// the server sends "" so the stored mode is kept.
 		st.posture = req.Posture
 	}
+	// Mirror the production adapter's best-effort startup restoration. Unknown
+	// values are stale preferences and leave the fake session unchanged.
+	switch req.Model {
+	case "fake/model-a", "fake/model-b", "anthropic/claude-sonnet-4-5", "openai/gpt-5.6":
+		st.model = req.Model
+	}
+	switch req.ThinkingLevel {
+	case "none", "low", "medium", "high":
+		st.thinking = req.ThinkingLevel
+	}
 	c := &chat{
 		a: a, st: st, req: req,
 		events:  make(chan protocol.Event, 256),

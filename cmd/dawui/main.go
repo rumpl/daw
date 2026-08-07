@@ -93,11 +93,12 @@ func run() error {
 		return err
 	}
 
-	// The real dashboard keeps its project MRU beside docker-agent's session
-	// data. Tests using the fake adapter stay isolated unless they explicitly
-	// provide a history file.
+	// The real dashboard keeps its project MRU and chat control preferences
+	// beside docker-agent's session data. Tests using the fake adapter stay
+	// isolated unless they explicitly provide file paths.
 	workspaceHistoryFile := strings.TrimSpace(os.Getenv("DAWUI_WORKSPACE_HISTORY_FILE"))
-	if workspaceHistoryFile == "" && !fakeAdapter {
+	chatPreferencesFile := strings.TrimSpace(os.Getenv("DAWUI_CHAT_PREFERENCES_FILE"))
+	if (workspaceHistoryFile == "" || chatPreferencesFile == "") && !fakeAdapter {
 		info, err := ad.Info(ctx)
 		if err != nil {
 			return fmt.Errorf("docker-agent could not report its data directory: %w", err)
@@ -105,7 +106,12 @@ func run() error {
 		if strings.TrimSpace(info.DataDir) == "" {
 			return errors.New("docker-agent reported an empty data directory")
 		}
-		workspaceHistoryFile = filepath.Join(info.DataDir, "dawui-workspaces.json")
+		if workspaceHistoryFile == "" {
+			workspaceHistoryFile = filepath.Join(info.DataDir, "dawui-workspaces.json")
+		}
+		if chatPreferencesFile == "" {
+			chatPreferencesFile = filepath.Join(info.DataDir, "dawui-chat-preferences.json")
+		}
 	}
 
 	srv := httpapi.New(httpapi.Options{
@@ -120,6 +126,7 @@ func run() error {
 		Logger:               log,
 		SkippedRoots:         skipped,
 		WorkspaceHistoryFile: workspaceHistoryFile,
+		ChatPreferencesFile:  chatPreferencesFile,
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))

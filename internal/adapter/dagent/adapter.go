@@ -274,33 +274,27 @@ func viewFromChecker(c *permissions.Checker, posture protocol.Posture, autoAppro
 	return v
 }
 
-// ListSessions reads docker-agent's own store. Only IDs returned here are ever
-// accepted for resume.
+// ListSessions reads docker-agent's lightweight summary query. Only IDs
+// returned here are ever accepted for resume. GetSessions must not be used for
+// this endpoint: it loads and JSON-decodes every item in every session before
+// we discard all but the title, count and timestamps.
 func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error) {
-	sessions, err := a.store.GetSessions(ctx)
+	summaries, err := a.store.GetSessionSummaries(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]protocol.SessionSummary, 0, len(sessions))
-	for _, s := range sessions {
-		if s == nil || s.ParentID != "" {
-			continue
-		}
-		if workingDir != "" && s.WorkingDir != "" && s.WorkingDir != workingDir {
+	out := make([]protocol.SessionSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if workingDir != "" && summary.WorkingDir != "" && summary.WorkingDir != workingDir {
 			continue
 		}
 		out = append(out, protocol.SessionSummary{
-			SessionID:  s.ID,
-			Title:      s.TitleSnapshot(),
-			WorkingDir: s.WorkingDir,
-			CreatedAt:  s.CreatedAt.UTC().Format(time.RFC3339),
-			Messages:   s.MessageCount(),
+			SessionID:  summary.ID,
+			Title:      summary.Title,
+			WorkingDir: summary.WorkingDir,
+			CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339),
+			Messages:   summary.NumMessages,
 		})
-	}
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].CreatedAt > out[j-1].CreatedAt; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
 	}
 	return out, nil
 }
@@ -422,6 +416,21 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 	c.refreshQueue()
 	c.startBackgroundBridges()
 	c.collectWarnings(ag)
+
+	// Restore dashboard choices before startup metadata is emitted. Preferences
+	// can become stale when an agent config or provider catalog changes; in that
+	// case opening the session is more useful than failing it, so retain the
+	// runtime's resolved value and log the rejected preference.
+	if req.Model != "" {
+		if err := c.SetModel(ctx, req.Model); err != nil {
+			a.log.Warn("restore model preference failed", "session", sess.ID)
+		}
+	}
+	if req.ThinkingLevel != "" {
+		if err := c.SetThinking(ctx, req.ThinkingLevel); err != nil {
+			a.log.Warn("restore thinking preference failed", "session", sess.ID)
+		}
+	}
 
 	// Emit the runtime's own startup info so model, thinking level, team and
 	// toolset state are populated before the first turn (and token usage is

@@ -617,10 +617,18 @@ func (c *chat) SetModel(ctx context.Context, ref string) error {
 		c.sess.AgentModelOverrides = map[string]string{}
 	}
 	c.sess.AgentModelOverrides[c.agentName] = ref
-	_ = c.a.store.UpdateSession(ctx, c.sess)
 	c.mu.Lock()
+	unsaved := c.unsaved
 	c.model = ref
 	c.mu.Unlock()
+	// Keep lazy session creation intact when a preference is selected before
+	// the first prompt. AddSession will persist the in-memory override with the
+	// first message; an existing session is updated immediately.
+	if !unsaved {
+		if err := c.a.store.UpdateSession(ctx, c.sess); err != nil {
+			c.a.log.Warn("persisting model override", "error", err)
+		}
+	}
 	return nil
 }
 

@@ -94,7 +94,9 @@ typing.
 
 **Settings.** Model, thinking budget, tool approval mode, Compact and Rename sit
 in the header on desktop, and behind **Settings** on mobile. Model, thinking and
-approval mode change only while the agent is idle.
+approval mode change only while the agent is idle. Model and thinking choices
+are saved on the server: they are restored per session after a restart, and the
+most recent choices become the defaults for new chats.
 
 The model button opens a searchable list: the models your agent config names
 come first, then any used earlier in the session, then the provider catalog
@@ -155,6 +157,7 @@ credential helpers.
 | `ALLOWED_TAILSCALE_USERS` | — | Tailnet logins allowed through Tailscale Serve |
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
 | `DAWUI_WORKSPACE_HISTORY_FILE` | `<data>/dawui-workspaces.json` | Opened-project history path |
+| `DAWUI_CHAT_PREFERENCES_FILE` | `<data>/dawui-chat-preferences.json` | Model and thinking preference path |
 | `DAWUI_DEBUG` | — | Debug logging |
 
 The server binds to `127.0.0.1` only; there is no host override.
@@ -236,11 +239,13 @@ Everything stays in docker-agent's own directories, resolved through its
 | Data | `~/.cagent` |
 | Sessions | `~/.cagent/session.db` |
 | Opened projects | `~/.cagent/dawui-workspaces.json` |
+| Model and thinking choices | `~/.cagent/dawui-chat-preferences.json` |
 
-The server keeps the ten most recently opened projects in that owner-only JSON
+The server keeps the ten most recently opened projects in an owner-only JSON
 file. They appear under **Projects** in every browser connected to the server,
 so a project opened on desktop is available when you visit from your phone.
 Paths are revalidated against `WORKSPACE_ROOTS` before they are advertised.
+Model and thinking choices use the same owner-only, atomic-file persistence.
 
 Sessions are created lazily on the first message, exactly like the CLI. In the
 browser, `localStorage` holds only UI preferences, the current device's last

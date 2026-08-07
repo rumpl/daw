@@ -54,6 +54,10 @@ type Options struct {
 	// list is shared by every browser connected to this server. Empty disables
 	// persistence (primarily useful for tests).
 	WorkspaceHistoryFile string
+	// ChatPreferencesFile persists the last model and thinking-level choices,
+	// both as defaults for new chats and as per-session overrides. Empty
+	// disables persistence (primarily useful for tests).
+	ChatPreferencesFile string
 }
 
 // Server is the whole dashboard HTTP surface.
@@ -72,6 +76,9 @@ type Server struct {
 	defaultPosture       protocol.Posture
 	defaultAgent         string
 	workspaceHistoryFile string
+	chatPreferencesFile  string
+	preferencesMu        sync.Mutex
+	preferences          chatPreferences
 	// builtins is the set of agent names embedded in the matched module.
 	// It is populated from the adapter, never from the browser.
 	builtinsOnce sync.Once
@@ -123,6 +130,7 @@ func New(opts Options) *Server {
 		defaultAgent:         defaultAgent,
 		defaultPosture:       defaultPosture,
 		workspaceHistoryFile: strings.TrimSpace(opts.WorkspaceHistoryFile),
+		chatPreferencesFile:  strings.TrimSpace(opts.ChatPreferencesFile),
 		mux:                  http.NewServeMux(),
 		adapter:              opts.Adapter,
 		guard:                opts.Guard,
@@ -140,6 +148,7 @@ func New(opts Options) *Server {
 		bySession:            map[string]string{},
 	}
 	s.loadWorkspaceHistory()
+	s.loadChatPreferences()
 	s.routes()
 	return s
 }
@@ -748,12 +757,15 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, a
 	}
 
 	chatID := newOpaqueID("chat")
+	preference := s.chatPreference(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
 		ChatID: chatID, WorkingDir: ws.path, Source: ag.source, Kind: ag.kind,
 		AgentName: agentName, ResumeSessionID: resumeID,
 		// New chats start in the server's configured default safety mode.
 		// Resumed sessions keep the mode stored with the session.
-		Posture: postureForOpen(s.defaultPosture, resumeID),
+		Posture:       postureForOpen(s.defaultPosture, resumeID),
+		Model:         preference.Model,
+		ThinkingLevel: preference.ThinkingLevel,
 	})
 	if err != nil {
 		switch {
@@ -770,6 +782,19 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, a
 	}
 
 	sessionID := c.SessionID()
+	// A new chat may have inherited the persisted defaults without the user
+	// touching either control in this session. Bind those values to its new
+	// session ID now, so its thinking level (which docker-agent's session schema
+	// does not store) is still restored after a later server restart.
+	if resumeID == "" && (preference.Model != "" || preference.ThinkingLevel != "") {
+		if err := s.rememberChatPreference(sessionID, preference); err != nil {
+			s.log.Error("persist new chat preferences", "error", err)
+			_ = c.Close(r.Context())
+			s.fail(w, http.StatusInternalServerError, "preference_save_failed",
+				"the chat opened but its settings could not be saved to disk")
+			return
+		}
+	}
 	s.mu.Lock()
 	if otherID, live := s.bySession[sessionID]; live {
 		other := s.chats[otherID]
@@ -934,13 +959,24 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		return false
 	}
+	preferencePatch := chatPreference{}
 	if req.Model != nil {
 		if !apply(c.chat.SetModel(r.Context(), *req.Model)) {
 			return
 		}
+		preferencePatch.Model = *req.Model
 	}
 	if req.ThinkingLevel != nil {
 		if !apply(c.chat.SetThinking(r.Context(), *req.ThinkingLevel)) {
+			return
+		}
+		preferencePatch.ThinkingLevel = *req.ThinkingLevel
+	}
+	if preferencePatch.Model != "" || preferencePatch.ThinkingLevel != "" {
+		if err := s.rememberChatPreference(c.chat.SessionID(), preferencePatch); err != nil {
+			s.log.Error("persist chat preferences", "error", err)
+			s.fail(w, http.StatusInternalServerError, "preference_save_failed",
+				"the setting was applied but could not be saved to disk")
 			return
 		}
 	}
