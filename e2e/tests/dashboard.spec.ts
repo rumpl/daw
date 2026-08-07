@@ -357,8 +357,13 @@ test.describe('dashboard', () => {
     // overflow, then scroll away from the bottom.
     await page.setViewportSize({ width: 1280, height: 400 });
     for (const text of ['/notool second', '/notool third', '/notool fourth', '/notool fifth']) {
+      const assistantMessages = page.getByLabel('assistant message');
+      const previousCount = await assistantMessages.count();
       await composer(page).fill(text);
       await page.getByRole('button', { name: 'Send' }).click();
+      // Observing the new turn before checking for idle prevents the idle check
+      // from passing during the brief interval before running state arrives.
+      await expect(assistantMessages).toHaveCount(previousCount + 1, { timeout: 20_000 });
       await expect(page.getByRole('button', { name: /Stop/ })).toHaveCount(0, { timeout: 20_000 });
     }
     await page.locator('.conversation').evaluate((el) => {
