@@ -71,6 +71,38 @@ describe('Sidebar', () => {
     expect(onOpenPlugin).toHaveBeenCalledWith('system-info', '');
   });
 
+  it('groups sessions by day', () => {
+    const sessions: SessionSummary[] = [
+      { ...liveSession, sessionId: 'today', title: 'Today session', createdAt: new Date().toISOString() },
+      { ...liveSession, sessionId: 'older', title: 'Older session', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    render(
+      <Sidebar
+        boot={boot}
+        workspace={workspace}
+        sessions={sessions}
+        liveSessions={[]}
+        recentWorkspaces={[]}
+        plugins={[]}
+        pluginErrors={[]}
+        activePluginId={null}
+        activePluginPath=""
+        workspacePath={workspace.path}
+        busy={false}
+        drawerRef={createRef<HTMLDivElement>()}
+        onWorkspacePathChange={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onNewChat={vi.fn()}
+        onResumeChat={vi.fn()}
+        onCloseLiveSession={vi.fn()}
+        onOpenPlugin={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Today' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /Wednesday, Jan 1/ })).toBeVisible();
+  });
+
   it('opens a live session from another project directly', async () => {
     const onResumeChat = vi.fn();
     const onCloseLiveSession = vi.fn();

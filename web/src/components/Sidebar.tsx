@@ -28,6 +28,34 @@ function projectLabel(path: string) {
   return path.split('/').filter(Boolean).slice(-2).join('/') || path;
 }
 
+function sessionDay(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const daysAgo = Math.round((startOfToday.getTime() - startOfDate.getTime()) / 86_400_000);
+  if (daysAgo === 0) return 'Today';
+  if (daysAgo === 1) return 'Yesterday';
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  }).format(date);
+}
+
+function groupSessionsByDay(sessions: SessionSummary[]) {
+  const groups = new Map<string, SessionSummary[]>();
+  for (const session of sessions) {
+    const label = sessionDay(session.createdAt);
+    const group = groups.get(label);
+    if (group) group.push(session);
+    else groups.set(label, [session]);
+  }
+  return Array.from(groups, ([label, groupedSessions]) => ({ label, sessions: groupedSessions }));
+}
+
 export function Sidebar({
   boot,
   workspace,
@@ -63,6 +91,8 @@ export function Sidebar({
         session.title.toLowerCase().includes(query) || session.sessionId.toLowerCase().includes(query),
     );
   }, [sessions, sessionFilter]);
+
+  const groupedSessions = useMemo(() => groupSessionsByDay(filteredSessions), [filteredSessions]);
 
   const projectWorkspaces = useMemo(
     () => Array.from(new Set([workspace?.path, ...recentWorkspaces].filter((path): path is string => Boolean(path)))),
@@ -267,22 +297,33 @@ export function Sidebar({
               {workspace ? 'No sessions yet for this project.' : 'Choose a project to see sessions.'}
             </p>
           ) : (
-            <ul className="session-list">
-              {filteredSessions.map((session) => (
-                <li key={session.sessionId}>
-                  <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
-                    <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
-                    <span className="session-meta">
-                      {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
-                      {session.messages} message{session.messages === 1 ? '' : 's'}
-                      {session.live
-                        ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
-                        : ''}
-                    </span>
-                  </button>
-                </li>
+            <div className="session-list">
+              {groupedSessions.map((group, index) => (
+                <section
+                  className={`session-day${group.label === 'Today' ? ' session-day-current' : ''}`}
+                  key={group.label}
+                  aria-labelledby={`session-day-${index}`}
+                >
+                  <h3 id={`session-day-${index}`}>{group.label}</h3>
+                  <ul>
+                    {group.sessions.map((session) => (
+                      <li key={session.sessionId}>
+                        <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
+                          <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
+                          <span className="session-meta">
+                            {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
+                            {session.messages} message{session.messages === 1 ? '' : 's'}
+                            {session.live
+                              ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
+                              : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           )}
         </section>
       ) : (

@@ -181,12 +181,21 @@ select {
   list-style: none; margin: 8px -8px 0 0; padding: 0 8px 0 0;
   flex: 1 1 auto; min-height: 110px; overflow-y: auto; overscroll-behavior: contain;
 }
-.session-list > li > button, .live-session-open {
+.session-list > li > button, .session-day li > button, .live-session-open {
   width: 100%; text-align: left; display: block;
   padding: 6px 8px; border: 0; background: transparent;
 }
 .session-list > li > button:hover:not([disabled]),
+.session-day li > button:hover:not([disabled]),
 .live-session-open:hover:not([disabled]) { background: var(--bg); }
+.session-day h3 {
+  margin: 12px 8px 4px; padding-bottom: 3px; border-bottom: 1px solid var(--rule);
+  color: var(--fg-dim); font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+}
+.session-day:first-child h3 { margin-top: 0; }
+.session-day-current h3 { color: var(--accent); border-bottom-color: var(--accent); }
+.session-day ul { list-style: none; margin: 0; padding: 0; }
 .session-title {
   display: block; font-size: 13px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
