@@ -96,8 +96,10 @@ func (c *chat) notice(level protocol.NoticeLevel, msg, code string) {
 	c.noticeSeq++
 	id := fmt.Sprintf("%s-notice-%d", c.sess.ID, c.noticeSeq)
 	c.mu.Unlock()
-	c.emit(protocol.Event{Type: protocol.EventNotice,
-		Notice: &protocol.Notice{ID: id, Level: level, Message: msg, Code: code}})
+	c.emit(protocol.Event{
+		Type:   protocol.EventNotice,
+		Notice: &protocol.Notice{ID: id, Level: level, Message: msg, Code: code},
+	})
 }
 
 // startBackgroundBridges wires the runtime's out-of-stream handlers so
@@ -197,17 +199,29 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 	for i, it := range items {
 		switch {
 		case it.Summary != "":
-			out = append(out, protocol.Item{Kind: protocol.ItemKindSummary,
-				Summary: &protocol.Summary{ID: fmt.Sprintf("%s-sum-%d", c.sess.ID, i),
-					Text: it.Summary, Cost: it.Cost}})
+			out = append(out, protocol.Item{
+				Kind: protocol.ItemKindSummary,
+				Summary: &protocol.Summary{
+					ID:   fmt.Sprintf("%s-sum-%d", c.sess.ID, i),
+					Text: it.Summary, Cost: it.Cost,
+				},
+			})
 		case it.Error != nil:
-			out = append(out, protocol.Item{Kind: protocol.ItemKindNotice,
-				Notice: &protocol.Notice{ID: fmt.Sprintf("%s-err-%d", c.sess.ID, i),
-					Level: protocol.NoticeError, Message: it.Error.Message, Code: it.Error.Code}})
+			out = append(out, protocol.Item{
+				Kind: protocol.ItemKindNotice,
+				Notice: &protocol.Notice{
+					ID:    fmt.Sprintf("%s-err-%d", c.sess.ID, i),
+					Level: protocol.NoticeError, Message: it.Error.Message, Code: it.Error.Code,
+				},
+			})
 		case it.SubSession != nil:
-			out = append(out, protocol.Item{Kind: protocol.ItemKindTransfer,
-				Transfer: &protocol.Transfer{ID: fmt.Sprintf("%s-sub-%d", c.sess.ID, i),
-					FromAgent: c.agentName, ToAgent: it.SubSession.AgentName}})
+			out = append(out, protocol.Item{
+				Kind: protocol.ItemKindTransfer,
+				Transfer: &protocol.Transfer{
+					ID:        fmt.Sprintf("%s-sub-%d", c.sess.ID, i),
+					FromAgent: c.agentName, ToAgent: it.SubSession.AgentName,
+				},
+			})
 		case it.Message != nil:
 			m := it.Message
 			if m.Implicit || m.Message.Role == dachat.MessageRoleTool ||
@@ -353,7 +367,8 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 	c.sess.AddMessage(msg)
 	c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
 		ID: fmt.Sprintf("%s-live-user-%d", c.sess.ID, gen), Role: "user", Text: resolved,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339)}})
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}})
 	c.publishRun()
 
 	// Generate a session title from the first user message(s), exactly as the
@@ -503,7 +518,8 @@ func (c *chat) Confirm(ctx context.Context, toolCallID string, decision protocol
 	}
 	c.rt.Resume(ctx, d.Resume(pt.pattern, reason))
 	c.emit(protocol.Event{Type: protocol.EventToolResolved, ToolResolved: &protocol.ToolResolved{
-		ToolCallID: toolCallID, Decision: decision, Pattern: pt.pattern}})
+		ToolCallID: toolCallID, Decision: decision, Pattern: pt.pattern,
+	}})
 	return nil
 }
 
@@ -530,8 +546,10 @@ func (c *chat) Elicit(ctx context.Context, id string, action protocol.Elicitatio
 	if err := c.rt.ResumeElicitation(ctx, a, content, id); err != nil {
 		return err
 	}
-	c.emit(protocol.Event{Type: protocol.EventElicitResolved,
-		ElicitResolved: &protocol.ElicitResolved{ElicitationID: id}})
+	c.emit(protocol.Event{
+		Type:           protocol.EventElicitResolved,
+		ElicitResolved: &protocol.ElicitResolved{ElicitationID: id},
+	})
 	return nil
 }
 
@@ -570,7 +588,8 @@ func (c *chat) Commands(ctx context.Context) []protocol.CommandInfo {
 	if ts := c.rt.CurrentAgentSkillsToolset(); ts != nil {
 		for _, s := range ts.Skills() {
 			out = append(out, protocol.CommandInfo{
-				Name: s.Name, Description: s.Description, Kind: "skill"})
+				Name: s.Name, Description: s.Description, Kind: "skill",
+			})
 		}
 	}
 	return out

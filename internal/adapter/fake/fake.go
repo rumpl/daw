@@ -146,8 +146,10 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		events:  make(chan protocol.Event, 256),
 		pending: map[string]chan reply{},
 	}
-	c.run = protocol.RunStatus{State: protocol.RunStateIdle,
-		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8}}
+	c.run = protocol.RunStatus{
+		State: protocol.RunStateIdle,
+		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8},
+	}
 	return c, nil
 }
 
@@ -272,8 +274,10 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 	c.genID++
 	gen := c.genID
 	runID := fmt.Sprintf("run-%s-%d", c.st.id, gen)
-	c.run = protocol.RunStatus{State: protocol.RunStateRunning, RunID: runID,
-		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8}}
+	c.run = protocol.RunStatus{
+		State: protocol.RunStateRunning, RunID: runID,
+		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8},
+	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.cancel = cancel
 	c.mu.Unlock()
@@ -295,8 +299,10 @@ func (c *chat) appendUserMessage(text string) {
 	c.msgN++
 	id := fmt.Sprintf("%s-msg-%d", c.st.id, c.msgN)
 	c.mu.Unlock()
-	m := &protocol.MessageItem{ID: id, Role: "user", Text: text,
-		CreatedAt: c.a.now().UTC().Format(time.RFC3339)}
+	m := &protocol.MessageItem{
+		ID: id, Role: "user", Text: text,
+		CreatedAt: c.a.now().UTC().Format(time.RFC3339),
+	}
 	c.a.mu.Lock()
 	c.st.items = append(c.st.items, protocol.Item{Kind: protocol.ItemKindMessage, Message: m})
 	if c.st.title == "New chat" && text != "" {
@@ -337,15 +343,19 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	itemID := fmt.Sprintf("%s-msg-%d", c.st.id, c.msgN)
 	c.mu.Unlock()
 
-	msg := &protocol.MessageItem{ID: itemID, Role: "assistant", AgentName: c.st.agentName,
-		Streaming: true, Model: c.st.model, CreatedAt: c.a.now().UTC().Format(time.RFC3339)}
+	msg := &protocol.MessageItem{
+		ID: itemID, Role: "assistant", AgentName: c.st.agentName,
+		Streaming: true, Model: c.st.model, CreatedAt: c.a.now().UTC().Format(time.RFC3339),
+	}
 	c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: msg})
 
 	if !c.pause(ctx) {
 		return
 	}
-	c.emit(protocol.Event{Type: protocol.EventReasoningDelta,
-		Delta: &protocol.Delta{ItemID: itemID, Text: "Considering the request."}})
+	c.emit(protocol.Event{
+		Type:  protocol.EventReasoningDelta,
+		Delta: &protocol.Delta{ItemID: itemID, Text: "Considering the request."},
+	})
 	c.emit(protocol.Event{Type: protocol.EventReasoningEnd, Ref: &protocol.ItemRef{ItemID: itemID}})
 
 	var text strings.Builder
@@ -354,16 +364,20 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 			return
 		}
 		text.WriteString(chunk)
-		c.emit(protocol.Event{Type: protocol.EventAssistantDelta,
-			Delta: &protocol.Delta{ItemID: itemID, Text: chunk}})
+		c.emit(protocol.Event{
+			Type:  protocol.EventAssistantDelta,
+			Delta: &protocol.Delta{ItemID: itemID, Text: chunk},
+		})
 	}
 
 	switch {
 	case strings.Contains(prompt, "/transfer"):
 		t := &protocol.Transfer{ID: runID + "-t1", FromAgent: "root", ToAgent: "helper", Switching: true}
 		c.emit(protocol.Event{Type: protocol.EventTransfer, Transfer: t})
-		c.emit(protocol.Event{Type: protocol.EventTransfer,
-			Transfer: &protocol.Transfer{ID: runID + "-t2", FromAgent: "helper", ToAgent: "root"}})
+		c.emit(protocol.Event{
+			Type:     protocol.EventTransfer,
+			Transfer: &protocol.Transfer{ID: runID + "-t2", FromAgent: "helper", ToAgent: "root"},
+		})
 	case strings.Contains(prompt, "/elicit"):
 		if !c.elicit(ctx, runID) {
 			return
@@ -371,15 +385,18 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	case strings.Contains(prompt, "/error"):
 		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 			ID: runID + "-err", Level: protocol.NoticeError,
-			Message: "the model returned an error: simulated failure", Code: "model_error"}})
+			Message: "the model returned an error: simulated failure", Code: "model_error",
+		}})
 	case strings.Contains(prompt, "/compact"):
 		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 			ID: runID + "-compact", Level: protocol.NoticeInfo,
-			Message: "Context compaction applied.", Code: "compaction"}})
+			Message: "Context compaction applied.", Code: "compaction",
+		}})
 	case strings.Contains(prompt, "/retry"):
 		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 			ID: runID + "-retry", Level: protocol.NoticeWarning,
-			Message: "Model fake/model-a failed; retrying with fake/model-b (attempt 1/3).", Code: "retry"}})
+			Message: "Model fake/model-a failed; retrying with fake/model-b (attempt 1/3).", Code: "retry",
+		}})
 	case strings.Contains(prompt, "/notool"):
 		// plain text turn
 	default:
@@ -393,8 +410,10 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	}
 	tail := "Done."
 	text.WriteString(tail)
-	c.emit(protocol.Event{Type: protocol.EventAssistantDelta,
-		Delta: &protocol.Delta{ItemID: itemID, Text: tail}})
+	c.emit(protocol.Event{
+		Type:  protocol.EventAssistantDelta,
+		Delta: &protocol.Delta{ItemID: itemID, Text: tail},
+	})
 	c.emit(protocol.Event{Type: protocol.EventAssistantEnd, Ref: &protocol.ItemRef{ItemID: itemID}})
 
 	final := *msg
@@ -418,9 +437,11 @@ func (c *chat) toolTurn(ctx context.Context, runID string, requireConfirmation b
 	id := fmt.Sprintf("%s-tool-%d", c.st.id, c.toolN)
 	c.mu.Unlock()
 
-	act := &protocol.ToolActivity{ID: id, Name: "shell", DisplayName: "Shell", Category: "shell",
+	act := &protocol.ToolActivity{
+		ID: id, Name: "shell", DisplayName: "Shell", Category: "shell",
 		AgentName: c.st.agentName, ArgsSummary: `ls -la /workspace`,
-		Arguments: map[string]any{"cmd": "ls -la /workspace", "cwd": "."}, State: protocol.ToolStatePending}
+		Arguments: map[string]any{"cmd": "ls -la /workspace", "cwd": "."}, State: protocol.ToolStatePending,
+	}
 	c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: act})
 
 	// /confirm simulates an explicit permission rule that still asks even though
@@ -453,8 +474,10 @@ func (c *chat) toolTurn(ctx context.Context, runID string, requireConfirmation b
 			c.st.grants = append(c.st.grants, pattern)
 		}
 		c.mu.Unlock()
-		c.emit(protocol.Event{Type: protocol.EventToolResolved,
-			ToolResolved: &protocol.ToolResolved{ToolCallID: id, Decision: r.decision, Pattern: pattern}})
+		c.emit(protocol.Event{
+			Type:         protocol.EventToolResolved,
+			ToolResolved: &protocol.ToolResolved{ToolCallID: id, Decision: r.decision, Pattern: pattern},
+		})
 		meta := c.Meta()
 		c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
 		if r.decision == protocol.DecisionReject {
@@ -491,18 +514,22 @@ func (c *chat) elicit(ctx context.Context, runID string) bool {
 		ElicitationID: id, Message: "Which branch should I use?", Mode: "form",
 		AgentName: c.st.agentName,
 		Schema: map[string]any{"type": "object", "properties": map[string]any{
-			"branch": map[string]any{"type": "string", "title": "Branch"}}},
+			"branch": map[string]any{"type": "string", "title": "Branch"},
+		}},
 	}})
 	select {
 	case r := <-ch:
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		c.emit(protocol.Event{Type: protocol.EventElicitResolved,
-			ElicitResolved: &protocol.ElicitResolved{ElicitationID: id}})
+		c.emit(protocol.Event{
+			Type:           protocol.EventElicitResolved,
+			ElicitResolved: &protocol.ElicitResolved{ElicitationID: id},
+		})
 		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 			ID: id + "-n", Level: protocol.NoticeInfo,
-			Message: fmt.Sprintf("Elicitation %s answered (%s).", id, r.action)}})
+			Message: fmt.Sprintf("Elicitation %s answered (%s).", id, r.action),
+		}})
 		return true
 	case <-ctx.Done():
 		return false
@@ -522,9 +549,13 @@ func (c *chat) settle(gen int, runID string) {
 		next, c.followUp = c.followUp[0], c.followUp[1:]
 	}
 	c.steer = nil
-	c.run = protocol.RunStatus{State: protocol.RunStateIdle,
-		Queue: protocol.QueueStatus{SteerCapacity: 8, FollowUpCapacity: 8,
-			FollowUpDepth: len(c.followUp)}}
+	c.run = protocol.RunStatus{
+		State: protocol.RunStateIdle,
+		Queue: protocol.QueueStatus{
+			SteerCapacity: 8, FollowUpCapacity: 8,
+			FollowUpDepth: len(c.followUp),
+		},
+	}
 	run := c.run
 	c.cancel = nil
 	closed := c.closed
@@ -588,17 +619,25 @@ func (c *chat) Elicit(_ context.Context, id string, action protocol.ElicitationA
 
 func (c *chat) Models(context.Context) []protocol.ModelOption {
 	return []protocol.ModelOption{
-		{Name: "default", Ref: "fake/model-a", Provider: "fake", Model: "model-a", Family: "fake",
+		{
+			Name: "default", Ref: "fake/model-a", Provider: "fake", Model: "model-a", Family: "fake",
 			ContextLimit: 200000, InputCost: 3, OutputCost: 15,
-			IsCurrent: c.st.model == "fake/model-a", IsDefault: true},
-		{Name: "fast", Ref: "fake/model-b", Provider: "fake", Model: "model-b", Family: "fake",
+			IsCurrent: c.st.model == "fake/model-a", IsDefault: true,
+		},
+		{
+			Name: "fast", Ref: "fake/model-b", Provider: "fake", Model: "model-b", Family: "fake",
 			ContextLimit: 128000, InputCost: 0.8, OutputCost: 4,
-			IsCurrent: c.st.model == "fake/model-b"},
-		{Name: "claude-sonnet-4-5", Ref: "anthropic/claude-sonnet-4-5", Provider: "anthropic",
+			IsCurrent: c.st.model == "fake/model-b",
+		},
+		{
+			Name: "claude-sonnet-4-5", Ref: "anthropic/claude-sonnet-4-5", Provider: "anthropic",
 			Model: "claude-sonnet-4-5", Family: "claude", ContextLimit: 200000,
-			InputCost: 3, OutputCost: 15, IsCatalog: true},
-		{Name: "gpt-5.6", Ref: "openai/gpt-5.6", Provider: "openai", Model: "gpt-5.6",
-			Family: "gpt", ContextLimit: 400000, InputCost: 1.25, OutputCost: 10, IsCatalog: true},
+			InputCost: 3, OutputCost: 15, IsCatalog: true,
+		},
+		{
+			Name: "gpt-5.6", Ref: "openai/gpt-5.6", Provider: "openai", Model: "gpt-5.6",
+			Family: "gpt", ContextLimit: 400000, InputCost: 1.25, OutputCost: 10, IsCatalog: true,
+		},
 	}
 }
 
@@ -671,12 +710,15 @@ func (c *chat) Compact(context.Context) error {
 		return err
 	}
 	c.a.mu.Lock()
-	c.st.items = append(c.st.items, protocol.Item{Kind: protocol.ItemKindSummary,
-		Summary: &protocol.Summary{ID: c.st.id + "-summary", Text: "Earlier turns were summarized."}})
+	c.st.items = append(c.st.items, protocol.Item{
+		Kind:    protocol.ItemKindSummary,
+		Summary: &protocol.Summary{ID: c.st.id + "-summary", Text: "Earlier turns were summarized."},
+	})
 	c.a.mu.Unlock()
 	c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 		ID: c.st.id + "-compact-notice", Level: protocol.NoticeInfo,
-		Message: "Context compaction applied.", Code: "compaction"}})
+		Message: "Context compaction applied.", Code: "compaction",
+	}})
 	return nil
 }
 
@@ -693,9 +735,11 @@ func (c *chat) Stats(context.Context) protocol.Stats {
 			msgs++
 		}
 	}
-	return protocol.Stats{Usage: c.st.usage, Messages: msgs, ToolCalls: tools,
+	return protocol.Stats{
+		Usage: c.st.usage, Messages: msgs, ToolCalls: tools,
 		Model: c.st.model, AgentName: c.st.agentName,
-		DurationSec: int64(c.a.now().Sub(c.st.createdAt).Seconds())}
+		DurationSec: int64(c.a.now().Sub(c.st.createdAt).Seconds()),
+	}
 }
 
 func (c *chat) Close(context.Context) error {

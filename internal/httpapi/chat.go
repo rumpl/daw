@@ -421,8 +421,10 @@ func (l *liveChat) close(ctx context.Context, reason string) {
 
 	l.mu.Lock()
 	l.seq++
-	ev := protocol.Event{Type: protocol.EventChatClosed, Seq: l.seq,
-		Closed: &protocol.ChatClosed{Reason: reason}}
+	ev := protocol.Event{
+		Type: protocol.EventChatClosed, Seq: l.seq,
+		Closed: &protocol.ChatClosed{Reason: reason},
+	}
 	l.buf = append(l.buf, ev)
 	l.closed = true
 	subs := make([]*subscriber, 0, len(l.subs))

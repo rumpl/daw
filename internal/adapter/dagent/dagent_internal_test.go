@@ -19,7 +19,8 @@ import (
 // dialog shows exactly the pattern the matched module would grant.
 func TestPatternFidelity(t *testing.T) {
 	call := tools.ToolCall{ID: "1", Function: tools.FunctionCall{
-		Name: "shell", Arguments: `{"cmd":"ls -la /tmp"}`}}
+		Name: "shell", Arguments: `{"cmd":"ls -la /tmp"}`,
+	}}
 	pattern := toolconfirm.BuildPermissionPattern(call)
 	if pattern == "" {
 		t.Fatal("empty pattern")
@@ -51,7 +52,8 @@ func TestRejectionReasonsComeFromTheMatchedModule(t *testing.T) {
 func TestSummarizeArgsIsShortAndSingleLine(t *testing.T) {
 	long := strings.Repeat("a", 5000)
 	call := tools.ToolCall{Function: tools.FunctionCall{
-		Name: "shell", Arguments: `{"cmd":"echo ` + long + `"}`}}
+		Name: "shell", Arguments: `{"cmd":"echo ` + long + `"}`,
+	}}
 	got := summarizeArgs(call)
 	if len(got) > 320 {
 		t.Fatalf("argument summary not bounded: %d", len(got))

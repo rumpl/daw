@@ -245,8 +245,10 @@ func newOpaqueID(prefix string) string {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	s.json(w, http.StatusOK, protocol.Health{Status: "ok",
-		Uptime: int64(time.Since(s.started).Seconds())})
+	s.json(w, http.StatusOK, protocol.Health{
+		Status: "ok",
+		Uptime: int64(time.Since(s.started).Seconds()),
+	})
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +272,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
 		Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
 			"with your user's permissions. There is no sandbox. Use `docker agent run --sandbox` " +
-			"in a terminal if you need isolation."})
+			"in a terminal if you need isolation.",
+	})
 
 	s.json(w, http.StatusOK, protocol.Bootstrap{
 		AppVersion: s.appVersion, AgentVersion: info.AgentVersion, AgentCommit: info.AgentCommit,
@@ -339,9 +342,11 @@ func (s *Server) handleOpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if fi, err := os.Stat(filepath.Join(canon, ".agentsignore")); err == nil && !fi.IsDir() {
 		ws.AgentsIgnore = true
-		ws.Notices = append(ws.Notices, protocol.Notice{ID: "agentsignore", Level: protocol.NoticeInfo,
+		ws.Notices = append(ws.Notices, protocol.Notice{
+			ID: "agentsignore", Level: protocol.NoticeInfo,
 			Message: ".agentsignore is present and is honoured by docker-agent's permission checker.",
-			Code:    "agentsignore"})
+			Code:    "agentsignore",
+		})
 	}
 	s.json(w, http.StatusOK, ws)
 }

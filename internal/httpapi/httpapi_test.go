@@ -330,7 +330,8 @@ func TestSessionIDValidatedAgainstFreshListing(t *testing.T) {
 	h := newHarness(t)
 	ws := h.openWorkspace()
 	resp := h.do(http.MethodPost, "/api/chats/resume", protocol.ResumeChatRequest{
-		WorkspaceID: ws.WorkspaceID, SessionID: "../../etc/passwd"})
+		WorkspaceID: ws.WorkspaceID, SessionID: "../../etc/passwd",
+	})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 for an unlisted session id, got %d", resp.StatusCode)
 	}
@@ -350,7 +351,8 @@ func TestResumeRestoresStoredHistory(t *testing.T) {
 	}
 
 	resp := h.do(http.MethodPost, "/api/chats/resume", protocol.ResumeChatRequest{
-		WorkspaceID: ws.WorkspaceID, SessionID: "sess-seeded"})
+		WorkspaceID: ws.WorkspaceID, SessionID: "sess-seeded",
+	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("resume: %d", resp.StatusCode)
 	}
@@ -702,8 +704,10 @@ func TestElicitationCorrelatedByID(t *testing.T) {
 	}
 
 	ok := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/elicitation",
-		protocol.ElicitationReply{ElicitationID: req.ElicitationID, Action: protocol.ElicitAccept,
-			Content: map[string]any{"branch": "main"}})
+		protocol.ElicitationReply{
+			ElicitationID: req.ElicitationID, Action: protocol.ElicitAccept,
+			Content: map[string]any{"branch": "main"},
+		})
 	if ok.StatusCode != http.StatusAccepted {
 		t.Fatalf("elicitation reply: %d", ok.StatusCode)
 	}

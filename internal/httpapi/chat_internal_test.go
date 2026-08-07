@@ -15,16 +15,26 @@ func testChat() *liveChat {
 
 func TestReducerAppliesDeltasByStableID(t *testing.T) {
 	c := testChat()
-	c.publish(protocol.Event{Type: protocol.EventMessageItem,
-		Message: &protocol.MessageItem{ID: "a1", Role: "assistant", Streaming: true}})
-	c.publish(protocol.Event{Type: protocol.EventAssistantDelta,
-		Delta: &protocol.Delta{ItemID: "a1", Text: "Hel"}})
-	c.publish(protocol.Event{Type: protocol.EventAssistantDelta,
-		Delta: &protocol.Delta{ItemID: "a1", Text: "lo"}})
-	c.publish(protocol.Event{Type: protocol.EventReasoningDelta,
-		Delta: &protocol.Delta{ItemID: "a1", Text: "think"}})
-	c.publish(protocol.Event{Type: protocol.EventAssistantEnd,
-		Ref: &protocol.ItemRef{ItemID: "a1"}})
+	c.publish(protocol.Event{
+		Type:    protocol.EventMessageItem,
+		Message: &protocol.MessageItem{ID: "a1", Role: "assistant", Streaming: true},
+	})
+	c.publish(protocol.Event{
+		Type:  protocol.EventAssistantDelta,
+		Delta: &protocol.Delta{ItemID: "a1", Text: "Hel"},
+	})
+	c.publish(protocol.Event{
+		Type:  protocol.EventAssistantDelta,
+		Delta: &protocol.Delta{ItemID: "a1", Text: "lo"},
+	})
+	c.publish(protocol.Event{
+		Type:  protocol.EventReasoningDelta,
+		Delta: &protocol.Delta{ItemID: "a1", Text: "think"},
+	})
+	c.publish(protocol.Event{
+		Type: protocol.EventAssistantEnd,
+		Ref:  &protocol.ItemRef{ItemID: "a1"},
+	})
 
 	snap := c.snapshot()
 	if len(snap.Items) != 1 {
@@ -39,11 +49,15 @@ func TestReducerAppliesDeltasByStableID(t *testing.T) {
 func TestReducerNeverDuplicatesByID(t *testing.T) {
 	c := testChat()
 	for range 3 {
-		c.publish(protocol.Event{Type: protocol.EventToolStart,
-			Tool: &protocol.ToolActivity{ID: "t1", Name: "shell", State: protocol.ToolStateRunning}})
+		c.publish(protocol.Event{
+			Type: protocol.EventToolStart,
+			Tool: &protocol.ToolActivity{ID: "t1", Name: "shell", State: protocol.ToolStateRunning},
+		})
 	}
-	c.publish(protocol.Event{Type: protocol.EventToolEnd,
-		Tool: &protocol.ToolActivity{ID: "t1", Name: "shell", State: protocol.ToolStateSuccess}})
+	c.publish(protocol.Event{
+		Type: protocol.EventToolEnd,
+		Tool: &protocol.ToolActivity{ID: "t1", Name: "shell", State: protocol.ToolStateSuccess},
+	})
 	snap := c.snapshot()
 	if len(snap.Items) != 1 {
 		t.Fatalf("expected 1 tool item, got %d", len(snap.Items))
@@ -59,10 +73,12 @@ func TestToolUpdatesMergeInsteadOfReplacing(t *testing.T) {
 	c := testChat()
 	c.publish(protocol.Event{Type: protocol.EventToolStart, Tool: &protocol.ToolActivity{
 		ID: "t1", Name: "shell", Category: "shell", AgentName: "root",
-		ArgsSummary: "ls -la /workspace", State: protocol.ToolStateRunning}})
+		ArgsSummary: "ls -la /workspace", State: protocol.ToolStateRunning,
+	}})
 	// An output chunk: only id, name, state and the chunk.
 	c.publish(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
-		ID: "t1", Name: "shell", State: protocol.ToolStateRunning, Preview: "partial"}})
+		ID: "t1", Name: "shell", State: protocol.ToolStateRunning, Preview: "partial",
+	}})
 
 	tool := c.snapshot().Items[0].Tool
 	if tool.ArgsSummary != "ls -la /workspace" {
@@ -74,7 +90,8 @@ func TestToolUpdatesMergeInsteadOfReplacing(t *testing.T) {
 
 	c.publish(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
 		ID: "t1", Name: "shell", State: protocol.ToolStateSuccess, Preview: "final output",
-		Images: []protocol.ToolImage{{Name: "result.png", MimeType: "image/png", Data: "aW1n"}}}})
+		Images: []protocol.ToolImage{{Name: "result.png", MimeType: "image/png", Data: "aW1n"}},
+	}})
 	tool = c.snapshot().Items[0].Tool
 	if tool.State != protocol.ToolStateSuccess || tool.Preview != "final output" {
 		t.Fatalf("final state not applied: %+v", tool)
@@ -93,8 +110,10 @@ func TestStaleEventsFromReplacedRuntimeAreDropped(t *testing.T) {
 	done := make(chan struct{})
 	go func() { c.pump(1, src); close(done) }()
 
-	src <- protocol.Event{Type: protocol.EventMessageItem,
-		Message: &protocol.MessageItem{ID: "m1", Role: "assistant", Text: "live"}}
+	src <- protocol.Event{
+		Type:    protocol.EventMessageItem,
+		Message: &protocol.MessageItem{ID: "m1", Role: "assistant", Text: "live"},
+	}
 
 	// Replace the runtime: bump the generation. Everything the old pump
 	// delivers afterwards must be ignored.
@@ -102,8 +121,10 @@ func TestStaleEventsFromReplacedRuntimeAreDropped(t *testing.T) {
 	c.generation = 2
 	c.mu.Unlock()
 
-	src <- protocol.Event{Type: protocol.EventMessageItem,
-		Message: &protocol.MessageItem{ID: "m2", Role: "assistant", Text: "stale"}}
+	src <- protocol.Event{
+		Type:    protocol.EventMessageItem,
+		Message: &protocol.MessageItem{ID: "m2", Role: "assistant", Text: "stale"},
+	}
 	close(src)
 	<-done
 
@@ -118,9 +139,13 @@ func TestStaleEventsFromReplacedRuntimeAreDropped(t *testing.T) {
 func TestToolPreviewClamped(t *testing.T) {
 	c := testChat()
 	huge := strings.Repeat("x", previewLimit*4)
-	c.publish(protocol.Event{Type: protocol.EventToolEnd,
-		Tool: &protocol.ToolActivity{ID: "t1", Name: "shell", Preview: huge,
-			State: protocol.ToolStateSuccess}})
+	c.publish(protocol.Event{
+		Type: protocol.EventToolEnd,
+		Tool: &protocol.ToolActivity{
+			ID: "t1", Name: "shell", Preview: huge,
+			State: protocol.ToolStateSuccess,
+		},
+	})
 	snap := c.snapshot()
 	tool := snap.Items[0].Tool
 	if len(tool.Preview) > previewLimit+128 {
@@ -134,8 +159,10 @@ func TestToolPreviewClamped(t *testing.T) {
 func TestReplayWindow(t *testing.T) {
 	c := testChat()
 	for i := range 5 {
-		c.publish(protocol.Event{Type: protocol.EventNotice,
-			Notice: &protocol.Notice{ID: string(rune('a' + i)), Message: "n"}})
+		c.publish(protocol.Event{
+			Type:   protocol.EventNotice,
+			Notice: &protocol.Notice{ID: string(rune('a' + i)), Message: "n"},
+		})
 	}
 	sub, replay, resumed := c.subscribe(2)
 	defer c.unsubscribe(sub)
@@ -156,8 +183,10 @@ func TestReplayWindow(t *testing.T) {
 func TestItemsAreBounded(t *testing.T) {
 	c := testChat()
 	for i := range maxItems + 50 {
-		c.publish(protocol.Event{Type: protocol.EventNotice,
-			Notice: &protocol.Notice{ID: itoa(i), Message: "n"}})
+		c.publish(protocol.Event{
+			Type:   protocol.EventNotice,
+			Notice: &protocol.Notice{ID: itoa(i), Message: "n"},
+		})
 	}
 	if got := len(c.snapshot().Items); got > maxItems {
 		t.Fatalf("timeline unbounded: %d items", got)
