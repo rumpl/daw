@@ -229,7 +229,12 @@ export function Sidebar({
         <span className="project-chevron" aria-hidden="true">›</span>
       </button>
 
-      <button type="button" className="block new-chat-button" onClick={onNewChat} disabled={!workspace || busy}>
+      <button
+        type="button"
+        className="block new-chat-button"
+        onClick={() => onNewChat()}
+        disabled={!workspace || busy}
+      >
         New chat
       </button>
 

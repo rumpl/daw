@@ -42,6 +42,35 @@ const boot = {
 } as unknown as Bootstrap;
 
 describe('Sidebar', () => {
+  it('starts a blank chat without forwarding the click event as a message', async () => {
+    const onNewChat = vi.fn();
+    render(
+      <Sidebar
+        boot={boot}
+        workspace={workspace}
+        sessions={[]}
+        liveSessions={[]}
+        recentWorkspaces={[]}
+        plugins={[]}
+        pluginErrors={[]}
+        activePluginId={null}
+        activePluginPath=""
+        workspacePath={workspace.path}
+        busy={false}
+        drawerRef={createRef<HTMLDivElement>()}
+        onWorkspacePathChange={vi.fn()}
+        onOpenWorkspace={vi.fn()}
+        onNewChat={onNewChat}
+        onResumeChat={vi.fn()}
+        onCloseLiveSession={vi.fn()}
+        onOpenPlugin={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    expect(onNewChat).toHaveBeenCalledWith();
+  });
+
   it('opens a global plugin from its contributed sidebar item', async () => {
     const onOpenPlugin = vi.fn();
     render(
