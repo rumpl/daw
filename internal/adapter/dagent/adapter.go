@@ -410,6 +410,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		events:       make(chan protocol.Event, 512),
 		unsaved:      newSession,
 		pendingTools: map[string]pendingTool{},
+		partialTools: map[string]partialTool{},
 		pendingElic:  map[string]struct{}{},
 		agentsIgnore: agentsIgnore,
 		run:          protocol.RunStatus{State: protocol.RunStateIdle},

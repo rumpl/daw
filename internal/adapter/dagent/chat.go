@@ -28,6 +28,11 @@ type pendingTool struct {
 	pattern string
 }
 
+type partialTool struct {
+	call       tools.ToolCall
+	definition tools.Tool
+}
+
 // chat is one live runtime + session pair.
 type chat struct {
 	a          *Adapter
@@ -47,6 +52,7 @@ type chat struct {
 	cancel       context.CancelFunc
 	generation   uint64
 	pendingTools map[string]pendingTool
+	partialTools map[string]partialTool
 	pendingElic  map[string]struct{}
 	posture      protocol.Posture
 	grants       []string
@@ -417,6 +423,7 @@ func (c *chat) settle(gen uint64) {
 	}
 	c.run = protocol.RunStatus{State: protocol.RunStateIdle}
 	c.cancel = nil
+	clear(c.partialTools)
 	c.mu.Unlock()
 
 	// Confirm the runtime really is idle and both queues are drained before

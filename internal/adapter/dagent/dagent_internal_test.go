@@ -68,6 +68,64 @@ func TestSummarizeArgsHandlesNonJSON(t *testing.T) {
 	}
 }
 
+func TestPartialToolCallIsEmittedAndArgumentDeltasAreMerged(t *testing.T) {
+	c := &chat{
+		sess:         session.New(),
+		events:       make(chan protocol.Event, 4),
+		partialTools: map[string]partialTool{},
+	}
+	def := tools.Tool{Name: "shell", Category: "shell"}
+	c.normalize(&daruntime.PartialToolCallEvent{
+		AgentContext: daruntime.AgentContext{AgentName: "root"},
+		ToolCall: tools.ToolCall{ID: "t1", Function: tools.FunctionCall{
+			Name: "shell", Arguments: `{"cmd":"echo `,
+		}},
+		ToolDefinition: &def,
+	})
+
+	first := <-c.events
+	if first.Type != protocol.EventToolUpdate || first.Tool == nil {
+		t.Fatalf("partial call did not immediately emit a tool update: %+v", first)
+	}
+	if first.Tool.ID != "t1" || first.Tool.Name != "shell" || first.Tool.State != protocol.ToolStatePending {
+		t.Fatalf("bad first partial tool activity: %+v", first.Tool)
+	}
+	if first.Tool.Category != "shell" || first.Tool.DisplayName != "shell" {
+		t.Fatalf("first-event tool definition was not retained: %+v", first.Tool)
+	}
+
+	// Current docker-agent versions send only the new argument bytes and omit
+	// ToolDefinition after the first partial event.
+	c.normalize(&daruntime.PartialToolCallEvent{
+		AgentContext: daruntime.AgentContext{AgentName: "root"},
+		ToolCall: tools.ToolCall{ID: "t1", Function: tools.FunctionCall{
+			Name: "shell", Arguments: `hello"}`,
+		}},
+	})
+	second := <-c.events
+	if second.Tool == nil || second.Tool.ArgsSummary != "echo hello" {
+		t.Fatalf("argument deltas were not merged: %+v", second.Tool)
+	}
+	if got := second.Tool.Arguments["cmd"]; got != "echo hello" {
+		t.Fatalf("merged presentation arguments = %v, want echo hello", got)
+	}
+	if second.Tool.Category != "shell" || second.Tool.DisplayName != "shell" {
+		t.Fatalf("tool definition was lost on a later delta: %+v", second.Tool)
+	}
+
+	complete := tools.ToolCall{ID: "t1", Function: tools.FunctionCall{
+		Name: "shell", Arguments: `{"cmd":"echo hello"}`,
+	}}
+	c.normalize(daruntime.ToolCall(complete, def, "root"))
+	started := <-c.events
+	if started.Type != protocol.EventToolStart || started.Tool == nil || started.Tool.State != protocol.ToolStateRunning {
+		t.Fatalf("complete call did not advance the pending item: %+v", started)
+	}
+	if len(c.partialTools) != 0 {
+		t.Fatalf("completed partial call was not discarded: %+v", c.partialTools)
+	}
+}
+
 func TestMCPInitializationDoesNotClutterTimeline(t *testing.T) {
 	c := &chat{sess: session.New(), events: make(chan protocol.Event, 2)}
 

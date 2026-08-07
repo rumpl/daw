@@ -45,7 +45,24 @@ func (c *chat) normalize(ev daruntime.Event) {
 			return
 		}
 
+	case *daruntime.PartialToolCallEvent:
+		// docker-agent emits this as soon as the model starts a tool call. Its
+		// arguments are deltas (and the definition is normally present only on
+		// the first event), so merge them before deriving browser presentation.
+		c.closeAssistant()
+		call, def := c.mergePartialToolCall(e)
+		displayName, category := "", ""
+		if def.Name != "" {
+			displayName = def.DisplayName()
+			category = def.Category
+		}
+		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: &protocol.ToolActivity{
+			ID: call.ID, Name: call.Function.Name, DisplayName: displayName,
+			Category: category, AgentName: e.AgentName, ArgsSummary: summarizeArgs(call),
+			Arguments: presentationArgs(call), State: protocol.ToolStatePending}})
+
 	case *daruntime.ToolCallConfirmationEvent:
+		c.forgetPartialToolCall(e.ToolCall.ID)
 		// The pattern shown to the user is the pattern granted on approval.
 		pattern := toolconfirm.BuildPermissionPattern(e.ToolCall)
 		c.mu.Lock()
@@ -64,6 +81,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 			}})
 
 	case *daruntime.ToolCallEvent:
+		c.forgetPartialToolCall(e.ToolCall.ID)
 		c.closeAssistant()
 		c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: &protocol.ToolActivity{
 			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name,
@@ -77,6 +95,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 			Preview: e.Output, OutputBytes: len(e.Output)}})
 
 	case *daruntime.ToolCallResponseEvent:
+		c.forgetPartialToolCall(e.ToolCallID)
 		state := protocol.ToolStateSuccess
 		isErr := false
 		if e.Result != nil && e.Result.IsError {
@@ -89,6 +108,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 			Images: toolResultImages(e.Result), OutputBytes: len(e.Response), IsError: isErr}})
 
 	case *daruntime.HookBlockedEvent:
+		c.forgetPartialToolCall(e.ToolCall.ID)
 		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
 			ID: e.ToolCall.ID, Name: e.ToolCall.Function.Name, AgentName: e.AgentName,
 			State: protocol.ToolStateRejected, Preview: e.Message, IsError: true}})
@@ -223,6 +243,38 @@ func (c *chat) closeAssistant() {
 	if id != "" {
 		c.emit(protocol.Event{Type: protocol.EventAssistantEnd, Ref: &protocol.ItemRef{ItemID: id}})
 	}
+}
+
+// mergePartialToolCall accumulates docker-agent's argument deltas and retains
+// the tool definition, which is normally sent only with the first delta.
+func (c *chat) mergePartialToolCall(e *daruntime.PartialToolCallEvent) (tools.ToolCall, tools.Tool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.partialTools == nil {
+		c.partialTools = map[string]partialTool{}
+	}
+	partial := c.partialTools[e.ToolCall.ID]
+	if partial.call.ID == "" {
+		partial.call.ID = e.ToolCall.ID
+	}
+	if e.ToolCall.Type != "" {
+		partial.call.Type = e.ToolCall.Type
+	}
+	if e.ToolCall.Function.Name != "" {
+		partial.call.Function.Name = e.ToolCall.Function.Name
+	}
+	partial.call.Function.Arguments += e.ToolCall.Function.Arguments
+	if e.ToolDefinition != nil {
+		partial.definition = *e.ToolDefinition
+	}
+	c.partialTools[e.ToolCall.ID] = partial
+	return partial.call, partial.definition
+}
+
+func (c *chat) forgetPartialToolCall(id string) {
+	c.mu.Lock()
+	delete(c.partialTools, id)
+	c.mu.Unlock()
 }
 
 // rejectionReasons exposes the matched module's own presets rather than
