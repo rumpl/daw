@@ -14,7 +14,7 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - Browser credentials are same-origin. Redirects are rejected.
 - Errors have `{error: string, code: string, details?: string}` and cause the
   client to throw `ApiError {message, code, status}`.
-- IDs beginning with `ws_`, `ag_`, and `chat_` are process-local opaque IDs.
+- IDs beginning with `ws_` and `chat_` are process-local opaque IDs.
   Never construct or persist them across server restarts. Session IDs are
   stable in docker-agent's session database.
 - Mutations require same-origin metadata and the CSRF header. Plugin code gets
@@ -60,8 +60,9 @@ selection or agent-resolution API.
   - Body: `{workspaceId: string}`. Returns `201 ChatRef`.
 - `POST /api/chats/resume`
   - Body: `{workspaceId: string, sessionId: string}`.
-  - Returns `201 ChatRef`. A session can have only one live runtime in this
-    server; attaching to an already-live session returns that owner.
+  - Returns `201 ChatRef` when opening a stored session, or `200 ChatRef` when
+    attaching to its already-live runtime. A session can have only one live
+    runtime in this server.
 - `GET /api/chats/{id}` → `200 Snapshot`
   - Complete authoritative chat state for resnapshot/reconciliation.
 - `GET /api/chats/{id}/events[?lastEventId=N]` → SSE stream
@@ -89,11 +90,11 @@ selection or agent-resolution API.
   - Body: `{elicitationId, action, content?}`. Actions: `accept`, `decline`,
     `cancel`. Returns `202 Accepted`.
 - `POST /api/chats/{id}/retitle`
-  - Body: `{title: string}`. Returns `202 Accepted`.
+  - Body: `{title: string}`. Returns `200 Accepted`.
 - `POST /api/chats/{id}/compact` → `202 Accepted`
   - Explicitly compacts an idle session.
 - `GET /api/chats/{id}/stats` → `200 Stats`
-- `DELETE /api/chats/{id}` → `202 Accepted`
+- `DELETE /api/chats/{id}` → `200 Accepted`
   - Closes the live runtime without deleting stored session history.
 
 Unknown `/api/*` routes return `404 {code:"not_found", ...}`.
@@ -135,9 +136,11 @@ interface SessionSummary {
   messages: number; live: boolean; chatId?: string; runState?: RunState;
 }
 interface ChatRef { chatId: string; sessionId: string }
+interface QueuedMessage { id: string; text: string }
 interface QueueStatus {
   steerDepth: number; steerCapacity: number;
   followUpDepth: number; followUpCapacity: number;
+  steer: QueuedMessage[] | null; followUps: QueuedMessage[] | null;
 }
 interface RunStatus { state: RunState; runId: string; queue: QueueStatus }
 interface Usage {
@@ -185,7 +188,7 @@ interface Snapshot {
   pendingElicitations: ElicitationRequest[] | null;
 }
 interface Accepted {
-  accepted: boolean; mode: DeliveryMode; runId: string; queued: boolean;
+  accepted: boolean; mode: DeliveryMode | ""; runId: string; queued: boolean;
 }
 interface ModelOption {
   name: string; ref: string; provider: string; model: string; family: string;
@@ -198,6 +201,10 @@ interface Stats {
   agentName: string; durationSeconds: number;
 }
 ```
+
+`mode` and `runId` are populated for accepted message delivery. Other
+operations returning `Accepted` currently encode `mode:""`, `runId:""`, and
+`queued:false`.
 
 ### SSE Event union
 
@@ -220,10 +227,28 @@ type Event =
  | {type:"transfer"; seq:number; transfer:Transfer}
  | {type:"usage"; seq:number; usage:Usage}
  | {type:"notice"; seq:number; notice:Notice}
+ | {type:"summary"; seq:number; summary:Summary}
  | {type:"session_meta"; seq:number; meta:SessionMeta}
  | {type:"gap"; seq:number}
  | {type:"chat_closed"; seq:number; closed:{reason:string}};
 ```
+
+### Dashboard SSE Event union
+
+The dashboard-wide stream uses the same monotonically increasing sequence and
+replay rules:
+
+```ts
+type DashboardEvent =
+ | {type:"snapshot"; seq:number}
+ | {type:"sessions_changed"; seq:number; workspaceIds?:string[];
+    sessionIds?:string[]; reason?:string}
+ | {type:"plugins_changed"; seq:number; revision?:string}
+ | {type:"gap"; seq:number};
+```
+
+Payload fields are optional on the wire. A `gap` means the requested replay
+point is unavailable; refresh authoritative REST resources.
 
 ## Plugin manifest and routing
 
@@ -247,9 +272,23 @@ Relative module imports work.
 }
 ```
 
-Manifest and directory IDs are identical lowercase kebab-case. Page IDs are
-kebab-case; paths are unique lowercase URL paths. At least one page is required.
-`sidebar:true` contributes a global sidebar item. The catalog shapes are:
+Manifest and directory IDs are identical lowercase kebab-case and at most 63
+characters. Page IDs follow the same form. Page paths are unique lowercase URL
+paths; leading and trailing slashes are normalized, but empty components and
+`//` are rejected. A plugin must declare 1–30 pages, with unique page IDs and
+paths. `sidebar:true` contributes a global sidebar item.
+
+The manifest is a single JSON object no larger than 64 KiB and unknown fields
+are rejected. `name` is required and at most 80 characters; page labels are
+required and at most 60 characters; `description` is at most 300 characters;
+`version` is at most 40 characters. `entry` must be a relative `.js` or `.mjs`
+path and optional `style` must be a relative `.css` path. Both must name regular
+files within the plugin.
+
+Plugin symlinks and special filesystem entries are not supported; nested
+regular directories and files are allowed. A plugin may contain at most 200
+files, each at most 4 MiB, with a maximum total size of 16 MiB. The catalog
+shapes are:
 
 ```ts
 interface PluginPage { id:string; path:string; label:string; sidebar:boolean }
@@ -373,11 +412,12 @@ Renders sanitized Mermaid SVG and handles loading/errors.
 ### `components.Conversation`
 
 ```ts
-Conversation({items: Item[], empty: ReactNode})
+Conversation({items: Item[], queue?: QueueStatus, empty: ReactNode})
 ```
 
 Renders messages, reasoning, tool cards, transfers, notices, summaries, live
-streaming state, automatic scroll pinning, and “Jump to latest”.
+streaming state, optional queued steer/follow-up messages, automatic scroll
+pinning, and “Jump to latest”.
 
 ### `components.Composer`
 
