@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Chromium only: it is the single browser the suite needs, so `playwright
 // install chromium` is the only download required.
@@ -35,6 +37,7 @@ export default defineConfig({
       DAWUI_FAKE_ADAPTER: '1',
       DAWUI_FAKE_DELAY_MS: '120',
       WORKSPACE_ROOTS: process.env.E2E_ROOT ?? process.env.HOME ?? '/tmp',
+      DAWUI_PLUGIN_DIR: process.env.E2E_PLUGIN_DIR ?? join(homedir(), '.dawui-e2e', 'plugins'),
     },
   },
 });

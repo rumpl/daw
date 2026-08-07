@@ -10,8 +10,29 @@ const workspace = mkdtempSync(join(workspaceRoot, 'ws-'));
 const agentFile = join(workspace, 'agent.yaml');
 writeFileSync(agentFile, 'agents:\n  root:\n    model: fake\n');
 
+const pluginRoot = process.env.E2E_PLUGIN_DIR ?? join(homedir(), '.dawui-e2e', 'plugins');
+const pluginDir = join(pluginRoot, 'system-info');
+mkdirSync(pluginDir, { recursive: true });
+writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+  apiVersion: 1,
+  id: 'system-info',
+  name: 'System info',
+  description: 'E2E global plugin',
+  version: '1.0.0',
+  entry: 'index.js',
+  pages: [{ id: 'overview', path: '', label: 'System info', sidebar: true }],
+}));
+const pluginEntry = (title: string) => `
+export async function mount(context) {
+  const health = await context.api.request('GET', '/api/health', undefined, { signal: context.signal });
+  const { React, components, render } = context.ui;
+  return render(React.createElement(components.Markdown, null, '# ${title}\\n\\nBackend: **' + health.status + '**'));
+}
+`;
+writeFileSync(join(pluginDir, 'index.js'), pluginEntry('Plugin API'));
+
 // Opening a working directory is the ONLY setup step: the server falls back to
-// docker-agent's built-in coder agent, so no agent config is ever chosen here.
+// its SDK-built coding agent, so no agent config is ever chosen here.
 async function openWorkspaceAndAgent(page: Page) {
   await page.locator('.project-switcher').click();
   const picker = page.getByRole('dialog', { name: 'Choose a project' });
@@ -40,7 +61,20 @@ const composer = (page: Page) => page.getByRole('textbox', { name: 'Message' });
 const connected = (page: Page) => expect(page.getByRole('status')).toHaveAccessibleName('Connected');
 
 test.describe('dashboard', () => {
-  test('a workspace alone is enough: built-in agent, with model and thinking controls', async ({ page }) => {
+  test('loads and hot-reloads a global plugin with host components and backend API', async ({ page }) => {
+    writeFileSync(join(pluginDir, 'index.js'), pluginEntry('Plugin API'));
+    await page.goto('/');
+    await openDrawerIfMobile(page);
+    await page.getByRole('button', { name: 'System info' }).click();
+    await expect(page).toHaveURL(/\/plugins\/system-info/);
+    await expect(page.getByRole('heading', { name: 'Plugin API' })).toBeVisible();
+    await expect(page.getByText('Backend:')).toContainText('ok');
+
+    writeFileSync(join(pluginDir, 'index.js'), pluginEntry('Plugin reloaded'));
+    await expect(page.getByRole('heading', { name: 'Plugin reloaded' })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('a workspace alone is enough: SDK-built agent, with model and thinking controls', async ({ page }) => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
