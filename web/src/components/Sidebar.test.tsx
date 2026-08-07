@@ -42,6 +42,43 @@ const boot = {
 } as unknown as Bootstrap;
 
 describe('Sidebar', () => {
+  it('opens the workspace selector and allows selecting the current workspace', async () => {
+    const onOpenWorkspace = vi.fn();
+    render(
+      <Sidebar
+        boot={boot}
+        workspace={workspace}
+        sessions={[]}
+        liveSessions={[]}
+        recentWorkspaces={['/code/other']}
+        plugins={[]}
+        pluginErrors={[]}
+        activePluginId={null}
+        activePluginPath=""
+        workspacePath={workspace.path}
+        busy={false}
+        drawerRef={createRef<HTMLDivElement>()}
+        onWorkspacePathChange={vi.fn()}
+        onOpenWorkspace={onOpenWorkspace}
+        onNewChat={vi.fn()}
+        onResumeChat={vi.fn()}
+        onCloseLiveSession={vi.fn()}
+        onOpenPlugin={vi.fn()}
+      />,
+    );
+
+    const switcher = screen.getByRole('button', { name: /current/i });
+    await userEvent.click(switcher);
+
+    const currentWorkspace = screen.getByRole('menuitem', { name: /current/i });
+    expect(currentWorkspace).toBeEnabled();
+    expect(currentWorkspace).toHaveAttribute('aria-current', 'page');
+    await userEvent.click(currentWorkspace);
+
+    expect(onOpenWorkspace).toHaveBeenCalledWith(workspace.path);
+    expect(switcher).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('starts a blank chat without forwarding the click event as a message', async () => {
     const onNewChat = vi.fn();
     render(

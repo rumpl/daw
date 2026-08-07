@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { createPortal } from 'react-dom';
 import type { Bootstrap, Plugin, PluginError, SessionSummary, Workspace } from '../protocol.gen';
 import { clip } from '../safety';
 
@@ -82,6 +81,7 @@ export function Sidebar({
   const [showPathInput, setShowPathInput] = useState(false);
   const projectButtonRef = useRef<HTMLButtonElement | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  const projectSwitcherRef = useRef<HTMLDivElement | null>(null);
 
   const filteredSessions = useMemo(() => {
     const query = sessionFilter.trim().toLowerCase();
@@ -107,17 +107,21 @@ export function Sidebar({
       if (event.key !== 'Escape') return;
       event.stopImmediatePropagation();
       setProjectPickerOpen(false);
+      setShowPathInput(false);
       projectButtonRef.current?.focus();
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (projectSwitcherRef.current?.contains(event.target as Node)) return;
+      setProjectPickerOpen(false);
+      setShowPathInput(false);
+    };
     document.addEventListener('keydown', onKey, true);
-    return () => document.removeEventListener('keydown', onKey, true);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
   }, [projectPickerOpen]);
-
-  const closeProjectPicker = () => {
-    setProjectPickerOpen(false);
-    setShowPathInput(false);
-    projectButtonRef.current?.focus();
-  };
 
   const openProject = (path: string) => {
     setProjectPickerOpen(false);
@@ -125,87 +129,68 @@ export function Sidebar({
     onOpenWorkspace(path);
   };
 
-  const projectPicker = projectPickerOpen
-    ? createPortal(
-        <div className="dialog-scrim project-picker-scrim" role="presentation" onMouseDown={closeProjectPicker}>
-          <div
-            className="dialog project-picker"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="project-picker-title"
-            ref={pickerRef}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="project-picker-head">
-              <h2 id="project-picker-title">Choose a project</h2>
-              <button type="button" aria-label="Close project picker" onClick={closeProjectPicker}>
-                Close
-              </button>
-            </div>
+  const projectPicker = projectPickerOpen ? (
+    <div className="project-picker" ref={pickerRef}>
+      {projectWorkspaces.length > 0 ? (
+        <ul className="project-picker-list" role="menu" aria-label="Projects">
+          {projectWorkspaces.map((path) => {
+            const current = path === workspace?.path;
+            return (
+              <li key={path} role="none">
+                <button
+                  type="button"
+                  role="menuitem"
+                  title={path}
+                  aria-current={current ? 'page' : undefined}
+                  onClick={() => openProject(path)}
+                  disabled={busy}
+                >
+                  <span className="project-name">{clip(projectLabel(path), 60)}</span>
+                  <span className="project-path">{clip(path, 160)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="hint">No recent projects.</p>
+      )}
 
-            {projectWorkspaces.length > 0 ? (
-              <ul className="project-picker-list">
-                {projectWorkspaces.map((path) => {
-                  const current = path === workspace?.path;
-                  return (
-                    <li key={path}>
-                      <button
-                        type="button"
-                        title={path}
-                        aria-current={current ? 'page' : undefined}
-                        onClick={() => openProject(path)}
-                        disabled={busy || current}
-                      >
-                        <span className="project-name">{clip(projectLabel(path), 60)}</span>
-                        <span className="project-path">{clip(path, 160)}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="hint">No recent projects.</p>
-            )}
-
-            {!pathInputVisible ? (
-              <button type="button" className="open-directory-button" onClick={() => setShowPathInput(true)}>
-                Open another directory…
-              </button>
-            ) : (
-              <form
-                className="project-path-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  openProject(workspacePath);
-                }}
-              >
-                <label htmlFor="ws-path">Working directory path</label>
-                <div className="project-path-row">
-                  <input
-                    id="ws-path"
-                    value={workspacePath}
-                    onChange={(event) => onWorkspacePathChange(event.target.value)}
-                    placeholder="/absolute/path/to/project"
-                    list="ws-hints"
-                    autoFocus={projectWorkspaces.length === 0}
-                  />
-                  <datalist id="ws-hints">
-                    {recentWorkspaces.map((path) => (
-                      <option key={path} value={path} />
-                    ))}
-                  </datalist>
-                  <button type="submit" disabled={busy || !workspacePath.trim()}>
-                    Open
-                  </button>
-                </div>
-              </form>
-            )}
-
+      {!pathInputVisible ? (
+        <button type="button" className="open-directory-button" onClick={() => setShowPathInput(true)}>
+          Open another directory…
+        </button>
+      ) : (
+        <form
+          className="project-path-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            openProject(workspacePath);
+          }}
+        >
+          <label htmlFor="ws-path">Working directory path</label>
+          <div className="project-path-row">
+            <input
+              id="ws-path"
+              value={workspacePath}
+              onChange={(event) => onWorkspacePathChange(event.target.value)}
+              placeholder="/absolute/path/to/project"
+              list="ws-hints"
+              autoFocus={projectWorkspaces.length === 0}
+            />
+            <datalist id="ws-hints">
+              {recentWorkspaces.map((path) => (
+                <option key={path} value={path} />
+              ))}
+            </datalist>
+            <button type="submit" disabled={busy || !workspacePath.trim()}>
+              Open
+            </button>
           </div>
-        </div>,
-        document.body,
-      )
-    : null;
+        </form>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div className="sidebar-inner" ref={drawerRef}>
@@ -213,21 +198,25 @@ export function Sidebar({
         docker-agent<span className="brand-sub"> dashboard</span>
       </div>
 
-      <button
-        type="button"
-        className="project-switcher"
-        ref={projectButtonRef}
-        aria-haspopup="dialog"
-        onClick={() => setProjectPickerOpen(true)}
-      >
-        <span>
-          <span className="project-name">{workspace ? clip(projectLabel(workspace.path), 60) : 'Choose a project'}</span>
-          <span className="project-path">
-            {workspace ? clip(workspace.path, 120) : 'Select a working directory'}
+      <div className="project-switcher-container" ref={projectSwitcherRef}>
+        <button
+          type="button"
+          className="project-switcher"
+          ref={projectButtonRef}
+          aria-haspopup="menu"
+          aria-expanded={projectPickerOpen}
+          onClick={() => setProjectPickerOpen((open) => !open)}
+        >
+          <span>
+            <span className="project-name">{workspace ? clip(projectLabel(workspace.path), 60) : 'Choose a project'}</span>
+            <span className="project-path">
+              {workspace ? clip(workspace.path, 120) : 'Select a working directory'}
+            </span>
           </span>
-        </span>
-        <span className="project-chevron" aria-hidden="true">›</span>
-      </button>
+          <span className="project-chevron" aria-hidden="true">⌄</span>
+        </button>
+        {projectPicker}
+      </div>
 
       <button
         type="button"
@@ -382,7 +371,6 @@ export function Sidebar({
       )}
 
       <p className="sidebar-version">docker-agent {clip(boot.agentVersion, 40)}</p>
-      {projectPicker}
     </div>
   );
 }
