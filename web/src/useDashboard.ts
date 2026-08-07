@@ -121,11 +121,13 @@ export function useDashboard(route: DashboardRoute) {
     [clearChat, refreshSessions, rememberWorkspace],
   );
 
-  const openWorkspace = (path: string) =>
+  const openWorkspace = (path: string) => {
+    setDrawerOpen(false);
     void guard(async () => {
       await applyWorkspace(path, true);
       route.leaveSession();
     });
+  };
 
   const activateChat = useCallback(
     async (nextChatId: string, sessionId: string, nextWorkspace: Workspace) => {

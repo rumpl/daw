@@ -53,7 +53,9 @@ describe('Sidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: /Live sessions 1/i })).toBeVisible();
+    const liveTab = screen.getByRole('tab', { name: /Live sessions 1/i });
+    expect(liveTab).toHaveAttribute('aria-selected', 'false');
+    await userEvent.click(liveTab);
     expect(screen.getByText('Running')).toBeVisible();
 
     await userEvent.click(
@@ -61,6 +63,7 @@ describe('Sidebar', () => {
     );
     expect(onResumeChat).toHaveBeenCalledWith('sess-live', '/code/other-project');
 
+    await userEvent.click(screen.getByText('•••'));
     await userEvent.click(screen.getByRole('button', { name: 'Close live session Fix the worker' }));
     expect(onCloseLiveSession).toHaveBeenCalledWith('sess-live', 'chat-live');
   });

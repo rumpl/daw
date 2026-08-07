@@ -1,4 +1,5 @@
-import { useMemo, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { Bootstrap, SessionSummary, Workspace } from '../protocol.gen';
 import { clip } from '../safety';
 
@@ -18,6 +19,10 @@ interface SidebarProps {
   onCloseLiveSession: (sessionId: string, chatId: string) => void;
 }
 
+function projectLabel(path: string) {
+  return path.split('/').filter(Boolean).slice(-2).join('/') || path;
+}
+
 export function Sidebar({
   boot,
   workspace,
@@ -33,7 +38,13 @@ export function Sidebar({
   onResumeChat,
   onCloseLiveSession,
 }: SidebarProps) {
+  const [activeTab, setActiveTab] = useState<'sessions' | 'live'>('sessions');
   const [sessionFilter, setSessionFilter] = useState('');
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [showPathInput, setShowPathInput] = useState(false);
+  const projectButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
   const filteredSessions = useMemo(() => {
     const query = sessionFilter.trim().toLowerCase();
     if (!query) return sessions;
@@ -42,7 +53,120 @@ export function Sidebar({
         session.title.toLowerCase().includes(query) || session.sessionId.toLowerCase().includes(query),
     );
   }, [sessions, sessionFilter]);
-  const projectWorkspaces = recentWorkspaces;
+
+  const projectWorkspaces = useMemo(
+    () => Array.from(new Set([workspace?.path, ...recentWorkspaces].filter((path): path is string => Boolean(path)))),
+    [recentWorkspaces, workspace?.path],
+  );
+  const pathInputVisible = showPathInput || projectWorkspaces.length === 0;
+
+  useEffect(() => {
+    if (!projectPickerOpen) return;
+    pickerRef.current?.querySelector<HTMLElement>('button:not([disabled]),input')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopImmediatePropagation();
+      setProjectPickerOpen(false);
+      projectButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [projectPickerOpen]);
+
+  const closeProjectPicker = () => {
+    setProjectPickerOpen(false);
+    setShowPathInput(false);
+    projectButtonRef.current?.focus();
+  };
+
+  const openProject = (path: string) => {
+    setProjectPickerOpen(false);
+    setShowPathInput(false);
+    onOpenWorkspace(path);
+  };
+
+  const projectPicker = projectPickerOpen
+    ? createPortal(
+        <div className="dialog-scrim project-picker-scrim" role="presentation" onMouseDown={closeProjectPicker}>
+          <div
+            className="dialog project-picker"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-picker-title"
+            ref={pickerRef}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="project-picker-head">
+              <h2 id="project-picker-title">Choose a project</h2>
+              <button type="button" aria-label="Close project picker" onClick={closeProjectPicker}>
+                Close
+              </button>
+            </div>
+
+            {projectWorkspaces.length > 0 ? (
+              <ul className="project-picker-list">
+                {projectWorkspaces.map((path) => {
+                  const current = path === workspace?.path;
+                  return (
+                    <li key={path}>
+                      <button
+                        type="button"
+                        title={path}
+                        aria-current={current ? 'page' : undefined}
+                        onClick={() => openProject(path)}
+                        disabled={busy || current}
+                      >
+                        <span className="project-name">{clip(projectLabel(path), 60)}</span>
+                        <span className="project-path">{clip(path, 160)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="hint">No recent projects.</p>
+            )}
+
+            {!pathInputVisible ? (
+              <button type="button" className="open-directory-button" onClick={() => setShowPathInput(true)}>
+                Open another directory…
+              </button>
+            ) : (
+              <form
+                className="project-path-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  openProject(workspacePath);
+                }}
+              >
+                <label htmlFor="ws-path">Working directory path</label>
+                <div className="project-path-row">
+                  <input
+                    id="ws-path"
+                    value={workspacePath}
+                    onChange={(event) => onWorkspacePathChange(event.target.value)}
+                    placeholder="/absolute/path/to/project"
+                    list="ws-hints"
+                    autoFocus={projectWorkspaces.length === 0}
+                  />
+                  <datalist id="ws-hints">
+                    {recentWorkspaces.map((path) => (
+                      <option key={path} value={path} />
+                    ))}
+                  </datalist>
+                  <button type="submit" disabled={busy || !workspacePath.trim()}>
+                    Open
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <p className="hint small">Allowed roots: {clip((boot.workspaceRoots ?? []).join(', '), 200)}</p>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
     <div className="sidebar-inner" ref={drawerRef}>
@@ -50,153 +174,133 @@ export function Sidebar({
         docker-agent<span className="brand-sub"> dashboard</span>
       </div>
 
-      <button type="button" className="block" onClick={onNewChat} disabled={!workspace || busy}>
+      <button
+        type="button"
+        className="project-switcher"
+        ref={projectButtonRef}
+        aria-haspopup="dialog"
+        onClick={() => setProjectPickerOpen(true)}
+      >
+        <span>
+          <span className="project-name">{workspace ? clip(projectLabel(workspace.path), 60) : 'Choose a project'}</span>
+          <span className="project-path">
+            {workspace ? clip(workspace.path, 120) : 'Select a working directory'}
+          </span>
+        </span>
+        <span className="project-chevron" aria-hidden="true">›</span>
+      </button>
+
+      <button type="button" className="block new-chat-button" onClick={onNewChat} disabled={!workspace || busy}>
         New chat
       </button>
 
-      <section className="live-sessions">
-        <h2>
-          Live sessions <span className="section-count">{liveSessions.length}</span>
-        </h2>
-        {liveSessions.length === 0 ? (
-          <p className="hint">No live sessions across your projects.</p>
-        ) : (
-          <ul className="live-session-list">
-            {liveSessions.map((session) => {
-              const project =
-                session.workingDir.split('/').filter(Boolean).slice(-2).join('/') || session.workingDir;
-              const status = session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle';
-              return (
-                <li key={session.sessionId} className="live-session-row">
-                  <button
-                    type="button"
-                    className="live-session-open"
-                    aria-label={`Open live session ${session.title || 'Untitled'} in ${session.workingDir}`}
-                    onClick={() => onResumeChat(session.sessionId, session.workingDir)}
-                    disabled={busy}
-                  >
+      <div className="sidebar-tabs" role="tablist" aria-label="Chat navigation">
+        <button
+          type="button"
+          role="tab"
+          id="sessions-tab"
+          aria-selected={activeTab === 'sessions'}
+          aria-controls="sessions-panel"
+          onClick={() => setActiveTab('sessions')}
+        >
+          Sessions <span>{sessions.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="live-tab"
+          aria-selected={activeTab === 'live'}
+          aria-controls="live-panel"
+          onClick={() => setActiveTab('live')}
+        >
+          Live sessions <span>{liveSessions.length}</span>
+        </button>
+      </div>
+
+      {activeTab === 'sessions' ? (
+        <section className="sidebar-panel" role="tabpanel" id="sessions-panel" aria-labelledby="sessions-tab">
+          <label className="sr-only" htmlFor="session-search">Search sessions</label>
+          <input
+            id="session-search"
+            value={sessionFilter}
+            onChange={(event) => setSessionFilter(event.target.value)}
+            placeholder="Search sessions"
+          />
+          {filteredSessions.length === 0 ? (
+            <p className="hint">
+              {workspace ? 'No sessions yet for this project.' : 'Choose a project to see sessions.'}
+            </p>
+          ) : (
+            <ul className="session-list">
+              {filteredSessions.map((session) => (
+                <li key={session.sessionId}>
+                  <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
                     <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
-                    <span className="session-project" title={session.workingDir}>
-                      {clip(project, 48)} ·{' '}
-                      <span className={`run-state run-${session.runState ?? 'idle'}`}>
-                        <span className="run-dot" aria-hidden="true" />
-                        {status}
-                      </span>
+                    <span className="session-meta">
+                      {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
+                      {session.messages} message{session.messages === 1 ? '' : 's'}
+                      {session.live
+                        ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
+                        : ''}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="close-session-button"
-                    aria-label={`Close live session ${session.title || 'Untitled'}`}
-                    title="Close this live session"
-                    onClick={() => onCloseLiveSession(session.sessionId, session.chatId ?? '')}
-                    disabled={busy || !session.chatId}
-                  >
-                    Close
-                  </button>
                 </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section>
-        <h2>Working directory</h2>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            onOpenWorkspace(workspacePath);
-          }}
-        >
-          <label className="sr-only" htmlFor="ws-path">
-            Working directory path
-          </label>
-          <input
-            id="ws-path"
-            value={workspacePath}
-            onChange={(event) => onWorkspacePathChange(event.target.value)}
-            placeholder="/absolute/path/to/project"
-            list="ws-hints"
-          />
-          <datalist id="ws-hints">
-            {recentWorkspaces.map((path) => (
-              <option key={path} value={path} />
-            ))}
-          </datalist>
-          <button type="submit" disabled={busy}>
-            Open
-          </button>
-        </form>
-        {workspace ? (
-          <code className="mono-path">{clip(workspace.path, 120)}</code>
-        ) : (
-          <p className="hint">No workspace selected yet.</p>
-        )}
-
-        {projectWorkspaces.length > 0 ? (
-          <>
-            <h3 className="sub-head">Projects</h3>
-            <ul className="recent-list">
-              {projectWorkspaces.slice(0, 10).map((path) => {
-                const current = path === workspace?.path;
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : (
+        <section className="sidebar-panel" role="tabpanel" id="live-panel" aria-labelledby="live-tab">
+          {liveSessions.length === 0 ? (
+            <p className="hint">No live sessions across your projects.</p>
+          ) : (
+            <ul className="session-list live-session-list">
+              {liveSessions.map((session) => {
+                const project = projectLabel(session.workingDir);
+                const status = session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle';
                 return (
-                  <li key={path}>
+                  <li key={session.sessionId} className="live-session-row">
                     <button
                       type="button"
-                      title={path}
-                      aria-current={current ? 'page' : undefined}
-                      onClick={() => onOpenWorkspace(path)}
-                      disabled={busy || current}
+                      className="live-session-open"
+                      aria-label={`Open live session ${session.title || 'Untitled'} in ${session.workingDir}`}
+                      onClick={() => onResumeChat(session.sessionId, session.workingDir)}
+                      disabled={busy}
                     >
-                      {clip(path.split('/').filter(Boolean).slice(-2).join('/') || path, 40)}
+                      <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
+                      <span className="session-project" title={session.workingDir}>
+                        {clip(project, 48)} ·{' '}
+                        <span className={`run-state run-${session.runState ?? 'idle'}`}>
+                          <span className="run-dot" aria-hidden="true" />
+                          {status}
+                        </span>
+                      </span>
                     </button>
+                    <details className="live-session-menu">
+                      <summary aria-label={`Actions for live session ${session.title || 'Untitled'}`}>•••</summary>
+                      <button
+                        type="button"
+                        className="close-session-button"
+                        aria-label={`Close live session ${session.title || 'Untitled'}`}
+                        onClick={(event) => {
+                          onCloseLiveSession(session.sessionId, session.chatId ?? '');
+                          event.currentTarget.closest('details')?.removeAttribute('open');
+                        }}
+                        disabled={busy || !session.chatId}
+                      >
+                        Close session
+                      </button>
+                    </details>
                   </li>
                 );
               })}
             </ul>
-          </>
-        ) : null}
-
-        <p className="hint small">Allowed roots: {clip((boot.workspaceRoots ?? []).join(', '), 200)}</p>
-      </section>
-
-      <section className="sessions">
-        <h2>Sessions</h2>
-        <label className="sr-only" htmlFor="session-search">
-          Search sessions
-        </label>
-        <input
-          id="session-search"
-          value={sessionFilter}
-          onChange={(event) => setSessionFilter(event.target.value)}
-          placeholder="Search sessions"
-        />
-        {filteredSessions.length === 0 ? (
-          <p className="hint">
-            {workspace ? 'No sessions yet for this directory.' : 'Open a workspace to see sessions.'}
-          </p>
-        ) : (
-          <ul className="session-list">
-            {filteredSessions.map((session) => (
-              <li key={session.sessionId}>
-                <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
-                  <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
-                  <span className="session-meta">
-                    {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
-                    {session.messages} message{session.messages === 1 ? '' : 's'}
-                    {session.live
-                      ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
-                      : ''}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          )}
+        </section>
+      )}
 
       <p className="sidebar-version">docker-agent {clip(boot.agentVersion, 40)}</p>
+      {projectPicker}
     </div>
   );
 }

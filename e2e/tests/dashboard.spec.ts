@@ -13,9 +13,15 @@ writeFileSync(agentFile, 'agents:\n  root:\n    model: fake\n');
 // Opening a working directory is the ONLY setup step: the server falls back to
 // docker-agent's built-in coder agent, so no agent config is ever chosen here.
 async function openWorkspaceAndAgent(page: Page) {
-  await page.getByLabel('Working directory path').fill(workspace);
-  await page.getByRole('button', { name: 'Open' }).click();
-  await expect(page.locator('.mono-path')).toHaveText(workspace);
+  await page.locator('.project-switcher').click();
+  const picker = page.getByRole('dialog', { name: 'Choose a project' });
+  const openAnother = picker.getByRole('button', { name: 'Open another directory…' });
+  if (await openAnother.isVisible()) await openAnother.click();
+  await picker.getByLabel('Working directory path').fill(workspace);
+  await picker.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(picker).toBeHidden();
+  await openDrawerIfMobile(page);
+  await expect(page.locator('.project-switcher')).toContainText(workspace);
 }
 
 async function openDrawerIfMobile(page: Page) {
@@ -242,7 +248,7 @@ test.describe('dashboard', () => {
     // Reload: no typing, no clicking — the workspace comes back on its own.
     await page.reload();
     await openDrawerIfMobile(page);
-    await expect(page.locator('.mono-path')).toHaveText(workspace);
+    await expect(page.locator('.project-switcher')).toContainText(workspace);
     await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeEnabled();
   });
 
@@ -256,14 +262,21 @@ test.describe('dashboard', () => {
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await openDrawerIfMobile(page);
-    await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
-    const project = page.getByTitle(workspace);
+    await page.locator('.project-switcher').click();
+    const picker = page.getByRole('dialog', { name: 'Choose a project' });
+    const project = picker.getByTitle(workspace);
     await expect(project).toBeVisible();
-
-    // Selecting a project highlights it; it must not disappear from the list.
     await project.click();
-    await expect(project).toBeVisible();
-    await expect(project).toHaveAttribute('aria-current', 'page');
+    await expect(picker).toBeHidden();
+    await openDrawerIfMobile(page);
+    await expect(page.locator('.project-switcher')).toContainText(workspace);
+
+    // The selected project remains in the picker and is marked as current.
+    await page.locator('.project-switcher').click();
+    await expect(page.getByRole('dialog', { name: 'Choose a project' }).getByTitle(workspace)).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   test('a workspace that no longer resolves is dropped without an error', async ({ page }) => {
@@ -274,7 +287,7 @@ test.describe('dashboard', () => {
     await page.reload();
     await openDrawerIfMobile(page);
     await expect(page.locator('.banner-error')).toHaveCount(0);
-    await expect(page.getByText('No workspace selected yet.')).toBeVisible();
+    await expect(page.getByText('Select a working directory')).toBeVisible();
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dawui.prefs.v1') ?? '{}').recentWorkspaces)).toEqual([]);
   });
 

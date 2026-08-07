@@ -15,8 +15,13 @@ async function run(name, viewport, mobile) {
   const p = await ctx.newPage();
   await p.goto(base);
   if (mobile) await p.getByRole('button', { name: 'Menu' }).click();
-  await p.getByLabel('Working directory path').fill(root);
-  await p.getByRole('button', { name: 'Open' }).click();
+  await p.locator('.project-switcher').click();
+  const picker = p.getByRole('dialog', { name: 'Choose a project' });
+  const openAnother = picker.getByRole('button', { name: 'Open another directory…' });
+  if (await openAnother.isVisible()) await openAnother.click();
+  await picker.getByLabel('Working directory path').fill(root);
+  await picker.getByRole('button', { name: 'Open', exact: true }).click();
+  if (mobile) await p.getByRole('button', { name: 'Menu' }).click();
   await p.getByRole('button', { name: 'New chat', exact: true }).click();
   await p.getByRole('textbox', { name: 'Message' }).fill('Run some random tools, I am testing my web ui');
   await p.getByRole('button', { name: 'Send' }).click();
