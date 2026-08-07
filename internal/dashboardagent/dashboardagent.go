@@ -19,7 +19,6 @@ import (
 	"github.com/docker/docker-agent/pkg/tools/builtin/fetch"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tools/builtin/shell"
-	"github.com/docker/docker-agent/pkg/tools/builtin/todo"
 )
 
 // Name is the source name exposed by the dashboard API.
@@ -120,7 +119,6 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 			filesystem.New(runConfig.WorkingDir),
 			shell.New(os.Environ(), runConfig),
 			backgroundjobs.New(os.Environ(), runConfig),
-			todo.New(),
 			fetch.New(),
 		),
 	)
