@@ -356,7 +356,7 @@ test.describe('dashboard', () => {
     // "Jump to latest" only exists once the conversation overflows, so make it
     // overflow, then scroll away from the bottom.
     await page.setViewportSize({ width: 1280, height: 400 });
-    for (const text of ['/notool second', '/notool third']) {
+    for (const text of ['/notool second', '/notool third', '/notool fourth', '/notool fifth']) {
       await composer(page).fill(text);
       await page.getByRole('button', { name: 'Send' }).click();
       await expect(page.getByRole('button', { name: /Stop/ })).toHaveCount(0, { timeout: 20_000 });

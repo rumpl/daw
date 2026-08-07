@@ -222,15 +222,24 @@ func (c *chat) normalize(ev daruntime.Event) {
 		if e.Usage == nil {
 			return
 		}
-		c.emit(protocol.Event{
-			Type: protocol.EventUsage,
-			Usage: &protocol.Usage{
-				InputTokens:  e.Usage.InputTokens,
-				OutputTokens: e.Usage.OutputTokens,
-				Cost:         e.Usage.Cost,
-				ContextLimit: e.Usage.ContextLimit,
-			},
-		})
+		usage := &protocol.Usage{
+			InputTokens:  e.Usage.InputTokens,
+			OutputTokens: e.Usage.OutputTokens,
+			Cost:         e.Usage.Cost,
+			ContextLimit: e.Usage.ContextLimit,
+		}
+		if e.Usage.LastMessage != nil {
+			usage.LastMessage = &protocol.MessageUsage{
+				InputTokens:       e.Usage.LastMessage.InputTokens,
+				OutputTokens:      e.Usage.LastMessage.OutputTokens,
+				CachedInputTokens: e.Usage.LastMessage.CachedInputTokens,
+				CacheWriteTokens:  e.Usage.LastMessage.CacheWriteTokens,
+				ReasoningTokens:   e.Usage.LastMessage.ReasoningTokens,
+				Cost:              e.Usage.LastMessage.Cost,
+				Model:             e.Usage.LastMessage.Model,
+			}
+		}
+		c.emit(protocol.Event{Type: protocol.EventUsage, Usage: usage})
 
 	case *daruntime.SessionCompactionEvent:
 		msg := "Context compaction " + e.Status

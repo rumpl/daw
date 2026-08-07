@@ -237,12 +237,24 @@ type RunStatus struct {
 	Queue QueueStatus `json:"queue"`
 }
 
+// MessageUsage is billing data for the most recent model invocation.
+type MessageUsage struct {
+	InputTokens       int64   `json:"inputTokens"`
+	OutputTokens      int64   `json:"outputTokens"`
+	CachedInputTokens int64   `json:"cachedInputTokens"`
+	CacheWriteTokens  int64   `json:"cacheWriteTokens"`
+	ReasoningTokens   int64   `json:"reasoningTokens"`
+	Cost              float64 `json:"cost"`
+	Model             string  `json:"model"`
+}
+
 // Usage is cumulative token/cost accounting for a session.
 type Usage struct {
-	InputTokens  int64   `json:"inputTokens"`
-	OutputTokens int64   `json:"outputTokens"`
-	Cost         float64 `json:"cost"`
-	ContextLimit int64   `json:"contextLimit"`
+	InputTokens  int64         `json:"inputTokens"`
+	OutputTokens int64         `json:"outputTokens"`
+	Cost         float64       `json:"cost"`
+	ContextLimit int64         `json:"contextLimit"`
+	LastMessage  *MessageUsage `json:"-"`
 }
 
 // PermissionsView reports the pattern sets the autonomous runtime evaluates.

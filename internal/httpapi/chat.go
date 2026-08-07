@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/rumpl/daw/internal/adapter"
@@ -281,7 +282,11 @@ func (l *liveChat) applyLocked(ev *protocol.Event) {
 		}
 	case protocol.EventUsage:
 		if ev.Usage != nil {
+			if ev.Usage.LastMessage != nil {
+				l.applyLastMessageUsageLocked(*ev.Usage.LastMessage)
+			}
 			l.usage = *ev.Usage
+			l.usage.LastMessage = nil
 		}
 	case protocol.EventSessionMeta:
 		if ev.Meta != nil {
@@ -307,6 +312,29 @@ func (l *liveChat) applyLocked(ev *protocol.Event) {
 		if ev.ElicitResolved != nil {
 			delete(l.pendingE, ev.ElicitResolved.ElicitationID)
 		}
+	}
+}
+
+// applyLastMessageUsageLocked attaches docker-agent's live per-invocation
+// accounting to the most recent assistant item. Stored history already carries
+// these fields directly; this bridges the live event stream until rehydration.
+func (l *liveChat) applyLastMessageUsageLocked(usage protocol.MessageUsage) {
+	for i, item := range slices.Backward(l.items) {
+		if item.Kind != protocol.ItemKindMessage || item.Message == nil || item.Message.Role != "assistant" {
+			continue
+		}
+		m := *item.Message
+		m.Cost = usage.Cost
+		m.InputTokens = usage.InputTokens
+		m.OutputTokens = usage.OutputTokens
+		m.CachedInputTokens = usage.CachedInputTokens
+		m.CacheWriteTokens = usage.CacheWriteTokens
+		m.ReasoningTokens = usage.ReasoningTokens
+		if usage.Model != "" {
+			m.Model = usage.Model
+		}
+		l.items[i].Message = &m
+		return
 	}
 }
 

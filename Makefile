@@ -8,8 +8,8 @@ BIN := bin/dawui
 PORT ?= 4788
 GO ?= go
 
-.PHONY: all deps generate dev dev-fake typecheck test test-go test-web test-e2e \
-        build build-web build-go start clean smoke-real screenshots help
+.PHONY: all deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
+        ci build build-web build-go start clean smoke-real screenshots help
 
 all: build
 
@@ -56,11 +56,19 @@ typecheck:
 	fi
 	cd web && npx tsc --noEmit
 
+## lint: run the Go linter configuration
+lint:
+	golangci-lint run ./...
+
 ## test: Go tests and Vitest
 test: test-go test-web
 
 test-go:
 	$(GO) test ./...
+
+## test-race: run Go tests with the race detector
+test-race:
+	$(GO) test -race ./...
 
 test-web:
 	cd web && npx vitest run
@@ -70,6 +78,15 @@ test-e2e: build
 	cd e2e && npm ci 2>/dev/null || (cd e2e && npm install)
 	cd e2e && npx playwright install chromium
 	cd e2e && npx playwright test
+
+## ci: run the complete pull-request gate after dependencies are installed
+ci: generate
+	git diff --exit-code -- web/src/protocol.gen.ts
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) test-race
+	$(MAKE) test-web
+	$(MAKE) build
 
 ## build: compile the Go binary with the frontend embedded
 build: generate build-web build-go

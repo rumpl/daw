@@ -227,11 +227,12 @@ func (c *chat) emit(ev protocol.Event) {
 		ev.Tool = &tool
 	}
 	c.mu.Lock()
-	closed := c.closed
-	c.mu.Unlock()
-	if closed {
+	defer c.mu.Unlock()
+	if c.closed {
 		return
 	}
+	// Keep the closed check and send under the same lock as Close. Otherwise
+	// Close can close the channel between the check and send.
 	select {
 	case c.events <- ev:
 	default:

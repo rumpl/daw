@@ -1,7 +1,6 @@
 package dagent
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +38,30 @@ func TestSessionSummaryEmitsCompactionResult(t *testing.T) {
 	}
 }
 
+func TestTokenUsagePreservesLastMessageBilling(t *testing.T) {
+	c := &chat{sess: session.New(), events: make(chan protocol.Event, 1)}
+	c.normalize(daruntime.NewTokenUsageEvent(c.sess.ID, "root", &daruntime.Usage{
+		InputTokens: 1000, OutputTokens: 60, Cost: 0.02,
+		LastMessage: &daruntime.MessageUsage{
+			Usage: dachat.Usage{
+				InputTokens: 400, OutputTokens: 30, CachedInputTokens: 250,
+				CacheWriteTokens: 15, ReasoningTokens: 8,
+			},
+			Cost: 0.009, Model: "provider/model",
+		},
+	}))
+
+	ev := <-c.events
+	if ev.Type != protocol.EventUsage || ev.Usage == nil || ev.Usage.LastMessage == nil {
+		t.Fatalf("last-message usage was not normalized: %+v", ev)
+	}
+	got := ev.Usage.LastMessage
+	if got.Cost != 0.009 || got.InputTokens != 400 || got.CachedInputTokens != 250 ||
+		got.CacheWriteTokens != 15 || got.ReasoningTokens != 8 || got.Model != "provider/model" {
+		t.Fatalf("last-message billing data was not preserved: %+v", got)
+	}
+}
+
 func TestSnapshotExposesExactStoredMessageCost(t *testing.T) {
 	sess := session.New()
 	sess.AddMessage(session.NewAgentMessage("root", &dachat.Message{
@@ -50,7 +73,7 @@ func TestSnapshotExposesExactStoredMessageCost(t *testing.T) {
 	}))
 	c := &chat{sess: sess}
 
-	items, _, err := c.Snapshot(context.Background())
+	items, _, err := c.Snapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +109,7 @@ func TestSnapshotKeepsToolCallOnlyAssistantMessages(t *testing.T) {
 	}))
 	c := &chat{sess: sess}
 
-	items, _, err := c.Snapshot(context.Background())
+	items, _, err := c.Snapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

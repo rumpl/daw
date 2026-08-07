@@ -28,7 +28,7 @@ export default defineConfig({
   webServer: {
     command: '../bin/dawui',
     cwd: '.',
-    url: `http://127.0.0.1:${PORT}/api/health`,
+    port: Number(PORT),
     reuseExistingServer: false,
     stdout: 'ignore',
     stderr: 'pipe',

@@ -46,6 +46,38 @@ func TestReducerAppliesDeltasByStableID(t *testing.T) {
 	}
 }
 
+func TestLiveUsageIsAttachedToLatestAssistantMessage(t *testing.T) {
+	c := testChat()
+	c.publish(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
+		ID: "a1", Role: "assistant", Text: "first",
+	}})
+	c.publish(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
+		ID: "a2", Role: "assistant", Text: "latest", Streaming: true,
+	}})
+	c.publish(protocol.Event{Type: protocol.EventUsage, Usage: &protocol.Usage{
+		InputTokens: 1500, OutputTokens: 80, Cost: 0.02,
+		LastMessage: &protocol.MessageUsage{
+			InputTokens: 700, OutputTokens: 40, CachedInputTokens: 500,
+			CacheWriteTokens: 20, ReasoningTokens: 10, Cost: 0.012345, Model: "provider/model",
+		},
+	}})
+
+	snap := c.snapshot()
+	first := snap.Items[0].Message
+	latest := snap.Items[1].Message
+	if first.Cost != 0 || first.InputTokens != 0 {
+		t.Fatalf("older message received latest usage: %+v", first)
+	}
+	if latest.Cost != 0.012345 || latest.InputTokens != 700 || latest.OutputTokens != 40 ||
+		latest.CachedInputTokens != 500 || latest.CacheWriteTokens != 20 ||
+		latest.ReasoningTokens != 10 || latest.Model != "provider/model" {
+		t.Fatalf("latest message billing data was not applied: %+v", latest)
+	}
+	if snap.Usage.Cost != 0.02 || snap.Usage.LastMessage != nil {
+		t.Fatalf("cumulative usage was not stored cleanly: %+v", snap.Usage)
+	}
+}
+
 func TestReducerNeverDuplicatesByID(t *testing.T) {
 	c := testChat()
 	for range 3 {

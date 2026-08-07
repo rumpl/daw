@@ -40,8 +40,6 @@ Open a folder, hit **New chat**, and type.
 - A working `docker-agent` install — if a chat reports no model, run
   `docker agent setup` or `docker agent doctor`
 
-Pinned to `github.com/docker/docker-agent v1.122.0`.
-
 ---
 
 ## Quick start
