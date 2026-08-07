@@ -20,16 +20,11 @@ function MessageBubble({ message }: { message: MessageItem }) {
       {/* Reasoning is model output: always visible, escaped text, never Markdown. */}
       {message.reasoning ? <p className="reasoning">{message.reasoning}</p> : null}
 
-      {/*
-        Streaming text is escaped plain text; only the completed message is
-        rendered as GFM Markdown. This keeps partial, unbalanced Markdown from
-        being interpreted mid-stream.
-      */}
       {message.streaming ? (
-        <pre className="msg-streaming" aria-live="polite">
-          {message.text}
+        <div className="msg-streaming" aria-live="polite">
+          <Markdown>{message.text}</Markdown>
           <span className="caret" aria-hidden="true" />
-        </pre>
+        </div>
       ) : isUser ? (
         <pre className="msg-plain">{message.text}</pre>
       ) : (

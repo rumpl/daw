@@ -324,9 +324,10 @@ select {
 }
 .msg-model { margin-left: auto; font-family: var(--mono); font-size: 10.5px; }
 
-.msg-plain, .msg-streaming {
+.msg-plain {
   white-space: pre-wrap; word-break: break-word; margin: 0; font-family: inherit;
 }
+.msg-streaming { margin: 0; }
 .caret {
   display: inline-block; width: 6px; height: 1em; margin-left: 2px;
   background: var(--fg-dim); vertical-align: -1px;
