@@ -1,15 +1,117 @@
-package httpapi
+package workspaces
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
+	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
 )
+
+type Workspace struct {
+	ID   string
+	Path string
+}
+
+// Service is the authority for validated workspace paths and their persisted
+// most-recently-used list.
+type Service struct {
+	mu          sync.Mutex
+	guard       *pathsec.Guard
+	historyFile string
+	log         *slog.Logger
+	entries     map[string]*Workspace
+	hints       []protocol.WorkspaceHint
+}
+
+func New(guard *pathsec.Guard, historyFile string, log *slog.Logger) *Service {
+	s := &Service{
+		guard: guard, historyFile: historyFile, log: log,
+		entries: map[string]*Workspace{},
+	}
+	s.loadHistory()
+	return s
+}
+
+func (s *Service) Open(path string) (*Workspace, error) {
+	canon, err := s.guard.ResolveDir(path)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.entries {
+		if entry.Path == canon {
+			s.rememberLocked(canon)
+			return entry, nil
+		}
+	}
+	entry := &Workspace{ID: newID(), Path: canon}
+	s.entries[entry.ID] = entry
+	s.rememberLocked(canon)
+	return entry, nil
+}
+
+func (s *Service) Get(id string) (*Workspace, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.entries[id]
+	return entry, ok
+}
+
+func (s *Service) Add(id, path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.entries[id] = &Workspace{ID: id, Path: path}
+}
+
+func (s *Service) Hints() []protocol.WorkspaceHint {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]protocol.WorkspaceHint(nil), s.hints...)
+}
+
+func (s *Service) Path(id string) (string, bool) {
+	entry, ok := s.Get(id)
+	if !ok {
+		return "", false
+	}
+	return entry.Path, true
+}
+
+func (s *Service) rememberLocked(path string) {
+	next := make([]protocol.WorkspaceHint, 0, min(len(s.hints)+1, maxWorkspaceHints))
+	next = append(next, protocol.WorkspaceHint{Path: path, Label: filepath.Base(path)})
+	for _, hint := range s.hints {
+		if hint.Path == path {
+			continue
+		}
+		next = append(next, hint)
+		if len(next) == maxWorkspaceHints {
+			break
+		}
+	}
+	s.hints = next
+	if s.historyFile != "" {
+		if err := writeWorkspaceHistory(s.historyFile, s.hints); err != nil {
+			s.log.Warn("could not persist workspace history", "error", err)
+		}
+	}
+}
+
+func newID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "ws_" + hex.EncodeToString(b)
+}
 
 const (
 	workspaceHistoryVersion = 1
@@ -22,15 +124,15 @@ type workspaceHistory struct {
 	Paths   []string `json:"paths"`
 }
 
-// loadWorkspaceHistory restores the server-wide project list. Every stored
-// path is resolved again: deleted projects and paths outside the user's home
-// directory are not advertised to browsers.
-func (s *Server) loadWorkspaceHistory() {
-	if s.workspaceHistoryFile == "" {
+// loadHistory restores the server-wide project list. Every stored path is
+// resolved again: deleted projects and paths outside the user's home directory
+// are not advertised to browsers.
+func (s *Service) loadHistory() {
+	if s.historyFile == "" {
 		return
 	}
 
-	history, err := readWorkspaceHistory(s.workspaceHistoryFile)
+	history, err := readWorkspaceHistory(s.historyFile)
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
@@ -46,10 +148,10 @@ func (s *Server) loadWorkspaceHistory() {
 			continue
 		}
 		seen[canon] = true
-		s.hintsWS = append(s.hintsWS, protocol.WorkspaceHint{
+		s.hints = append(s.hints, protocol.WorkspaceHint{
 			Path: canon, Label: filepath.Base(canon),
 		})
-		if len(s.hintsWS) == maxWorkspaceHints {
+		if len(s.hints) == maxWorkspaceHints {
 			break
 		}
 	}

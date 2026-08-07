@@ -220,6 +220,12 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 func (c *chat) Events() <-chan protocol.Event { return c.events }
 
 func (c *chat) emit(ev protocol.Event) {
+	// Events are immutable once published. The scripted fake reuses its local
+	// tool value while advancing states, so give the consumer its own copy.
+	if ev.Tool != nil {
+		tool := *ev.Tool
+		ev.Tool = &tool
+	}
 	c.mu.Lock()
 	closed := c.closed
 	c.mu.Unlock()

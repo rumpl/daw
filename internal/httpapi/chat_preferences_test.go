@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rumpl/daw/internal/adapter/fake"
+	"github.com/rumpl/daw/internal/chatprefs"
 	"github.com/rumpl/daw/internal/pathsec"
 )
 
@@ -33,10 +34,10 @@ func TestChatPreferencesPersistDefaultsAndPerSessionChoices(t *testing.T) {
 	preferencesFile := filepath.Join(t.TempDir(), "dawui-chat-preferences.json")
 
 	first := newPreferenceTestServer(t, root, preferencesFile)
-	if err := first.rememberChatPreference("session-a", chatPreference{Model: "fake/model-b"}); err != nil {
+	if err := first.preferences.Remember("session-a", chatprefs.Preference{Model: "fake/model-b"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.rememberChatPreference("session-a", chatPreference{ThinkingLevel: "high"}); err != nil {
+	if err := first.preferences.Remember("session-a", chatprefs.Preference{ThinkingLevel: "high"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,9 +52,9 @@ func TestChatPreferencesPersistDefaultsAndPerSessionChoices(t *testing.T) {
 	// Constructing another server simulates a process restart and reads only
 	// the file, not the first server's in-memory state.
 	second := newPreferenceTestServer(t, root, preferencesFile)
-	for name, got := range map[string]chatPreference{
-		"new chat":        second.chatPreference(""),
-		"resumed session": second.chatPreference("session-a"),
+	for name, got := range map[string]chatprefs.Preference{
+		"new chat":        second.preferences.Get(""),
+		"resumed session": second.preferences.Get("session-a"),
 	} {
 		if got.Model != "fake/model-b" || got.ThinkingLevel != "high" {
 			t.Fatalf("%s preference = %+v", name, got)
@@ -62,7 +63,7 @@ func TestChatPreferencesPersistDefaultsAndPerSessionChoices(t *testing.T) {
 
 	// A session which never selected dashboard overrides must retain the
 	// docker-agent session's own values instead of inheriting a later default.
-	if got := second.chatPreference("older-session"); got.Model != "" || got.ThinkingLevel != "" {
+	if got := second.preferences.Get("older-session"); got.Model != "" || got.ThinkingLevel != "" {
 		t.Fatalf("unconfigured resumed session inherited defaults: %+v", got)
 	}
 }
@@ -71,13 +72,13 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	root := t.TempDir()
 	preferencesFile := filepath.Join(t.TempDir(), "preferences.json")
 	first := newPreferenceTestServer(t, root, preferencesFile)
-	if err := first.rememberChatPreference("previous-session", chatPreference{
+	if err := first.preferences.Remember("previous-session", chatprefs.Preference{
 		Model: "fake/model-b", ThinkingLevel: "high",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	first.workspaces["ws"] = &workspaceEntry{id: "ws", path: root}
+	first.workspaces.Add("ws", root)
 	recorder := httptest.NewRecorder()
 	first.openChat(recorder, httptest.NewRequest("POST", "/api/chats", nil), "ws", "")
 	if recorder.Code != 201 {
@@ -98,7 +99,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	if meta.Model != "fake/model-b" || meta.ThinkingLevel != "high" {
 		t.Fatalf("new chat did not receive persisted defaults: %+v", meta)
 	}
-	if bound := first.chatPreference(ref.SessionID); bound.Model != "fake/model-b" || bound.ThinkingLevel != "high" {
+	if bound := first.preferences.Get(ref.SessionID); bound.Model != "fake/model-b" || bound.ThinkingLevel != "high" {
 		t.Fatalf("inherited defaults were not bound to the new session: %+v", bound)
 	}
 	first.Shutdown(context.Background())
@@ -108,7 +109,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	second := newPreferenceTestServer(t, root, preferencesFile)
 	secondFake := second.adapter.(*fake.Adapter)
 	secondFake.Seed(ref.SessionID, "Existing", root, nil)
-	second.workspaces["ws"] = &workspaceEntry{id: "ws", path: root}
+	second.workspaces.Add("ws", root)
 	recorder = httptest.NewRecorder()
 	second.openChat(recorder, httptest.NewRequest("POST", "/api/chats/resume", nil), "ws", ref.SessionID)
 	if recorder.Code != 201 {
@@ -136,22 +137,22 @@ func TestChatPreferencesMergeIndependentControls(t *testing.T) {
 	preferencesFile := filepath.Join(t.TempDir(), "preferences.json")
 	s := newPreferenceTestServer(t, root, preferencesFile)
 
-	if err := s.rememberChatPreference("one", chatPreference{Model: "fake/model-b", ThinkingLevel: "low"}); err != nil {
+	if err := s.preferences.Remember("one", chatprefs.Preference{Model: "fake/model-b", ThinkingLevel: "low"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.rememberChatPreference("two", chatPreference{ThinkingLevel: "high"}); err != nil {
+	if err := s.preferences.Remember("two", chatprefs.Preference{ThinkingLevel: "high"}); err != nil {
 		t.Fatal(err)
 	}
 
-	one := s.chatPreference("one")
+	one := s.preferences.Get("one")
 	if one.Model != "fake/model-b" || one.ThinkingLevel != "low" {
 		t.Fatalf("session one was overwritten: %+v", one)
 	}
-	two := s.chatPreference("two")
+	two := s.preferences.Get("two")
 	if two.Model != "" || two.ThinkingLevel != "high" {
 		t.Fatalf("session two should contain only its own patch: %+v", two)
 	}
-	def := s.chatPreference("")
+	def := s.preferences.Get("")
 	if def.Model != "fake/model-b" || def.ThinkingLevel != "high" {
 		t.Fatalf("new-chat defaults did not merge latest independent choices: %+v", def)
 	}

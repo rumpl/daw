@@ -1,48 +1,42 @@
-package httpapi
+package chatprefs
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-const (
-	chatPreferencesVersion = 1
-	maxChatPreferencesSize = 1 << 20 // 1 MiB
-	maxSessionPreferences  = 2048
-)
-
-// chatPreference is deliberately small and non-secret. A per-session entry
-// preserves the controls when that session is resumed; Default makes the most
-// recently selected values the starting point for a brand-new chat.
-type chatPreference struct {
-	Model         string `json:"model,omitempty"`
-	ThinkingLevel string `json:"thinkingLevel,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+// Service persists dashboard-only chat controls. It owns all synchronization
+// and file I/O for preferences.
+type Service struct {
+	mu    sync.Mutex
+	file  string
+	log   *slog.Logger
+	state preferences
 }
 
-type chatPreferences struct {
-	Version  int                       `json:"version"`
-	Default  chatPreference            `json:"default"`
-	Sessions map[string]chatPreference `json:"sessions,omitempty"`
+func New(file string, log *slog.Logger) *Service {
+	s := &Service{file: file, log: log}
+	s.load()
+	return s
 }
 
-func (s *Server) loadChatPreferences() {
-	s.preferences = chatPreferences{
-		Version:  chatPreferencesVersion,
-		Sessions: map[string]chatPreference{},
+func (s *Service) load() {
+	s.state = preferences{
+		Version: preferencesVersion, Sessions: map[string]Preference{},
 	}
-	if s.chatPreferencesFile == "" {
+	if s.file == "" {
 		return
 	}
-
-	preferences, err := readChatPreferences(s.chatPreferencesFile)
+	preferences, err := read(s.file)
 	if errors.Is(err, os.ErrNotExist) {
 		return
 	}
@@ -50,11 +44,69 @@ func (s *Server) loadChatPreferences() {
 		s.log.Warn("could not read chat preferences", "error", err)
 		return
 	}
-	s.preferences = preferences
+	s.state = preferences
 }
 
-func readChatPreferences(path string) (chatPreferences, error) {
-	var preferences chatPreferences
+func (s *Service) Get(sessionID string) Preference {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sessionID == "" {
+		return s.state.Default
+	}
+	return s.state.Sessions[sessionID]
+}
+
+func (s *Service) Remember(sessionID string, patch Preference) error {
+	if s.file == "" {
+		return nil
+	}
+	patch = sanitizeChatPreference(patch)
+	if sessionID == "" || (patch.Model == "" && patch.ThinkingLevel == "") {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	merge := func(current Preference) Preference {
+		if patch.Model != "" {
+			current.Model = patch.Model
+		}
+		if patch.ThinkingLevel != "" {
+			current.ThinkingLevel = patch.ThinkingLevel
+		}
+		current.UpdatedAt = now
+		return current
+	}
+	s.state.Default = merge(s.state.Default)
+	s.state.Sessions[sessionID] = merge(s.state.Sessions[sessionID])
+	pruneChatPreferences(s.state.Sessions)
+	return write(s.file, s.state)
+}
+
+const (
+	preferencesVersion     = 1
+	maxChatPreferencesSize = 1 << 20 // 1 MiB
+	maxSessionPreferences  = 2048
+)
+
+// Preference is deliberately small and non-secret. A per-session entry
+// preserves the controls when that session is resumed; Default makes the most
+// recently selected values the starting point for a brand-new chat.
+type Preference struct {
+	Model         string `json:"model,omitempty"`
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+}
+
+type preferences struct {
+	Version  int                   `json:"version"`
+	Default  Preference            `json:"default"`
+	Sessions map[string]Preference `json:"sessions,omitempty"`
+}
+
+func read(path string) (preferences, error) {
+	var preferences preferences
 	f, err := os.Open(path)
 	if err != nil {
 		return preferences, err
@@ -71,11 +123,11 @@ func readChatPreferences(path string) (chatPreferences, error) {
 	if err := json.Unmarshal(data, &preferences); err != nil {
 		return preferences, fmt.Errorf("decode chat preferences: %w", err)
 	}
-	if preferences.Version != chatPreferencesVersion {
+	if preferences.Version != preferencesVersion {
 		return preferences, fmt.Errorf("unsupported chat preferences version %d", preferences.Version)
 	}
 	if preferences.Sessions == nil {
-		preferences.Sessions = map[string]chatPreference{}
+		preferences.Sessions = map[string]Preference{}
 	}
 	preferences.Default = sanitizeChatPreference(preferences.Default)
 	for id, preference := range preferences.Sessions {
@@ -88,7 +140,7 @@ func readChatPreferences(path string) (chatPreferences, error) {
 	return preferences, nil
 }
 
-func sanitizeChatPreference(preference chatPreference) chatPreference {
+func sanitizeChatPreference(preference Preference) Preference {
 	preference.Model = strings.TrimSpace(preference.Model)
 	preference.ThinkingLevel = strings.TrimSpace(preference.ThinkingLevel)
 	// Corrupt or hand-edited files must not feed unbounded strings into model
@@ -102,53 +154,7 @@ func sanitizeChatPreference(preference chatPreference) chatPreference {
 	return preference
 }
 
-// chatPreference returns the persisted defaults for a new chat, or the exact
-// per-session choice for a resumed chat. Defaults are intentionally not laid
-// over old sessions: sessions without a dashboard override retain their own
-// docker-agent configuration.
-func (s *Server) chatPreference(sessionID string) chatPreference {
-	s.preferencesMu.Lock()
-	defer s.preferencesMu.Unlock()
-	if sessionID == "" {
-		return s.preferences.Default
-	}
-	return s.preferences.Sessions[sessionID]
-}
-
-// rememberChatPreference atomically updates both the session's choice and the
-// defaults used by future chats. Holding preferencesMu through the rename
-// serializes concurrent browser updates, so an older write cannot replace a
-// newer complete snapshot.
-func (s *Server) rememberChatPreference(sessionID string, patch chatPreference) error {
-	if s.chatPreferencesFile == "" {
-		return nil
-	}
-	patch = sanitizeChatPreference(patch)
-	if sessionID == "" || (patch.Model == "" && patch.ThinkingLevel == "") {
-		return nil
-	}
-
-	s.preferencesMu.Lock()
-	defer s.preferencesMu.Unlock()
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	merge := func(current chatPreference) chatPreference {
-		if patch.Model != "" {
-			current.Model = patch.Model
-		}
-		if patch.ThinkingLevel != "" {
-			current.ThinkingLevel = patch.ThinkingLevel
-		}
-		current.UpdatedAt = now
-		return current
-	}
-	s.preferences.Default = merge(s.preferences.Default)
-	s.preferences.Sessions[sessionID] = merge(s.preferences.Sessions[sessionID])
-	pruneChatPreferences(s.preferences.Sessions)
-	return writeChatPreferences(s.chatPreferencesFile, s.preferences)
-}
-
-func pruneChatPreferences(sessions map[string]chatPreference) {
+func pruneChatPreferences(sessions map[string]Preference) {
 	if len(sessions) <= maxSessionPreferences {
 		return
 	}
@@ -174,7 +180,7 @@ func pruneChatPreferences(sessions map[string]chatPreference) {
 // writeChatPreferences follows the same owner-only, same-directory atomic
 // replacement scheme as workspace history. A crash leaves either the old
 // complete file or the new complete file, never a partially written setting.
-func writeChatPreferences(path string, preferences chatPreferences) (retErr error) {
+func write(path string, preferences preferences) (retErr error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create chat preferences directory: %w", err)
