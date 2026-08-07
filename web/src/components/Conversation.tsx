@@ -11,8 +11,11 @@ function MessageBubble({ message }: { message: MessageItem }) {
   const isUser = message.role === 'user';
   return (
     <article className={`msg msg-${isUser ? 'user' : 'assistant'}`} aria-label={`${message.role} message`}>
-      {/* Reasoning is model output: always visible, escaped text, never Markdown. */}
-      {message.reasoning ? <p className="reasoning">{message.reasoning}</p> : null}
+      {message.reasoning ? (
+        <div className="reasoning">
+          <Markdown>{message.reasoning}</Markdown>
+        </div>
+      ) : null}
 
       {message.streaming ? (
         <div className="msg-streaming" aria-live="polite">

@@ -35,6 +35,20 @@ describe('Conversation', () => {
     expect(container.querySelector('.msg-streaming pre')).toBeNull();
   });
 
+  it('renders reasoning with its existing styling class and Markdown', () => {
+    const { container } = render(
+      <Conversation
+        items={[assistantMessage({ reasoning: '**Considering** the options:\n\n- first\n- second' })]}
+        empty={null}
+      />,
+    );
+
+    const reasoning = container.querySelector('.reasoning');
+    expect(reasoning).not.toBeNull();
+    expect(reasoning?.querySelector('strong')).toHaveTextContent('Considering');
+    expect(reasoning?.querySelectorAll('li')).toHaveLength(2);
+  });
+
   it('does not render agent or model metadata in messages', () => {
     const { container } = render(
       <Conversation
