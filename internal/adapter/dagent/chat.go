@@ -61,6 +61,7 @@ type chat struct {
 	thinking     string
 	thinkLevels  []string
 	assistantSeq int
+	userSeq      int
 	curAssistant string
 	noticeSeq    int
 }
@@ -365,10 +366,6 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 
 	msg := session.UserMessage(resolved)
 	c.sess.AddMessage(msg)
-	c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
-		ID: fmt.Sprintf("%s-live-user-%d", c.sess.ID, gen), Role: "user", Text: resolved,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}})
 	c.publishRun()
 
 	// Generate a session title from the first user message(s), exactly as the

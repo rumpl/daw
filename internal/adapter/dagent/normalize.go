@@ -3,6 +3,7 @@ package dagent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
@@ -44,10 +45,22 @@ func (c *chat) normalize(ev daruntime.Event) {
 		})
 
 	case *daruntime.UserMessageEvent:
-		// Implicit/system-injected user messages are not shown.
-		if e.Message == "" {
+		if strings.TrimSpace(e.Message) == "" || (e.SessionID != "" && e.SessionID != c.sess.ID) {
 			return
 		}
+		// Runtime user-message events are authoritative for the live timeline.
+		// In particular, steer and follow-up messages are emitted only when the
+		// runtime consumes them, rather than when the HTTP request queues them.
+		c.closeAssistant()
+		id := c.userMessageID(e.SessionPosition)
+		createdAt := e.Timestamp
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
+		c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
+			ID: id, Role: "user", Text: e.Message,
+			CreatedAt: createdAt.UTC().Format(time.RFC3339),
+		}})
 
 	case *daruntime.PartialToolCallEvent:
 		// docker-agent emits this as soon as the model starts a tool call. Its
@@ -229,6 +242,19 @@ func (c *chat) normalize(ev daruntime.Event) {
 	case *daruntime.BudgetExceededEvent:
 		c.notice(protocol.NoticeWarning, "A configured budget was exceeded; the run was stopped.", "budget")
 	}
+}
+
+// userMessageID uses the session position when the runtime provides it. That
+// is the same position Snapshot uses, so reconnect snapshots reconcile the live
+// item instead of briefly duplicating it. Older/remote runtimes may omit it.
+func (c *chat) userMessageID(sessionPosition int) string {
+	if sessionPosition >= 0 {
+		return fmt.Sprintf("%s-m-%d", c.sess.ID, sessionPosition)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.userSeq++
+	return fmt.Sprintf("%s-u-%d", c.sess.ID, c.userSeq)
 }
 
 // ensureAssistant returns the id of the assistant item currently streaming,

@@ -3,6 +3,7 @@ package dagent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/docker-agent/pkg/permissions"
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
@@ -125,6 +126,40 @@ func TestPartialToolCallIsEmittedAndArgumentDeltasAreMerged(t *testing.T) {
 	}
 	if len(c.partialTools) != 0 {
 		t.Fatalf("completed partial call was not discarded: %+v", c.partialTools)
+	}
+}
+
+func TestUserMessageIsEmittedOnlyFromRuntimeEvent(t *testing.T) {
+	c := &chat{sess: session.New(), events: make(chan protocol.Event, 2)}
+	at := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+
+	c.normalize(&daruntime.UserMessageEvent{
+		AgentContext:    daruntime.AgentContext{Timestamp: at},
+		Message:         "change direction",
+		SessionID:       c.sess.ID,
+		SessionPosition: 3,
+	})
+
+	ev := <-c.events
+	if ev.Type != protocol.EventMessageItem || ev.Message == nil {
+		t.Fatalf("user event did not emit a message item: %+v", ev)
+	}
+	if ev.Message.ID != c.sess.ID+"-m-3" || ev.Message.Role != "user" || ev.Message.Text != "change direction" {
+		t.Fatalf("bad user message item: %+v", ev.Message)
+	}
+	if ev.Message.CreatedAt != at.Format(time.RFC3339) {
+		t.Fatalf("createdAt = %q, want %q", ev.Message.CreatedAt, at.Format(time.RFC3339))
+	}
+}
+
+func TestUserMessageIgnoresEventsForOtherSessions(t *testing.T) {
+	c := &chat{sess: session.New(), events: make(chan protocol.Event, 1)}
+	c.normalize(&daruntime.UserMessageEvent{Message: "hidden", SessionID: "another-session"})
+
+	select {
+	case ev := <-c.events:
+		t.Fatalf("foreign user event emitted a timeline item: %+v", ev)
+	default:
 	}
 }
 
