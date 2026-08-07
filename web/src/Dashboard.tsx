@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChatHeader } from './components/ChatHeader';
 import { Composer } from './components/Composer';
@@ -52,6 +52,11 @@ export function Dashboard() {
   );
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
+  const [newChatMessage, setNewChatMessage] = useState('');
+
+  useEffect(() => {
+    if (dashboard.chatId) setNewChatMessage('');
+  }, [dashboard.chatId]);
 
   useEffect(() => {
     if (!dashboard.drawerOpen) return;
@@ -178,13 +183,46 @@ export function Dashboard() {
                 <p>Open a folder in the sidebar and start a chat.</p>
               </>
             ) : !dashboard.chatId ? (
-              <>
-                <h2>Ready when you are</h2>
+              <form
+                className="new-chat-prompt"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const message = newChatMessage.trim();
+                  if (!message || dashboard.busyAction) return;
+                  dashboard.newChat(message);
+                }}
+              >
+                <label htmlFor="new-chat-input">
+                  Start a chat in <code>{clip(dashboard.workspace.label, 40)}</code>
+                </label>
+                <div className="new-chat-input-row">
+                  <textarea
+                    id="new-chat-input"
+                    rows={2}
+                    value={newChatMessage}
+                    disabled={dashboard.busyAction}
+                    placeholder="What would you like to work on?"
+                    onChange={(event) => setNewChatMessage(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        event.currentTarget.form?.requestSubmit();
+                      }
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={dashboard.busyAction || !newChatMessage.trim()}
+                  >
+                    {dashboard.busyAction ? 'Starting…' : 'Start chat'}
+                  </button>
+                </div>
                 <p>
-                  Start a new chat or resume a session from the sidebar. Working in{' '}
-                  <code>{clip(dashboard.workspace.label, 40)}</code>.
+                  <span className="kbd">Enter</span> start · <span className="kbd">Shift</span>+
+                  <span className="kbd">Enter</span> newline
                 </p>
-              </>
+              </form>
             ) : (
               <>
                 <h2>Say something</h2>

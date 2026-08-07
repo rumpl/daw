@@ -317,6 +317,19 @@ select {
 .empty { margin: auto; text-align: center; color: var(--fg-dim); padding: 24px; }
 .empty h2 { margin: 0 0 6px; font-size: 15px; color: var(--fg); font-weight: 600; }
 .empty p { margin: 0; font-size: 13.5px; max-width: 46ch; }
+.new-chat-prompt { width: min(560px, calc(100vw - 48px)); text-align: left; }
+.new-chat-prompt label { display: block; margin-bottom: 9px; color: var(--fg); font-size: 13.5px; font-weight: 600; }
+.new-chat-input-row {
+  display: flex; align-items: flex-end; gap: 8px; padding: 8px;
+  border: 1px solid var(--rule); background: var(--bg-alt);
+}
+.new-chat-input-row:focus-within { border-color: var(--fg-faint); }
+.new-chat-input-row textarea {
+  flex: 1; min-width: 0; resize: vertical; padding: 6px; border: 0; outline: 0;
+  background: transparent; color: var(--fg); font: inherit; line-height: 1.45;
+}
+.new-chat-input-row button { flex: none; min-height: 32px; }
+.empty .new-chat-prompt p { margin-top: 7px; color: var(--fg-faint); font-size: 11.5px; }
 
 /* messages */
 

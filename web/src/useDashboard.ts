@@ -134,7 +134,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     [loadChatExtras, refreshLiveSessions, refreshSessions],
   );
 
-  const newChat = () =>
+  const newChat = (initialMessage?: string) =>
     void guard(async () => {
       if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
       const ref = await api.createChat(workspace.workspaceId);
@@ -143,6 +143,10 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       setDrawerOpen(false);
       route.openSession(ref.sessionId, workspace.path);
       await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
+      if (initialMessage) {
+        const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await api.send(ref.chatId, initialMessage, 'normal', key);
+      }
       void refreshLiveSessions().catch(() => undefined);
     });
 
