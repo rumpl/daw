@@ -1,10 +1,12 @@
 package dagent
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	dachat "github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/permissions"
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/runtime/toolexec"
@@ -14,6 +16,65 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
 	"github.com/rumpl/daw/internal/protocol"
 )
+
+func TestSnapshotExposesExactStoredMessageCost(t *testing.T) {
+	sess := session.New()
+	sess.AddMessage(session.NewAgentMessage("root", &dachat.Message{
+		Role: dachat.MessageRoleAssistant, Content: "answer", Model: "provider/model", Cost: 0.012345,
+		Usage: &dachat.Usage{
+			InputTokens: 1234, OutputTokens: 56, CachedInputTokens: 900,
+			CacheWriteTokens: 78, ReasoningTokens: 12,
+		},
+	}))
+	c := &chat{sess: sess}
+
+	items, _, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Message == nil {
+		t.Fatalf("unexpected snapshot items: %+v", items)
+	}
+	if got := items[0].Message.Cost; got != 0.012345 {
+		t.Fatalf("message cost = %v, want 0.012345", got)
+	}
+	if got := items[0].Message.InputTokens; got != 1234 {
+		t.Fatalf("message input tokens = %d, want 1234", got)
+	}
+	if got := items[0].Message.OutputTokens; got != 56 {
+		t.Fatalf("message output tokens = %d, want 56", got)
+	}
+	if got := items[0].Message.CachedInputTokens; got != 900 {
+		t.Fatalf("message cached input tokens = %d, want 900", got)
+	}
+	if got := items[0].Message.CacheWriteTokens; got != 78 {
+		t.Fatalf("message cache write tokens = %d, want 78", got)
+	}
+	if got := items[0].Message.ReasoningTokens; got != 12 {
+		t.Fatalf("message reasoning tokens = %d, want 12", got)
+	}
+}
+
+func TestSnapshotKeepsToolCallOnlyAssistantMessages(t *testing.T) {
+	sess := session.New()
+	sess.AddMessage(session.NewAgentMessage("root", &dachat.Message{
+		Role: dachat.MessageRoleAssistant, Cost: 0.0042,
+		Usage:     &dachat.Usage{InputTokens: 500, OutputTokens: 20},
+		ToolCalls: []tools.ToolCall{{ID: "call-1", Function: tools.FunctionCall{Name: "shell"}}},
+	}))
+	c := &chat{sess: sess}
+
+	items, _, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Message == nil || items[1].Tool == nil {
+		t.Fatalf("tool-call-only assistant message was filtered: %+v", items)
+	}
+	if items[0].Message.Cost != 0.0042 || items[0].Message.InputTokens != 500 {
+		t.Fatalf("tool-call message lost billing data: %+v", items[0].Message)
+	}
+}
 
 // TestPatternFidelity locks the contract that the dashboard's confirmation
 // dialog shows exactly the pattern the matched module would grant.

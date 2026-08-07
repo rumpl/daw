@@ -148,7 +148,9 @@ interface SessionMeta {
 }
 interface MessageItem {
   id: string; role: string; agentName: string; text: string; reasoning: string;
-  streaming: boolean; createdAt: string; model: string;
+  streaming: boolean; createdAt: string; model: string; cost?: number;
+  inputTokens?: number; outputTokens?: number; cachedInputTokens?: number;
+  cacheWriteTokens?: number; reasoningTokens?: number;
 }
 interface ToolImage { name: string; mimeType: string; data: string }
 interface ToolActivity {

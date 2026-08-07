@@ -20,6 +20,12 @@ export interface MessageItem {
   streaming: boolean;
   createdAt: string;
   model: string;
+  cost?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
 }
 
 export interface ToolImage {

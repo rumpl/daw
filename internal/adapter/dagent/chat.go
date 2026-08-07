@@ -237,9 +237,20 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 			mi := &protocol.MessageItem{
 				ID: id, Role: string(m.Message.Role), AgentName: m.AgentName,
 				Text: m.Message.Content, Reasoning: m.Message.ReasoningContent,
-				CreatedAt: m.Message.CreatedAt, Model: m.Message.Model,
+				CreatedAt: m.Message.CreatedAt, Model: m.Message.Model, Cost: m.Message.Cost,
 			}
-			if strings.TrimSpace(mi.Text) != "" || strings.TrimSpace(mi.Reasoning) != "" {
+			if m.Message.Usage != nil {
+				mi.InputTokens = m.Message.Usage.InputTokens
+				mi.OutputTokens = m.Message.Usage.OutputTokens
+				mi.CachedInputTokens = m.Message.Usage.CachedInputTokens
+				mi.CacheWriteTokens = m.Message.Usage.CacheWriteTokens
+				mi.ReasoningTokens = m.Message.Usage.ReasoningTokens
+			}
+			// Assistant messages that contain only tool calls have no display text,
+			// but they still represent a billed model invocation with their own
+			// usage and cost. Keep them in the API alongside the ToolActivity items.
+			if strings.TrimSpace(mi.Text) != "" || strings.TrimSpace(mi.Reasoning) != "" ||
+				len(m.Message.ToolCalls) > 0 || m.Message.Usage != nil || m.Message.Cost != 0 {
 				out = append(out, protocol.Item{Kind: protocol.ItemKindMessage, Message: mi})
 			}
 			for _, tc := range m.Message.ToolCalls {

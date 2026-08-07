@@ -102,6 +102,15 @@ type MessageItem struct {
 	Streaming bool   `json:"streaming"`
 	CreatedAt string `json:"createdAt"`
 	Model     string `json:"model"`
+	// Cost is the exact provider-reported cost for this stored message in USD.
+	// It is zero for messages that do not carry usage, including user messages
+	// and assistant messages that are still streaming.
+	Cost              float64 `json:"cost,omitempty"`
+	InputTokens       int64   `json:"inputTokens,omitempty"`
+	OutputTokens      int64   `json:"outputTokens,omitempty"`
+	CachedInputTokens int64   `json:"cachedInputTokens,omitempty"`
+	CacheWriteTokens  int64   `json:"cacheWriteTokens,omitempty"`
+	ReasoningTokens   int64   `json:"reasoningTokens,omitempty"`
 }
 
 // ToolImage is a base64-encoded image attachment returned by a tool.

@@ -430,6 +430,12 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	final.Streaming = false
 	final.Text = text.String()
 	final.Reasoning = "Considering the request."
+	final.Cost = 0.0012
+	final.InputTokens = 120
+	final.OutputTokens = 45
+	final.CachedInputTokens = 80
+	final.CacheWriteTokens = 10
+	final.ReasoningTokens = 8
 	c.a.mu.Lock()
 	c.st.items = append(c.st.items, protocol.Item{Kind: protocol.ItemKindMessage, Message: &final})
 	c.st.usage.InputTokens += 120
