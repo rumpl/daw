@@ -3,25 +3,21 @@
 package webassets
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"strings"
 )
 
-//go:embed all:dist
-var dist embed.FS
-
 // Available reports whether a real build (not just the placeholder) is embedded.
 func Available() bool {
-	entries, err := fs.ReadDir(dist, "dist/assets")
+	entries, err := fs.ReadDir(dist, distRoot+"/assets")
 	return err == nil && len(entries) > 0
 }
 
 // Handler serves the embedded SPA. Unknown non-asset paths fall back to
 // index.html so client-side routing works; /api/* never reaches this handler.
 func Handler() http.Handler {
-	sub, err := fs.Sub(dist, "dist")
+	sub, err := fs.Sub(dist, distRoot)
 	if err != nil {
 		return http.NotFoundHandler()
 	}

@@ -84,7 +84,7 @@ CAGENT_VERSION := $(shell $(GO) list -m -f '{{.Version}}' github.com/docker/dock
 
 build-go:
 	mkdir -p bin
-	$(GO) build -trimpath -ldflags "\
+	$(GO) build -tags webassets -trimpath -ldflags "\
 	  -X main.appVersion=$$(git describe --tags --always 2>/dev/null || echo dev) \
 	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
 	  -o $(BIN) ./cmd/dawui
@@ -108,9 +108,7 @@ smoke-real:
 	./scripts/smoke-real.sh
 
 clean:
-	rm -rf bin internal/webassets/dist/assets internal/webassets/dist/index.html web/node_modules e2e/node_modules
-	mkdir -p internal/webassets/dist/assets
-	printf '<!doctype html><html><body><p>Frontend not built. Run make build.</p></body></html>\n' > internal/webassets/dist/index.html
+	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'
