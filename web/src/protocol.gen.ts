@@ -6,9 +6,8 @@ export type ElicitationAction = 'accept' | 'decline' | 'cancel';
 export type EventType = 'snapshot' | 'run_status' | 'message_item' | 'assistant_delta' | 'assistant_end' | 'reasoning_delta' | 'reasoning_end' | 'tool_start' | 'tool_update' | 'tool_end' | 'tool_confirmation' | 'tool_confirmation_resolved' | 'elicitation' | 'elicitation_resolved' | 'transfer' | 'usage' | 'notice' | 'session_meta' | 'gap' | 'chat_closed';
 export type ItemKind = 'message' | 'tool' | 'transfer' | 'notice' | 'summary';
 export type NoticeLevel = 'info' | 'warning' | 'error';
-export type Posture = 'strict' | 'balanced' | 'autonomous';
 export type RunState = 'idle' | 'running' | 'stopping';
-export type ToolDecision = 'approve' | 'approveSession' | 'approveAlways' | 'reject';
+export type ToolDecision = 'approve' | 'approveAlways' | 'reject';
 export type ToolState = 'pending' | 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'rejected';
 
 export interface MessageItem {
@@ -120,11 +119,9 @@ export interface Usage {
 }
 
 export interface PermissionsView {
-  posture: Posture;
   allow: Array<string> | null;
   ask: Array<string> | null;
   deny: Array<string> | null;
-  autoApproveAll: boolean;
   agentsIgnore: boolean;
   sessionGrants: Array<string> | null;
 }
@@ -321,8 +318,6 @@ export interface ModelOption {
 export interface UpdateConfigRequest {
   model?: string;
   thinkingLevel?: string;
-  posture?: Posture;
-  confirmAutoApprove: boolean;
 }
 
 export interface ToolConfirmationReply {

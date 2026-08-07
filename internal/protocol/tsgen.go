@@ -30,9 +30,8 @@ var enums = map[string][]string{
 	"DeliveryMode":      {string(DeliveryNormal), string(DeliverySteer), string(DeliveryFollowUp)},
 	"ToolState":         {string(ToolStatePending), string(ToolStateAwaiting), string(ToolStateRunning), string(ToolStateSuccess), string(ToolStateError), string(ToolStateRejected)},
 	"NoticeLevel":       {string(NoticeInfo), string(NoticeWarning), string(NoticeError)},
-	"ToolDecision":      {string(DecisionApprove), string(DecisionApproveSession), string(DecisionApproveAlways), string(DecisionReject)},
+	"ToolDecision":      {string(DecisionApprove), string(DecisionApproveAlways), string(DecisionReject)},
 	"ElicitationAction": {string(ElicitAccept), string(ElicitDecline), string(ElicitCancel)},
-	"Posture":           {string(PostureStrict), string(PostureBalanced), string(PostureAutonomous)},
 	"ItemKind":          {string(ItemKindMessage), string(ItemKindTool), string(ItemKindTransfer), string(ItemKindNotice), string(ItemKindSummary)},
 	"EventType": {
 		string(EventSnapshot), string(EventRunStatus), string(EventMessageItem),

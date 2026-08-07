@@ -42,7 +42,6 @@ type OpenRequest struct {
 	ChatID          string
 	WorkingDir      string
 	ResumeSessionID string
-	Posture         protocol.Posture
 	// Model and ThinkingLevel are dashboard preferences restored from disk.
 	// Adapters apply them, in that order, before publishing startup metadata.
 	// Empty values leave the agent or resumed session's own configuration in
@@ -86,7 +85,6 @@ type Chat interface {
 
 	SetModel(ctx context.Context, ref string) error
 	SetThinking(ctx context.Context, level string) error
-	SetPosture(ctx context.Context, posture protocol.Posture) error
 
 	Retitle(ctx context.Context, title string) error
 	Compact(ctx context.Context) error

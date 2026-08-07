@@ -70,15 +70,13 @@ selection or agent-resolution API.
 - `POST /api/chats/{id}/abort` → `202 Accepted`
   - Cancels the run and clears queued steering/follow-ups.
 - `PATCH /api/chats/{id}/config`
-  - Body: `{model?: string, thinkingLevel?: string, posture?: Posture,
-    confirmAutoApprove: boolean}`.
-  - Only valid while idle. Moving to `autonomous` requires
-    `confirmAutoApprove: true`. Returns `200 SessionMeta`.
+  - Body: `{model?: string, thinkingLevel?: string}`.
+  - Only valid while idle. Returns `200 SessionMeta`.
 - `GET /api/chats/{id}/models` → `200 ModelOption[]`
 - `GET /api/chats/{id}/commands` → `200 CommandInfo[]`
 - `POST /api/chats/{id}/tool-confirmation`
   - Body: `{toolCallId, decision, reason}`. Decisions: `approve`,
-    `approveAlways`, `approveSession`, `reject`. Returns `202 Accepted`.
+    `approveAlways`, `reject`. Returns `202 Accepted`.
   - Use the request's server-produced permission `pattern`; never rebuild it.
 - `POST /api/chats/{id}/elicitation`
   - Body: `{elicitationId, action, content?}`. Actions: `accept`, `decline`,
@@ -103,8 +101,7 @@ type RunState = "idle" | "running" | "stopping";
 type DeliveryMode = "normal" | "steer" | "followUp";
 type ToolState = "pending" | "awaiting_confirmation" | "running" |
   "success" | "error" | "rejected";
-type Posture = "strict" | "balanced" | "autonomous";
-type ToolDecision = "approve" | "approveSession" | "approveAlways" | "reject";
+type ToolDecision = "approve" | "approveAlways" | "reject";
 type ElicitationAction = "accept" | "decline" | "cancel";
 
 interface Health { status: string; uptimeSeconds: number }
@@ -123,9 +120,8 @@ interface Workspace {
   agentsMd: boolean; agentsIgnore: boolean;
 }
 interface PermissionsView {
-  posture: Posture; allow: string[] | null; ask: string[] | null;
-  deny: string[] | null; autoApproveAll: boolean; agentsIgnore: boolean;
-  sessionGrants: string[] | null;
+  allow: string[] | null; ask: string[] | null; deny: string[] | null;
+  agentsIgnore: boolean; sessionGrants: string[] | null;
 }
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
@@ -295,8 +291,8 @@ interface DashboardAPI {
   send(chatId:string, text:string, mode:DeliveryMode,
     idempotencyKey:string): Promise<Accepted>;
   abort(chatId:string): Promise<Accepted>;
-  updateConfig(chatId:string, patch:{model?:string;thinkingLevel?:string;
-    posture?:Posture;confirmAutoApprove:boolean}): Promise<SessionMeta>;
+  updateConfig(chatId:string,
+    patch:{model?:string;thinkingLevel?:string}): Promise<SessionMeta>;
   models(chatId:string): Promise<ModelOption[]>;
   commands(chatId:string): Promise<CommandInfo[]>;
   confirmTool(chatId:string, reply:{toolCallId:string;
@@ -400,7 +396,7 @@ ChatHeader({
   models:ModelOption[]; busyAction:boolean;
   menuButton:{current:HTMLButtonElement|null}; drawerOpen:boolean;
   onToggleDrawer():void;
-  onPatchConfig(patch:{model?:string;thinkingLevel?:string;posture?:Posture}):void;
+  onPatchConfig(patch:{model?:string;thinkingLevel?:string}):void;
   onCompact():void; onRename(title:string):void;
 })
 ```

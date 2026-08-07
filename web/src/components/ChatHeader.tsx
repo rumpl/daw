@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { ModelOption, Posture, UpdateConfigRequest } from '../protocol.gen';
+import type { ModelOption, UpdateConfigRequest } from '../protocol.gen';
 import type { ChatState, ConnectionState } from '../reducer';
 import { clip, formatCost, formatTokens } from '../safety';
 import { ModelPicker } from './ModelPicker';
@@ -13,7 +13,7 @@ interface ChatHeaderProps {
   menuButton: RefObject<HTMLButtonElement | null>;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
-  onPatchConfig: (patch: Pick<UpdateConfigRequest, 'model' | 'thinkingLevel' | 'posture'>) => void;
+  onPatchConfig: (patch: Pick<UpdateConfigRequest, 'model' | 'thinkingLevel'>) => void;
   onCompact: () => void;
   onRename: (title: string) => void;
 }
@@ -55,7 +55,7 @@ export function ChatHeader({
     return () => document.removeEventListener('keydown', onKey);
   }, [controlsOpen]);
 
-  const patchConfig = (patch: Pick<UpdateConfigRequest, 'model' | 'thinkingLevel' | 'posture'>) => {
+  const patchConfig = (patch: Pick<UpdateConfigRequest, 'model' | 'thinkingLevel'>) => {
     onPatchConfig(patch);
     setControlsOpen(false);
   };
@@ -127,18 +127,6 @@ export function ChatHeader({
               </select>
             </label>
 
-            <label>
-              <span className="sr-only">Tool approval mode</span>
-              <select
-                value={state.meta.permissions.posture}
-                disabled={busy || busyAction}
-                onChange={(event) => patchConfig({ posture: event.target.value as Posture })}
-              >
-                <option value="autonomous">tools: auto-approve</option>
-                <option value="balanced">tools: safe only</option>
-                <option value="strict">tools: ask always</option>
-              </select>
-            </label>
 
             <div className="control-row">
               <button type="button" onClick={onCompact} disabled={busy || busyAction}>

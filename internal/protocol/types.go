@@ -61,9 +61,6 @@ type ToolDecision string
 const (
 	// DecisionApprove approves this one call (runtime.ResumeApprove).
 	DecisionApprove ToolDecision = "approve"
-	// DecisionApproveSession approves every tool for the rest of the session
-	// (runtime.ResumeApproveSession). Widening: idle-time, explicit only.
-	DecisionApproveSession ToolDecision = "approveSession"
 	// DecisionApproveAlways grants the exact pattern shown in the dialog,
 	// built by toolconfirm.BuildPermissionPattern.
 	DecisionApproveAlways ToolDecision = "approveAlways"
@@ -78,31 +75,6 @@ const (
 	ElicitAccept  ElicitationAction = "accept"
 	ElicitDecline ElicitationAction = "decline"
 	ElicitCancel  ElicitationAction = "cancel"
-)
-
-// Posture is the session's tool-approval mode. These are not dashboard
-// inventions: they are exactly docker-agent's own three safety modes
-// (session.SafetyPolicy), applied through session.SetSafetyPolicy and
-// evaluated by pkg/runtime/toolexec's (mode x safety-label) table. The user's
-// own allow/ask/deny patterns and .agentsignore are evaluated independently
-// and always win over the mode.
-type Posture string
-
-const (
-	// PostureStrict is session.SafetyPolicyStrict: prompt on every tool call,
-	// including read-only ones. Only custom allow rules silence a prompt.
-	PostureStrict Posture = "strict"
-	// PostureBalanced is session.SafetyPolicyBalanced: auto-approve calls the
-	// classifier labels safe (safe-listed shell commands, read-only-annotated
-	// tools); ask on destructive and unknown ones.
-	PostureBalanced Posture = "balanced"
-	// PostureAutonomous is session.SafetyPolicyAutonomous (docker-agent's
-	// "yolo"): auto-approve EVERY tool call. Only custom deny/ask rules and
-	// preempt hooks still gate.
-	//
-	// This is always the initial mode for new dashboard chats. It means shell
-	// commands and MCP tools run immediately with the server user's permissions.
-	PostureAutonomous Posture = "autonomous"
 )
 
 // ---------------------------------------------------------------------------
@@ -256,18 +228,13 @@ type Usage struct {
 	ContextLimit int64   `json:"contextLimit"`
 }
 
-// PermissionsView is the honest, real posture of a chat: the session's actual
-// safety mode plus the actual pattern sets the runtime will evaluate.
+// PermissionsView reports the pattern sets the autonomous runtime evaluates.
 type PermissionsView struct {
-	Posture Posture  `json:"posture"`
-	Allow   []string `json:"allow"`
-	Ask     []string `json:"ask"`
-	Deny    []string `json:"deny"`
-	// AutoApproveAll mirrors session.IsToolsApproved(): true exactly when the
-	// effective mode is autonomous.
-	AutoApproveAll bool     `json:"autoApproveAll"`
-	AgentsIgnore   bool     `json:"agentsIgnore"`
-	SessionGrants  []string `json:"sessionGrants"`
+	Allow         []string `json:"allow"`
+	Ask           []string `json:"ask"`
+	Deny          []string `json:"deny"`
+	AgentsIgnore  bool     `json:"agentsIgnore"`
+	SessionGrants []string `json:"sessionGrants"`
 }
 
 // SessionMeta is per-chat metadata shown in the header and sidebar.
@@ -526,13 +493,8 @@ type ModelOption struct {
 
 // UpdateConfigRequest is PATCH /api/chats/:id/config. Nil fields are unchanged.
 type UpdateConfigRequest struct {
-	Model         *string  `json:"model,omitempty"`
-	ThinkingLevel *string  `json:"thinkingLevel,omitempty"`
-	Posture       *Posture `json:"posture,omitempty"`
-	// ConfirmAutoApprove must be true to move to PostureAutonomous. It exists
-	// so a stray or replayed request can never widen approval on its own; the
-	// UI sets it when the user picks that mode explicitly.
-	ConfirmAutoApprove bool `json:"confirmAutoApprove"`
+	Model         *string `json:"model,omitempty"`
+	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
 }
 
 // ToolConfirmationReply is POST /api/chats/:id/tool-confirmation.

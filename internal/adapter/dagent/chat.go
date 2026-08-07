@@ -52,7 +52,6 @@ type chat struct {
 	pendingTools map[string]pendingTool
 	partialTools map[string]partialTool
 	pendingElic  map[string]struct{}
-	posture      protocol.Posture
 	grants       []string
 	// unsaved marks a brand-new session whose row is created lazily, on the
 	// first real prompt, exactly as the CLI does.
@@ -114,12 +113,7 @@ func (c *chat) startBackgroundBridges() {
 // ---------------------------------------------------------------------------
 
 func (c *chat) Meta() protocol.SessionMeta {
-	// The posture reported is derived from the session itself, so a policy the
-	// runtime changed underneath us (or one inherited from a CLI run) is shown
-	// truthfully rather than from our cache.
-	posture := postureFor(c.sess.GetSafetyPolicy())
 	c.mu.Lock()
-	c.posture = posture
 	grants := append([]string(nil), c.grants...)
 	model, thinking, levels := c.model, c.thinking, append([]string(nil), c.thinkLevels...)
 	ignore := c.agentsIgnore
@@ -137,7 +131,7 @@ func (c *chat) Meta() protocol.SessionMeta {
 		levels = c.supportedThinkingLevels()
 	}
 	checker := c.team.Permissions()
-	view := viewFromChecker(checker, posture, c.sess.IsToolsApproved(), grants)
+	view := viewFromChecker(checker, grants)
 	view.AgentsIgnore = ignore
 	if sp := c.sess.ClonePermissions(); sp != nil {
 		view.Allow = append(sp.Allow, view.Allow...)
@@ -496,23 +490,12 @@ func (c *chat) Confirm(ctx context.Context, toolCallID string, decision protocol
 	}
 	c.mu.Unlock()
 
-	// "Approve all for this session" must really escalate the session's mode,
-	// not just relabel our cached posture: the runtime's own resume path and
-	// our view of it have to agree, and the escalation has to survive the
-	// next dispatch.
-	if decision == protocol.DecisionApproveSession {
-		c.applyPosture(protocol.PostureAutonomous)
-		_ = c.a.store.UpdateSession(ctx, c.sess)
-	}
-
 	var d toolconfirm.Decision
 	switch decision {
 	case protocol.DecisionApprove:
 		d = toolconfirm.Approve
 	case protocol.DecisionApproveAlways:
 		d = toolconfirm.ApproveTool
-	case protocol.DecisionApproveSession:
-		d = toolconfirm.ApproveSession
 	case protocol.DecisionReject:
 		d = toolconfirm.Reject
 	default:
@@ -649,77 +632,6 @@ func (c *chat) SetThinking(ctx context.Context, level string) error {
 	c.mu.Lock()
 	c.thinking = applied.String()
 	c.mu.Unlock()
-	return nil
-}
-
-// safetyPolicyFor maps a dashboard posture onto docker-agent's own safety mode.
-// The mapping is 1:1 by design — these are not dashboard-invented postures.
-func safetyPolicyFor(p protocol.Posture) (session.SafetyPolicy, bool) {
-	switch p {
-	case protocol.PostureStrict:
-		return session.SafetyPolicyStrict, true
-	case protocol.PostureBalanced:
-		return session.SafetyPolicyBalanced, true
-	case protocol.PostureAutonomous:
-		return session.SafetyPolicyAutonomous, true
-	default:
-		return "", false
-	}
-}
-
-// postureFor is the inverse: the honest posture of whatever mode the session
-// actually carries right now, including a policy inherited from a CLI run.
-func postureFor(p session.SafetyPolicy) protocol.Posture {
-	switch p.Normalize() {
-	case session.SafetyPolicyAutonomous:
-		return protocol.PostureAutonomous
-	case session.SafetyPolicyBalanced:
-		return protocol.PostureBalanced
-	default:
-		// Empty (never explicitly chosen) behaves like "ask for everything
-		// except read-only-annotated tools"; strict is the honest label.
-		return protocol.PostureStrict
-	}
-}
-
-// applyPosture sets the session's real safety mode through the matched
-// module's public API.
-//
-// It deliberately does NOT install a session-level `ask: ["*"]` rule. In the
-// matched module a session-tier ask is a ForceAsk that toolexec.Decide honours
-// unconditionally (TierSession), which would outrank both autonomous mode and
-// any "always allow this pattern" grant the user made from the dialog — i.e. it
-// would make auto-approve impossible and silently void granted patterns.
-// session.SafetyPolicyStrict already prompts on every call, so the real mode is
-// both correct and honest.
-//
-// SetSafetyPolicy syncs the legacy ToolsApproved flag in the same critical
-// section, so downgrading genuinely revokes a blanket approval. The runtime
-// reads the policy per dispatch (toolexec.call.permissionDecision ->
-// sess.GetSafetyPolicy()), so the change takes effect on the next tool call
-// with no runtime rebuild.
-func (c *chat) applyPosture(p protocol.Posture) {
-	policy, ok := safetyPolicyFor(p)
-	if !ok {
-		policy, p = session.SafetyPolicyAutonomous, protocol.PostureAutonomous
-	}
-	c.sess.SetSafetyPolicy(policy)
-	c.mu.Lock()
-	c.posture = p
-	c.mu.Unlock()
-}
-
-func (c *chat) SetPosture(ctx context.Context, p protocol.Posture) error {
-	if err := c.idle(); err != nil {
-		return err
-	}
-	if _, ok := safetyPolicyFor(p); !ok {
-		return adapter.ErrNotFound
-	}
-	c.applyPosture(p)
-	_ = c.a.store.UpdateSession(ctx, c.sess)
-	meta := c.Meta()
-	c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
 	return nil
 }
 

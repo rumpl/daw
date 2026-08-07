@@ -184,15 +184,6 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// postureForOpen starts new sessions autonomous and keeps a resumed session's
-// stored policy.
-func postureForOpen(resumeID string) protocol.Posture {
-	if resumeID != "" {
-		return ""
-	}
-	return protocol.PostureAutonomous
-}
-
 func isMutation(method string) bool {
 	switch method {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
@@ -271,9 +262,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 
 	notices := append([]protocol.Notice(nil), info.Notices...)
 	notices = append(notices, protocol.Notice{
-		ID: "default-autonomous", Level: protocol.NoticeWarning, Code: "default_autonomous",
-		Message: "This server starts every new chat in autonomous mode: every tool call, " +
-			"including shell commands, is auto-approved and runs on this host as your user.",
+		ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
+		Message: "Every tool call, including shell commands, is auto-approved and runs " +
+			"on this host as your user.",
 	})
 	notices = append(notices, protocol.Notice{
 		ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
@@ -549,9 +540,6 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	preference := s.chatPreference(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
 		ChatID: chatID, WorkingDir: ws.path, ResumeSessionID: resumeID,
-		// New chats are always autonomous. Resumed sessions keep the mode
-		// stored with the session.
-		Posture:       postureForOpen(resumeID),
 		Model:         preference.Model,
 		ThinkingLevel: preference.ThinkingLevel,
 	})
@@ -761,16 +749,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Posture != nil {
-		if *req.Posture == protocol.PostureAutonomous && !req.ConfirmAutoApprove {
-			s.fail(w, http.StatusPreconditionRequired, "confirm_auto_approve",
-				"switching to autonomous requires an explicit confirmAutoApprove: it approves EVERY tool call")
-			return
-		}
-		if !apply(c.chat.SetPosture(r.Context(), *req.Posture)) {
-			return
-		}
-	}
 	meta := c.chat.Meta()
 	meta.ChatID = c.id
 	meta.WorkspaceID = c.workspaceID
@@ -813,8 +791,7 @@ func (s *Server) handleToolConfirmation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	switch req.Decision {
-	case protocol.DecisionApprove, protocol.DecisionApproveSession,
-		protocol.DecisionApproveAlways, protocol.DecisionReject:
+	case protocol.DecisionApprove, protocol.DecisionApproveAlways, protocol.DecisionReject:
 	default:
 		s.fail(w, http.StatusBadRequest, "invalid_decision", "unknown decision")
 		return

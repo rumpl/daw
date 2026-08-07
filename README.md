@@ -19,12 +19,10 @@ Open a folder, hit **New chat**, and type.
   activity, sub-agent transfers, token usage and cost, live over SSE.
 - **Full turn control** — send, steer a running turn, queue a follow-up, stop.
 - **Interactive prompts** — tool-confirmation and MCP elicitation dialogs, with
-  approve once / always-allow-this-pattern / approve-for-session / reject.
+  approve once / always-allow-this-pattern / reject.
 - **Model picker** — searchable, grouped by provider, showing each model's
   context window and price, from the models docker-agent itself reports.
 - **Thinking budget** — switch effort level while the agent is idle.
-- **Tool approval modes** — docker-agent's own `strict` / `balanced` /
-  `autonomous` safety modes.
 - **Sessions** — list, resume and search every docker-agent session for the
   current directory; they survive restarts because they are docker-agent's.
 - **Global plugins** — trusted runtime JavaScript modules can add sidebar items,
@@ -103,11 +101,11 @@ Markdown renderer, tool cards, dialogs, and chat hooks. See
 Drafts are kept per chat, so switching away and back doesn't lose what you were
 typing.
 
-**Settings.** Model, thinking budget, tool approval mode, Compact and Rename sit
-in the header on desktop, and behind **Settings** on mobile. Model, thinking and
-approval mode change only while the agent is idle. Model and thinking choices
-are saved on the server: they are restored per session after a restart, and the
-most recent choices become the defaults for new chats.
+**Settings.** Model, thinking budget, Compact and Rename sit in the header on
+desktop, and behind **Settings** on mobile. Model and thinking change only while
+the agent is idle. Those choices are saved on the server: they are restored per
+session after a restart, and the most recent choices become the defaults for new
+chats.
 
 The model button opens a searchable list: the models your agent config names
 come first, then any used earlier in the session, then the provider catalog
@@ -124,25 +122,12 @@ one resumes it with its real history from docker-agent's store.
 
 ---
 
-## Tool approval modes
+## Tool execution
 
-These are docker-agent's own session safety modes, applied through
-`session.SetSafetyPolicy` and evaluated by its permission engine. Your
-configured allow / ask / deny patterns and `.agentsignore` are evaluated
-independently and always win over the mode.
-
-| Mode | Behaviour |
-| --- | --- |
-| `autonomous` | auto-approves every tool call *(new chats always start here)* |
-| `balanced` | auto-approves calls classified safe, asks on destructive and unknown ones |
-| `strict` | asks before every tool call, including read-only ones |
-
-New chats always start autonomous; resumed sessions keep the mode stored with
-the session. You can change the active chat's mode from the header while idle.
-
-When a confirmation dialog appears, the permission pattern it shows you is
-exactly the pattern granted if you choose always-allow — it comes from
-docker-agent's own pattern builder, so the dialog and the grant can't disagree.
+Every chat auto-approves tools. Explicit deny or ask patterns from your Docker
+Agent configuration and `.agentsignore` still take precedence. When such a rule
+raises a confirmation dialog, the permission pattern shown is exactly the
+pattern granted by always-allow.
 
 Permission patterns are a tool-call policy, not an OS boundary: they decide
 whether a call runs, not what it can do once it does. The agent runs in this

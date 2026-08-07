@@ -169,7 +169,7 @@ func run() error {
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
 	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
 	fmt.Printf("  global plugins: %s\n", pluginDir)
-	fmt.Println("  new chats are autonomous: EVERY tool call is auto-approved")
+	fmt.Println("  all chats are autonomous: EVERY tool call is auto-approved")
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpServer.Serve(ln) }()

@@ -41,7 +41,6 @@ type storedSession struct {
 	agentName  string
 	model      string
 	thinking   string
-	posture    protocol.Posture
 	grants     []string
 }
 
@@ -109,7 +108,6 @@ func (a *Adapter) Seed(id, title, workingDir string, items []protocol.Item) {
 	a.sessions[id] = &storedSession{
 		id: id, title: title, workingDir: workingDir, createdAt: a.now(),
 		items: items, agentName: "root", model: "fake/model-a", thinking: "medium",
-		posture: protocol.PostureStrict,
 	}
 }
 
@@ -129,18 +127,9 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 		id := a.nextID("sess")
 		st = &storedSession{
 			id: id, title: "New chat", workingDir: req.WorkingDir, createdAt: a.now(),
-			agentName: "root", model: "fake/model-a",
-			thinking: "medium", posture: req.Posture,
+			agentName: "root", model: "fake/model-a", thinking: "medium",
 		}
 		a.sessions[id] = st
-	}
-	if st.posture == "" {
-		st.posture = protocol.PostureStrict
-	}
-	if req.Posture != "" {
-		// A new chat is autonomous; on resume the server sends "" so the
-		// stored mode is kept.
-		st.posture = req.Posture
 	}
 	// Mirror the production adapter's best-effort startup restoration. Unknown
 	// values are stale preferences and leave the fake session unchanged.
@@ -211,16 +200,12 @@ func (c *chat) meta() protocol.SessionMeta {
 	}
 }
 
-// permissions mirrors the real adapter: the posture is the session's safety
-// mode, and the pattern lists are the user's own configuration (which the fake
-// simulates as a fixed set). The mode never fabricates patterns.
+// permissions mirrors the real adapter's configured pattern lists.
 func (c *chat) permissions() protocol.PermissionsView {
 	return protocol.PermissionsView{
-		Posture:        c.st.posture,
-		Allow:          []string{"read_file", "list_files"},
-		Deny:           []string{"rm*"},
-		AutoApproveAll: c.st.posture == protocol.PostureAutonomous,
-		SessionGrants:  append([]string(nil), c.st.grants...),
+		Allow:         []string{"read_file", "list_files"},
+		Deny:          []string{"rm*"},
+		SessionGrants: append([]string(nil), c.st.grants...),
 	}
 }
 
@@ -398,7 +383,7 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	case strings.Contains(prompt, "/notool"):
 		// plain text turn
 	default:
-		if !c.toolTurn(ctx, runID) {
+		if !c.toolTurn(ctx, runID, strings.Contains(prompt, "/confirm")) {
 			return
 		}
 	}
@@ -427,11 +412,10 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	c.emit(protocol.Event{Type: protocol.EventUsage, Usage: &usage})
 }
 
-func (c *chat) toolTurn(ctx context.Context, runID string) bool {
+func (c *chat) toolTurn(ctx context.Context, runID string, requireConfirmation bool) bool {
 	c.mu.Lock()
 	c.toolN++
 	id := fmt.Sprintf("%s-tool-%d", c.st.id, c.toolN)
-	posture := c.st.posture
 	c.mu.Unlock()
 
 	act := &protocol.ToolActivity{ID: id, Name: "shell", DisplayName: "Shell", Category: "shell",
@@ -439,10 +423,9 @@ func (c *chat) toolTurn(ctx context.Context, runID string) bool {
 		Arguments: map[string]any{"cmd": "ls -la /workspace", "cwd": "."}, State: protocol.ToolStatePending}
 	c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: act})
 
-	// Mirrors toolexec's (mode x label) table: autonomous auto-approves
-	// everything, balanced auto-approves classifier-safe calls, strict always
-	// asks. The scripted shell call is deliberately labelled unsafe.
-	if posture != protocol.PostureAutonomous {
+	// /confirm simulates an explicit permission rule that still asks even though
+	// the session itself always auto-approves tools.
+	if requireConfirmation {
 		act.State = protocol.ToolStateAwaiting
 		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: act})
 		pattern := "shell(ls*)"
@@ -468,10 +451,6 @@ func (c *chat) toolTurn(ctx context.Context, runID string) bool {
 		delete(c.pending, id)
 		if r.decision == protocol.DecisionApproveAlways {
 			c.st.grants = append(c.st.grants, pattern)
-		}
-		if r.decision == protocol.DecisionApproveSession {
-			// Really escalates the session's mode, as the real adapter does.
-			c.st.posture = protocol.PostureAutonomous
 		}
 		c.mu.Unlock()
 		c.emit(protocol.Event{Type: protocol.EventToolResolved,
@@ -672,23 +651,6 @@ func (c *chat) SetThinking(_ context.Context, level string) error {
 	}
 	c.a.mu.Lock()
 	c.st.thinking = level
-	c.a.mu.Unlock()
-	meta := c.Meta()
-	c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
-	return nil
-}
-
-func (c *chat) SetPosture(_ context.Context, p protocol.Posture) error {
-	if err := c.idle(); err != nil {
-		return err
-	}
-	switch p {
-	case protocol.PostureStrict, protocol.PostureBalanced, protocol.PostureAutonomous:
-	default:
-		return adapter.ErrNotFound
-	}
-	c.a.mu.Lock()
-	c.st.posture = p
 	c.a.mu.Unlock()
 	meta := c.Meta()
 	c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})

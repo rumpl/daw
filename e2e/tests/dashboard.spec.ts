@@ -138,16 +138,12 @@ test.describe('dashboard', () => {
     await expect(trigger).toHaveText(before ?? '');
   });
 
-  test('auto-approve is the default: a tool runs with no dialog', async ({ page }) => {
+  test('a tool runs with no dialog', async ({ page }) => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
     await page.getByRole('button', { name: 'New chat', exact: true }).click();
     await connected(page);
-    // The mode control is the honest, non-intrusive indicator.
-    await openControls(page);
-    await expect(page.getByLabel('Tool approval mode')).toHaveValue('autonomous');
-    await page.keyboard.press('Escape');
 
     await page.getByLabel('Message').fill('list the files');
     await page.getByRole('button', { name: 'Send' }).click();
@@ -157,20 +153,14 @@ test.describe('dashboard', () => {
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 20_000 });
   });
 
-  test('strict mode: send, stream, tool confirmation, settle', async ({ page }) => {
+  test('explicit permission rule: send, confirm tool, settle', async ({ page }) => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
     await page.getByRole('button', { name: 'New chat', exact: true }).click();
     await connected(page);
 
-    await openControls(page);
-    await page.getByLabel('Tool approval mode').selectOption('strict');
-    // Wait for the server to confirm the mode before prompting, so the test
-    // never races the config PATCH.
-    await expect(page.getByLabel('Tool approval mode')).toHaveValue('strict');
-
-    await page.getByLabel('Message').fill('list the files');
+    await page.getByLabel('Message').fill('/confirm list the files');
     await page.getByRole('button', { name: 'Send' }).click();
 
     // Streaming assistant text appears.

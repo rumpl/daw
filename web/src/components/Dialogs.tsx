@@ -67,9 +67,6 @@ export function ToolConfirmDialog({
           <button type="button" onClick={() => onDecide('approveAlways', '')}>
             {clip(request.patternLabel, 80) || 'Always allow'}
           </button>
-          <button type="button" onClick={() => onDecide('approveSession', '')}>
-            Approve all for this session
-          </button>
         </div>
         <div className="dialog-reject">
           <label htmlFor="reject-reason">Reject with a reason</label>

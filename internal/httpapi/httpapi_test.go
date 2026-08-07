@@ -99,19 +99,6 @@ func (h *harness) openWorkspace() protocol.Workspace {
 	return decodeJSON[protocol.Workspace](h.t, resp)
 }
 
-// setStrict switches a chat to the confirm-everything mode, for tests that
-// exercise the confirmation dialog (the server default auto-approves).
-func (h *harness) setStrict(chatID string) {
-	h.t.Helper()
-	strict := protocol.PostureStrict
-	resp := h.do(http.MethodPatch, "/api/chats/"+chatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &strict})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		h.t.Fatalf("set strict posture: %d", resp.StatusCode)
-	}
-}
-
 func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace, struct{}) {
 	h.t.Helper()
 	ws := h.openWorkspace()
@@ -636,12 +623,11 @@ func TestFullTurnStreamsAndSettles(t *testing.T) {
 func TestToolConfirmationRoundTrip(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
-	h.setStrict(ref.ChatID)
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "list the files", Mode: protocol.DeliveryNormal}).Body.Close()
+		protocol.SendMessageRequest{Text: "/confirm list the files", Mode: protocol.DeliveryNormal}).Body.Close()
 
 	events := sse.collect(func(e protocol.Event) bool {
 		return e.Type == protocol.EventToolConfirmation
@@ -862,11 +848,10 @@ func TestReconnectBeyondBufferResnapshots(t *testing.T) {
 func TestToolPreviewIsBounded(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
-	h.setStrict(ref.ChatID)
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "run it", Mode: protocol.DeliveryNormal}).Body.Close()
+		protocol.SendMessageRequest{Text: "/confirm run it", Mode: protocol.DeliveryNormal}).Body.Close()
 	events := sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 5*time.Second)
 	req := events[len(events)-1].Confirmation
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
@@ -878,35 +863,12 @@ func TestToolPreviewIsBounded(t *testing.T) {
 	}
 }
 
-func TestConfigChangesRequireIdleAndAutoApproveConfirmation(t *testing.T) {
+func TestConfigChanges(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
 
-	// Move down first: this server's default is already autonomous.
-	strict := protocol.PostureStrict
-	if r := h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &strict}); r.StatusCode != http.StatusOK {
-		t.Fatalf("downgrade to strict: %d", r.StatusCode)
-	}
-
-	auto := protocol.PostureAutonomous
-	resp := h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &auto})
-	if resp.StatusCode != http.StatusPreconditionRequired {
-		t.Fatalf("expected 428 without explicit confirmation, got %d", resp.StatusCode)
-	}
-	resp = h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &auto, ConfirmAutoApprove: true})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("posture change: %d", resp.StatusCode)
-	}
-	meta := decodeJSON[protocol.SessionMeta](t, resp)
-	if meta.Permissions.Posture != protocol.PostureAutonomous || !meta.Permissions.AutoApproveAll {
-		t.Fatalf("posture not applied honestly: %+v", meta.Permissions)
-	}
-
 	model := "fake/model-b"
-	resp = h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
+	resp := h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
 		protocol.UpdateConfigRequest{Model: &model})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("model change: %d", resp.StatusCode)
@@ -919,32 +881,21 @@ func TestConfigChangesRequireIdleAndAutoApproveConfirmation(t *testing.T) {
 	}
 }
 
-// TestNewChatsAreAutonomous verifies the fixed initial posture.
-func TestNewChatsAreAutonomous(t *testing.T) {
+func TestBootstrapWarnsThatToolsAreAutoApproved(t *testing.T) {
 	h := newHarness(t)
-	ref, _, _ := h.newChat()
-	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	if snap.Meta.Permissions.Posture != protocol.PostureAutonomous {
-		t.Fatalf("new chats must be autonomous, got %q", snap.Meta.Permissions.Posture)
-	}
-	if !snap.Meta.Permissions.AutoApproveAll {
-		t.Fatal("autonomous must report auto-approve honestly")
-	}
 	b := decodeJSON[protocol.Bootstrap](t, h.do(http.MethodGet, "/api/bootstrap", nil))
 	var warned bool
 	for _, n := range b.Notices {
-		if n.Code == "default_autonomous" {
+		if n.Code == "tools_auto_approved" {
 			warned = true
 		}
 	}
 	if !warned {
-		t.Fatal("an auto-approve default must be stated plainly in bootstrap")
+		t.Fatal("automatic tool approval must be stated plainly in bootstrap")
 	}
 }
 
-// TestAutonomousSkipsConfirmationDialog is the end-to-end form of the fix:
-// with auto-approve on, a tool call must run without ever raising a dialog.
-func TestAutonomousSkipsConfirmationDialog(t *testing.T) {
+func TestToolsRunWithoutConfirmationDialog(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
 	sse := h.openSSE(ref.ChatID, 0)
@@ -959,7 +910,7 @@ func TestAutonomousSkipsConfirmationDialog(t *testing.T) {
 
 	for _, e := range events {
 		if e.Type == protocol.EventToolConfirmation {
-			t.Fatal("autonomous mode must never raise a tool-confirmation dialog")
+			t.Fatal("a normal tool call must not raise a confirmation dialog")
 		}
 	}
 	var ranTool bool
@@ -970,51 +921,6 @@ func TestAutonomousSkipsConfirmationDialog(t *testing.T) {
 	}
 	if !ranTool {
 		t.Fatal("the tool should have run and completed without asking")
-	}
-}
-
-// TestStrictStillAsks: the safe mode is still reachable and still enforced.
-func TestStrictStillAsks(t *testing.T) {
-	h := newHarness(t)
-	ref, _, _ := h.newChat()
-	strict := protocol.PostureStrict
-	if r := h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &strict}); r.StatusCode != http.StatusOK {
-		t.Fatalf("switch to strict: %d", r.StatusCode)
-	}
-	sse := h.openSSE(ref.ChatID, 0)
-	sse.next(3 * time.Second)
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "list the files", Mode: protocol.DeliveryNormal}).Body.Close()
-	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 6*time.Second)
-}
-
-// TestApproveForSessionEscalatesMode: "approve all for this session" from the
-// dialog must really change the session's mode, not just relabel a cache.
-func TestApproveForSessionEscalatesMode(t *testing.T) {
-	h := newHarness(t)
-	ref, _, _ := h.newChat()
-	strict := protocol.PostureStrict
-	h.do(http.MethodPatch, "/api/chats/"+ref.ChatID+"/config",
-		protocol.UpdateConfigRequest{Posture: &strict}).Body.Close()
-
-	sse := h.openSSE(ref.ChatID, 0)
-	sse.next(3 * time.Second)
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "list the files", Mode: protocol.DeliveryNormal}).Body.Close()
-	events := sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 6*time.Second)
-	req := events[len(events)-1].Confirmation
-
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
-		protocol.ToolConfirmationReply{ToolCallID: req.ToolCallID,
-			Decision: protocol.DecisionApproveSession}).Body.Close()
-	sse.collect(func(e protocol.Event) bool {
-		return e.Type == protocol.EventRunStatus && e.Run != nil && e.Run.State == protocol.RunStateIdle
-	}, 6*time.Second)
-
-	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	if snap.Meta.Permissions.Posture != protocol.PostureAutonomous || !snap.Meta.Permissions.AutoApproveAll {
-		t.Fatalf("approve-for-session must escalate the real mode, got %+v", snap.Meta.Permissions)
 	}
 }
 
@@ -1050,11 +956,10 @@ func TestRetitleCompactStatsAndDispose(t *testing.T) {
 func TestDisposeCancelsPendingDialogs(t *testing.T) {
 	h := newHarness(t)
 	ref, _, _ := h.newChat()
-	h.setStrict(ref.ChatID)
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "run it", Mode: protocol.DeliveryNormal}).Body.Close()
+		protocol.SendMessageRequest{Text: "/confirm run it", Mode: protocol.DeliveryNormal}).Body.Close()
 	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 5*time.Second)
 
 	h.do(http.MethodDelete, "/api/chats/"+ref.ChatID, nil).Body.Close()
@@ -1127,7 +1032,7 @@ func TestChatWithoutChoosingAnAgent(t *testing.T) {
 func TestBootstrapDoesNotAdvertiseAgents(t *testing.T) {
 	h := newHarness(t)
 	b := decodeJSON[map[string]any](t, h.do(http.MethodGet, "/api/bootstrap", nil))
-	for _, field := range []string{"defaultAgent", "builtinAgents", "agentSourceHints", "defaultPosture", "workspaceRoots"} {
+	for _, field := range []string{"defaultAgent", "builtinAgents", "agentSourceHints", "workspaceRoots"} {
 		if _, exists := b[field]; exists {
 			t.Fatalf("bootstrap must not expose obsolete %q", field)
 		}

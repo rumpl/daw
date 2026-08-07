@@ -4,7 +4,6 @@ import type {
   Bootstrap,
   CommandInfo,
   ModelOption,
-  Posture,
   SessionSummary,
   UpdateConfigRequest,
   Workspace,
@@ -247,13 +246,12 @@ export function useDashboard(route: DashboardRoute) {
       setDraft('');
     });
 
-  const patchConfig = (patch: { model?: string; thinkingLevel?: string; posture?: Posture }) =>
+  const patchConfig = (patch: { model?: string; thinkingLevel?: string }) =>
     void guard(async () => {
       if (!chatId) return;
-      const body: UpdateConfigRequest = { confirmAutoApprove: patch.posture === 'autonomous' };
+      const body: UpdateConfigRequest = {};
       if (patch.model !== undefined) body.model = patch.model;
       if (patch.thinkingLevel !== undefined) body.thinkingLevel = patch.thinkingLevel;
-      if (patch.posture !== undefined) body.posture = patch.posture;
       await api.updateConfig(chatId, body);
       await loadChatExtras(chatId);
     });
@@ -294,7 +292,7 @@ export function useDashboard(route: DashboardRoute) {
     compact: () => runChatAction((id) => api.compact(id)),
     rename: (title: string) => runChatAction((id) => api.retitle(id, title)),
     abort: () => runChatAction((id) => api.abort(id)),
-    decideTool: (decision: 'approve' | 'approveAlways' | 'approveSession' | 'reject', reason: string) =>
+    decideTool: (decision: 'approve' | 'approveAlways' | 'reject', reason: string) =>
       runChatAction(async (id) => {
         const request = state.confirmations[0];
         if (request) await api.confirmTool(id, { toolCallId: request.toolCallId, decision, reason });

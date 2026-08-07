@@ -144,8 +144,8 @@ func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {
 	return rc
 }
 
-func viewFromChecker(c *permissions.Checker, posture protocol.Posture, autoApproveAll bool, grants []string) protocol.PermissionsView {
-	v := protocol.PermissionsView{Posture: posture, AutoApproveAll: autoApproveAll, SessionGrants: grants}
+func viewFromChecker(c *permissions.Checker, grants []string) protocol.PermissionsView {
+	v := protocol.PermissionsView{SessionGrants: grants}
 	if c != nil {
 		v.Allow = c.AllowPatterns()
 		v.Ask = c.AskPatterns()
@@ -269,6 +269,16 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		newSession = true
 	}
 
+	// The dashboard has one safety policy: tools are always auto-approved.
+	// Reapply it on resume too, so an older session cannot restore a different
+	// policy into this runtime.
+	sess.SetSafetyPolicy(session.SafetyPolicyAutonomous)
+	if !newSession {
+		if err := a.store.UpdateSession(ctx, sess); err != nil {
+			a.log.Warn("persisting autonomous safety policy", "error", err)
+		}
+	}
+
 	c := &chat{
 		a: a, rt: rt, team: t, sess: sess, agentName: agentName,
 		workingDir:   req.WorkingDir,
@@ -279,15 +289,6 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		pendingElic:  map[string]struct{}{},
 		agentsIgnore: agentsIgnore,
 		run:          protocol.RunStatus{State: protocol.RunStateIdle},
-	}
-	// An empty posture means "keep whatever safety mode this session already
-	// carries" (resume). A new chat starts autonomous.
-	if req.Posture != "" {
-		c.applyPosture(req.Posture)
-	} else {
-		c.mu.Lock()
-		c.posture = postureFor(sess.GetSafetyPolicy())
-		c.mu.Unlock()
 	}
 	c.refreshQueue()
 	c.startBackgroundBridges()
