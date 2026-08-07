@@ -317,19 +317,76 @@ select {
 .empty { margin: auto; text-align: center; color: var(--fg-dim); padding: 24px; }
 .empty h2 { margin: 0 0 6px; font-size: 15px; color: var(--fg); font-weight: 600; }
 .empty p { margin: 0; font-size: 13.5px; max-width: 46ch; }
-.new-chat-prompt { width: min(560px, calc(100vw - 48px)); text-align: left; }
-.new-chat-prompt label { display: block; margin-bottom: 9px; color: var(--fg); font-size: 13.5px; font-weight: 600; }
-.new-chat-input-row {
-  display: flex; align-items: flex-end; gap: 8px; padding: 8px;
-  border: 1px solid var(--rule); background: var(--bg-alt);
+
+/* The home state is intentionally more substantial than a centered input: it
+   gives the otherwise empty canvas a clear starting point without turning it
+   into a decorative landing page. */
+.new-chat-prompt { width: min(720px, calc(100vw - var(--sidebar-w) - 64px)); text-align: left; }
+.new-chat-intro { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.new-chat-mark {
+  width: 48px; height: 48px; flex: none; display: grid; place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--rule));
+  color: var(--fg); background: var(--bg-alt); font: 600 17px/1 var(--mono);
 }
-.new-chat-input-row:focus-within { border-color: var(--fg-faint); }
+.new-chat-mark span { color: var(--accent); }
+.empty .new-chat-status {
+  display: flex; align-items: center; gap: 6px; margin: 0 0 3px;
+  color: var(--fg-faint); font-size: 10.5px; font-weight: 650;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+.new-chat-status > span { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.empty .new-chat-intro h2 { margin: 0 0 2px; font-size: 23px; line-height: 1.25; letter-spacing: -.015em; }
+.empty .new-chat-intro > div > p:last-child { max-width: none; color: var(--fg-dim); font-size: 13px; }
+.new-chat-intro code { color: var(--fg); font: 12px/1.4 var(--mono); }
+
+.new-chat-form { border: 1px solid var(--rule); background: var(--bg-alt); }
+.new-chat-form:focus-within { border-color: color-mix(in srgb, var(--accent) 70%, var(--rule)); }
+.new-chat-input-row { display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
 .new-chat-input-row textarea {
-  flex: 1; min-width: 0; resize: vertical; padding: 6px; border: 0; outline: 0;
-  background: transparent; color: var(--fg); font: inherit; line-height: 1.45;
+  flex: 1; min-width: 0; min-height: 68px; resize: none; padding: 4px 5px;
+  border: 0; outline: 0; background: transparent; color: var(--fg);
+  font: inherit; font-size: 14px; line-height: 1.5;
 }
-.new-chat-input-row button { flex: none; min-height: 32px; }
-.empty .new-chat-prompt p { margin-top: 7px; color: var(--fg-faint); font-size: 11.5px; }
+.new-chat-input-row textarea:focus { border: 0; }
+.new-chat-submit {
+  flex: none; min-width: 112px; min-height: 36px; display: inline-flex;
+  align-items: center; justify-content: space-between; gap: 14px;
+}
+.new-chat-submit:hover:not([disabled]) {
+  background: var(--accent); border-color: var(--accent); filter: brightness(1.08);
+}
+.new-chat-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-width: 0; padding: 7px 10px; border-top: 1px solid var(--rule);
+  color: var(--fg-faint); font-size: 10.5px;
+}
+.new-chat-path {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--fg-dim); font-family: var(--mono);
+}
+.new-chat-meta > span:last-child { flex: none; white-space: nowrap; }
+
+.prompt-suggestions { margin-top: 17px; }
+.empty .prompt-suggestions > p {
+  margin: 0 0 7px; color: var(--fg-faint); font-size: 10.5px;
+  font-weight: 650; letter-spacing: .07em; text-transform: uppercase;
+}
+.prompt-suggestion-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--rule); border-left: 1px solid var(--rule);
+}
+.prompt-suggestion-grid button {
+  min-width: 0; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 11px 12px; border: 0; border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule); color: var(--fg-dim); text-align: left;
+  font-size: 12.5px;
+}
+.prompt-suggestion-grid button > span:first-child {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prompt-suggestion-grid button > span:last-child { flex: none; color: var(--fg-faint); }
+.prompt-suggestion-grid button:hover:not([disabled]) { color: var(--fg); }
+.prompt-suggestion-grid button:hover:not([disabled]) > span:last-child { color: var(--accent); }
 
 /* messages */
 
@@ -639,6 +696,18 @@ select {
   .controls-scrim { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(10, 12, 15, .5); }
 
   .composer-actions button { min-height: 40px; }
+
+  .empty { width: 100%; padding: 22px 16px; }
+  .new-chat-prompt { width: 100%; }
+  .new-chat-intro { align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .new-chat-mark { width: 42px; height: 42px; }
+  .empty .new-chat-intro h2 { font-size: 20px; }
+  .new-chat-input-row { display: block; }
+  .new-chat-input-row textarea { width: 100%; min-height: 78px; }
+  .new-chat-submit { width: 100%; margin-top: 7px; }
+  .new-chat-meta > span:last-child { display: none; }
+  .prompt-suggestion-grid { grid-template-columns: 1fr; }
+  .prompt-suggestion-grid button { padding: 10px 11px; }
 }
 
 @media (max-width: 380px) {
