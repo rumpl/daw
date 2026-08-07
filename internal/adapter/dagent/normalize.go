@@ -240,7 +240,22 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.notice(protocol.NoticeInfo, msg, "compaction")
 
 	case *daruntime.SessionSummaryEvent:
-		c.notice(protocol.NoticeInfo, "History compacted into a summary.", "compaction")
+		items := c.sess.MessagesSnapshot()
+		position := len(items) - 1
+		for position >= 0 && items[position].Summary != e.Summary {
+			position--
+		}
+		if position < 0 {
+			return
+		}
+		c.emit(protocol.Event{
+			Type: protocol.EventSummary,
+			Summary: &protocol.Summary{
+				ID:   fmt.Sprintf("%s-sum-%d", c.sess.ID, position),
+				Text: e.Summary,
+				Cost: e.Cost,
+			},
+		})
 
 	case *daruntime.ModelFallbackEvent:
 		c.notice(protocol.NoticeWarning, fmt.Sprintf(

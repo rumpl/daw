@@ -17,6 +17,28 @@ import (
 	"github.com/rumpl/daw/internal/protocol"
 )
 
+func TestSessionSummaryEmitsCompactionResult(t *testing.T) {
+	sess := session.New()
+	sess.AddMessage(session.NewAgentMessage("root", &dachat.Message{
+		Role: dachat.MessageRoleUser, Content: "original prompt",
+	}))
+	sess.ApplyCompaction(0, 0, session.Item{Summary: "Work completed before compaction.", Cost: 0.0042})
+	c := &chat{sess: sess, events: make(chan protocol.Event, 1)}
+
+	c.normalize(daruntime.SessionSummary(sess.ID, "Work completed before compaction.", "root", 0, 0.0042, "", nil))
+
+	ev := <-c.events
+	if ev.Type != protocol.EventSummary || ev.Summary == nil {
+		t.Fatalf("summary event was not normalized: %+v", ev)
+	}
+	if ev.Summary.Text != "Work completed before compaction." || ev.Summary.Cost != 0.0042 {
+		t.Fatalf("compaction result was not preserved: %+v", ev.Summary)
+	}
+	if want := sess.ID + "-sum-1"; ev.Summary.ID != want {
+		t.Fatalf("summary id = %q, want snapshot-compatible %q", ev.Summary.ID, want)
+	}
+}
+
 func TestSnapshotExposesExactStoredMessageCost(t *testing.T) {
 	sess := session.New()
 	sess.AddMessage(session.NewAgentMessage("root", &dachat.Message{

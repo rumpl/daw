@@ -192,6 +192,10 @@ export function reduce(state: ChatState, event: Event): ChatState {
       return event.notice
         ? { ...state, seq, items: upsert(state.items, { kind: 'notice', notice: event.notice }) }
         : { ...state, seq };
+    case 'summary':
+      return event.summary
+        ? { ...state, seq, items: upsert(state.items, { kind: 'summary', summary: event.summary }) }
+        : { ...state, seq };
     case 'tool_confirmation':
       if (!event.confirmation) return { ...state, seq };
       if (state.confirmations.some((c) => c.toolCallId === event.confirmation?.toolCallId)) {

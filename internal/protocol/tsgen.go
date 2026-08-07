@@ -77,7 +77,7 @@ var enums = map[string][]string{
 		string(EventReasoningEnd), string(EventToolStart), string(EventToolUpdate),
 		string(EventToolEnd), string(EventToolConfirmation), string(EventToolResolved),
 		string(EventElicitation), string(EventElicitResolved), string(EventTransfer),
-		string(EventUsage), string(EventNotice), string(EventSessionMeta),
+		string(EventUsage), string(EventNotice), string(EventSummary), string(EventSessionMeta),
 		string(EventGap), string(EventChatClosed),
 	},
 	"DashboardEventType": {

@@ -48,6 +48,15 @@ describe('reducer', () => {
     expect(s.items[0]?.tool?.state).toBe('success');
   });
 
+  it('shows a live compaction summary and reconciles it by ID', () => {
+    let s = initialChatState();
+    const summary = { id: 'session-sum-4', text: 'The compacted conversation result.', cost: 0.0042 };
+    s = reduce(s, ev({ type: 'summary', seq: 1, summary }));
+    s = reduce(s, ev({ type: 'summary', seq: 2, summary }));
+
+    expect(s.items).toEqual([{ kind: 'summary', summary }]);
+  });
+
   it('resnapshot after reconnect replaces state without duplicates', () => {
     let s = initialChatState();
     s = reduce(s, ev({ type: 'message_item', seq: 1, message: { id: 'm1', role: 'user', agentName: '', text: 'hi', reasoning: '', streaming: false, createdAt: '', model: '' } }));

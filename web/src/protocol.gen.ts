@@ -4,7 +4,7 @@
 export type DashboardEventType = 'snapshot' | 'sessions_changed' | 'plugins_changed' | 'gap';
 export type DeliveryMode = 'normal' | 'steer' | 'followUp';
 export type ElicitationAction = 'accept' | 'decline' | 'cancel';
-export type EventType = 'snapshot' | 'run_status' | 'message_item' | 'assistant_delta' | 'assistant_end' | 'reasoning_delta' | 'reasoning_end' | 'tool_start' | 'tool_update' | 'tool_end' | 'tool_confirmation' | 'tool_confirmation_resolved' | 'elicitation' | 'elicitation_resolved' | 'transfer' | 'usage' | 'notice' | 'session_meta' | 'gap' | 'chat_closed';
+export type EventType = 'snapshot' | 'run_status' | 'message_item' | 'assistant_delta' | 'assistant_end' | 'reasoning_delta' | 'reasoning_end' | 'tool_start' | 'tool_update' | 'tool_end' | 'tool_confirmation' | 'tool_confirmation_resolved' | 'elicitation' | 'elicitation_resolved' | 'transfer' | 'usage' | 'notice' | 'summary' | 'session_meta' | 'gap' | 'chat_closed';
 export type ItemKind = 'message' | 'tool' | 'transfer' | 'notice' | 'summary';
 export type NoticeLevel = 'info' | 'warning' | 'error';
 export type RunState = 'idle' | 'running' | 'stopping';
@@ -203,6 +203,7 @@ export interface Event {
   transfer?: Transfer;
   usage?: Usage;
   notice?: Notice;
+  summary?: Summary;
   meta?: SessionMeta;
   closed?: ChatClosed;
 }

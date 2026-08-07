@@ -305,6 +305,7 @@ const (
 	EventTransfer         EventType = "transfer"
 	EventUsage            EventType = "usage"
 	EventNotice           EventType = "notice"
+	EventSummary          EventType = "summary"
 	EventSessionMeta      EventType = "session_meta"
 	EventGap              EventType = "gap"
 	EventChatClosed       EventType = "chat_closed"
@@ -357,6 +358,7 @@ type Event struct {
 	Transfer       *Transfer                `json:"transfer,omitempty"`
 	Usage          *Usage                   `json:"usage,omitempty"`
 	Notice         *Notice                  `json:"notice,omitempty"`
+	Summary        *Summary                 `json:"summary,omitempty"`
 	Meta           *SessionMeta             `json:"meta,omitempty"`
 	Closed         *ChatClosed              `json:"closed,omitempty"`
 }
