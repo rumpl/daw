@@ -177,19 +177,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Idempotency: a retried submit with the same key is accepted once,
-	// mirroring the upstream API server's idempotency-key behaviour.
-	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
-		c.mu.Lock()
-		prev, seen := c.idem[key]
-		c.mu.Unlock()
-		if seen {
-			s.json(w, http.StatusAccepted, prev)
-			return
-		}
-	}
-
-	runID, queued, err := c.chat.Send(r.Context(), req.Text, req.Mode)
+	mode, runID, queued, err := c.chat.Send(r.Context(), req.Text, req.Mode)
 	if err != nil {
 		switch {
 		case errors.Is(err, adapter.ErrBusy):
@@ -203,15 +191,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	res := protocol.Accepted{Accepted: true, Mode: req.Mode, RunID: runID, Queued: queued}
-	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
-		c.mu.Lock()
-		if len(c.idem) > 256 {
-			c.idem = map[string]protocol.Accepted{}
-		}
-		c.idem[key] = res
-		c.mu.Unlock()
-	}
+	res := protocol.Accepted{Accepted: true, Mode: mode, RunID: runID, Queued: queued}
 	s.json(w, http.StatusAccepted, res)
 }
 

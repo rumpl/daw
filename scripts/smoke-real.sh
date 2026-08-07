@@ -35,7 +35,7 @@ CHATID=$(echo "$CHAT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["
 echo "$CHAT"
 
 echo "==> send one prompt (this spends tokens)"
-post "/api/chats/$CHATID/messages" '{"text":"Reply with the single word: pong","mode":"normal","idempotencyKey":"smoke-1"}'
+post "/api/chats/$CHATID/messages" '{"text":"Reply with the single word: pong","mode":"normal"}'
 echo
 
 echo "==> streaming for 60s (ctrl-c to stop)"

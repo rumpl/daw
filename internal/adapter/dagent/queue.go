@@ -95,21 +95,6 @@ func (q *observableQueue) Drain(_ context.Context) []daruntime.QueuedMessage {
 	return messages
 }
 
-func (q *observableQueue) clear() {
-	q.mu.Lock()
-	if len(q.entries) == 0 {
-		q.mu.Unlock()
-		return
-	}
-	clear(q.entries)
-	q.entries = nil
-	fn := q.onChange
-	q.mu.Unlock()
-	if fn != nil {
-		fn()
-	}
-}
-
 func (q *observableQueue) snapshot() ([]protocol.QueuedMessage, int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

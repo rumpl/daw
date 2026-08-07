@@ -514,9 +514,8 @@ type ChatRef struct {
 
 // SendMessageRequest is POST /api/chats/:id/messages.
 type SendMessageRequest struct {
-	Text           string       `json:"text"`
-	Mode           DeliveryMode `json:"mode"`
-	IdempotencyKey string       `json:"idempotencyKey"`
+	Text string       `json:"text"`
+	Mode DeliveryMode `json:"mode"`
 }
 
 // Accepted is the 202 body for accepted prompts.

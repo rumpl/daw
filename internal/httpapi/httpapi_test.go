@@ -855,23 +855,25 @@ func TestSteerFollowUpAndAbort(t *testing.T) {
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 
-	// Steer while idle is refused.
-	if r := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "steer", Mode: protocol.DeliverySteer}); r.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409 steering an idle chat, got %d", r.StatusCode)
+	// A stale steer hint received while idle starts a normal turn.
+	idleDispatch := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
+		protocol.SendMessageRequest{Text: "/notool start", Mode: protocol.DeliverySteer}))
+	if idleDispatch.Mode != protocol.DeliveryNormal || idleDispatch.Queued {
+		t.Fatalf("idle dispatch = %+v, want a normal turn", idleDispatch)
 	}
 
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/notool long", Mode: protocol.DeliveryNormal}).Body.Close()
-
-	if r := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "actually, do this", Mode: protocol.DeliverySteer}); r.StatusCode != http.StatusAccepted {
-		t.Fatalf("steer while running: %d", r.StatusCode)
+	// A stale normal hint received while that turn is running steers it.
+	runningDispatch := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
+		protocol.SendMessageRequest{Text: "actually, do this", Mode: protocol.DeliveryNormal}))
+	if runningDispatch.Mode != protocol.DeliverySteer || !runningDispatch.Queued {
+		t.Fatalf("running dispatch = %+v, want a steer", runningDispatch)
 	}
-	// A normal send while busy is a conflict, not a silent queue.
-	if r := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "another", Mode: protocol.DeliveryNormal}); r.StatusCode != http.StatusConflict {
-		t.Fatalf("expected 409 for a normal send while busy, got %d", r.StatusCode)
+
+	// An explicit follow-up remains distinct while running.
+	followUp := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
+		protocol.SendMessageRequest{Text: "then do another turn", Mode: protocol.DeliveryFollowUp}))
+	if followUp.Mode != protocol.DeliveryFollowUp || !followUp.Queued {
+		t.Fatalf("follow-up dispatch = %+v", followUp)
 	}
 
 	sawQueue := false
@@ -910,19 +912,6 @@ func TestAbortSettles(t *testing.T) {
 	}, 6*time.Second)
 	if !sawStopping {
 		t.Fatal("expected a Stopping state before the run settled")
-	}
-}
-
-func TestIdempotentSubmission(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	key := "abc-123"
-	r1 := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/notool hi", Mode: protocol.DeliveryNormal, IdempotencyKey: key}))
-	r2 := decodeJSON[protocol.Accepted](t, h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/notool hi", Mode: protocol.DeliveryNormal, IdempotencyKey: key}))
-	if r1.RunID != r2.RunID {
-		t.Fatalf("idempotent replay started a second run: %s vs %s", r1.RunID, r2.RunID)
 	}
 }
 

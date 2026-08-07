@@ -314,7 +314,6 @@ export interface ChatRef {
 export interface SendMessageRequest {
   text: string;
   mode: DeliveryMode;
-  idempotencyKey: string;
 }
 
 export interface Accepted {

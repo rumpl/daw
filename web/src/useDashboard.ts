@@ -144,8 +144,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       route.openSession(ref.sessionId, workspace.path);
       await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
       if (initialMessage) {
-        const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        await api.send(ref.chatId, initialMessage, 'normal', key);
+        await api.send(ref.chatId, initialMessage, 'normal');
       }
       void refreshLiveSessions().catch(() => undefined);
     });
@@ -240,8 +239,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   const send = (text: string, mode: SendMode) =>
     void guard(async () => {
       if (!chatId) return;
-      const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      await api.send(chatId, text, mode, key);
+      await api.send(chatId, text, mode);
       setDraft('');
     });
 

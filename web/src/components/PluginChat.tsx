@@ -44,8 +44,7 @@ export function PluginChat({ chatId }: { chatId: string }) {
 
   const send = (text: string, mode: SendMode) => {
     void run(async () => {
-      const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      await api.send(chatId, text, mode, key);
+      await api.send(chatId, text, mode);
       setDraft('');
     });
   };

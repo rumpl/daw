@@ -101,11 +101,10 @@ export const api = {
   snapshot(chatId: string): Promise<Snapshot> {
     return request<Snapshot>('GET', `/api/chats/${encodeURIComponent(chatId)}`);
   },
-  send(chatId: string, text: string, mode: 'normal' | 'steer' | 'followUp', idempotencyKey: string): Promise<Accepted> {
+  send(chatId: string, text: string, mode: 'normal' | 'steer' | 'followUp'): Promise<Accepted> {
     return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/messages`, {
       text,
       mode,
-      idempotencyKey,
     });
   },
   abort(chatId: string): Promise<Accepted> {

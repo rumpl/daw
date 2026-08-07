@@ -167,17 +167,18 @@ type chat struct {
 	a  *Adapter
 	st *storedSession
 
-	mu       sync.Mutex
-	events   chan protocol.Event
-	run      protocol.RunStatus
-	closed   bool
-	cancel   context.CancelFunc
-	pending  map[string]chan reply
-	genID    int
-	steer    []protocol.QueuedMessage
-	followUp []protocol.QueuedMessage
-	toolN    int
-	msgN     int
+	mu         sync.Mutex
+	dispatchMu sync.Mutex
+	events     chan protocol.Event
+	run        protocol.RunStatus
+	closed     bool
+	cancel     context.CancelFunc
+	pending    map[string]chan reply
+	genID      int
+	steer      []protocol.QueuedMessage
+	followUp   []protocol.QueuedMessage
+	toolN      int
+	msgN       int
 }
 
 func (c *chat) SessionID() string { return c.st.id }
@@ -239,22 +240,27 @@ func (c *chat) emit(ev protocol.Event) {
 	}
 }
 
-func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode) (string, bool, error) {
+func (c *chat) Send(ctx context.Context, text string, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
+	c.dispatchMu.Lock()
+	defer c.dispatchMu.Unlock()
+
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		return "", false, adapter.ErrClosed
+		return preferred, "", false, adapter.ErrClosed
+	}
+	mode := preferred
+	if c.run.State == protocol.RunStateIdle {
+		mode = protocol.DeliveryNormal
+	} else if mode == protocol.DeliveryNormal {
+		mode = protocol.DeliverySteer
 	}
 	switch mode {
 	case protocol.DeliveryNormal:
-		if c.run.State != protocol.RunStateIdle {
-			c.mu.Unlock()
-			return "", false, adapter.ErrBusy
-		}
 	case protocol.DeliverySteer:
 		if c.run.State != protocol.RunStateRunning {
 			c.mu.Unlock()
-			return "", false, fmt.Errorf("%w: steer requires a running turn", adapter.ErrBusy)
+			return mode, "", false, fmt.Errorf("%w: steer requires a running turn", adapter.ErrBusy)
 		}
 		queued := protocol.QueuedMessage{ID: fmt.Sprintf("steer-%d", c.msgN+len(c.steer)+1), Text: text}
 		c.steer = append(c.steer, queued)
@@ -263,11 +269,11 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 		run := c.run
 		c.mu.Unlock()
 		c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
-		return run.RunID, true, nil
+		return mode, run.RunID, true, nil
 	case protocol.DeliveryFollowUp:
 		if c.run.State != protocol.RunStateRunning {
 			c.mu.Unlock()
-			return "", false, fmt.Errorf("%w: follow-up requires a running turn", adapter.ErrBusy)
+			return mode, "", false, fmt.Errorf("%w: follow-up requires a running turn", adapter.ErrBusy)
 		}
 		queued := protocol.QueuedMessage{ID: fmt.Sprintf("followUp-%d", c.msgN+len(c.followUp)+1), Text: text}
 		c.followUp = append(c.followUp, queued)
@@ -276,10 +282,10 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 		run := c.run
 		c.mu.Unlock()
 		c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
-		return run.RunID, true, nil
+		return mode, run.RunID, true, nil
 	default:
 		c.mu.Unlock()
-		return "", false, errors.New("unknown delivery mode")
+		return mode, "", false, errors.New("unknown delivery mode")
 	}
 
 	c.genID++
@@ -302,7 +308,7 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 	c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
 
 	go c.script(runCtx, gen, runID, text)
-	return runID, false, nil
+	return mode, runID, false, nil
 }
 
 func (c *chat) appendUserMessage(text string) {
@@ -583,7 +589,7 @@ func (c *chat) settle(gen int, runID string) {
 	_ = runID
 	c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
 	if next != "" {
-		_, _, _ = c.Send(context.Background(), next, protocol.DeliveryNormal)
+		_, _, _, _ = c.Send(context.Background(), next, protocol.DeliveryNormal)
 	}
 }
 

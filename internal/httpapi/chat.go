@@ -50,7 +50,6 @@ type liveChat struct {
 	// once it no longer matches.
 	generation uint64
 	closed     bool
-	idem       map[string]protocol.Accepted
 }
 
 func newLiveChat(id, workspaceID string, c adapter.Chat) *liveChat {
@@ -60,7 +59,6 @@ func newLiveChat(id, workspaceID string, c adapter.Chat) *liveChat {
 		index:    map[string]int{},
 		pendingC: map[string]protocol.ToolConfirmationRequest{},
 		pendingE: map[string]protocol.ElicitationRequest{},
-		idem:     map[string]protocol.Accepted{},
 		run:      protocol.RunStatus{State: protocol.RunStateIdle},
 	}
 }
@@ -187,26 +185,17 @@ func (l *liveChat) publish(ev protocol.Event) {
 		copy(l.buf, l.buf[len(l.buf)-eventLogCapacity:])
 		l.buf = l.buf[:eventLogCapacity]
 	}
-	subs := make([]*subscriber, 0, len(l.subs))
 	for s := range l.subs {
-		subs = append(subs, s)
-	}
-	l.mu.Unlock()
-
-	for _, s := range subs {
 		select {
 		case s.ch <- ev:
 		default:
 			// Slow client: drop it. It reconnects with Last-Event-ID and
 			// replays, or resnapshots if the buffer moved past it.
-			l.mu.Lock()
-			if _, ok := l.subs[s]; ok {
-				delete(l.subs, s)
-				close(s.ch)
-			}
-			l.mu.Unlock()
+			delete(l.subs, s)
+			close(s.ch)
 		}
 	}
+	l.mu.Unlock()
 	if l.onIndexChange != nil {
 		switch ev.Type {
 		case protocol.EventRunStatus:

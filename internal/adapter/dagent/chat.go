@@ -45,6 +45,7 @@ type chat struct {
 	events chan protocol.Event
 
 	mu           sync.Mutex
+	dispatchMu   sync.Mutex
 	closed       bool
 	run          protocol.RunStatus
 	cancel       context.CancelFunc
@@ -125,8 +126,6 @@ func (c *chat) Meta() protocol.SessionMeta {
 	c.mu.Unlock()
 
 	ctx := context.Background()
-	c.steerQueue.clear()
-	c.followQueue.clear()
 	if model == "" {
 		if ag, err := c.team.Agent(c.agentName); err == nil && ag != nil {
 			if m := ag.Model(ctx); m != nil {
@@ -317,36 +316,39 @@ func truncate(s string, n int) string {
 // run lifecycle
 // ---------------------------------------------------------------------------
 
-func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode) (string, bool, error) {
+func (c *chat) Send(ctx context.Context, text string, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
+	// Dispatch and the idle→running transition are one serialized operation.
+	// The browser's SSE state can lag, so the runtime state—not the requested
+	// hint—decides whether this starts a turn or joins the active one.
+	c.dispatchMu.Lock()
+	defer c.dispatchMu.Unlock()
+
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		return "", false, adapter.ErrClosed
+		return preferred, "", false, adapter.ErrClosed
 	}
 	state := c.run.State
 	c.mu.Unlock()
 
-	switch mode {
-	case protocol.DeliverySteer:
-		if state != protocol.RunStateRunning {
-			return "", false, fmt.Errorf("%w: steer requires a running turn", adapter.ErrBusy)
-		}
-		if err := c.rt.Steer(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
-			return "", false, err
-		}
-		return c.runID(), true, nil
-	case protocol.DeliveryFollowUp:
-		if state != protocol.RunStateRunning {
-			return "", false, fmt.Errorf("%w: follow-up requires a running turn", adapter.ErrBusy)
-		}
-		if err := c.rt.FollowUp(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
-			return "", false, err
-		}
-		return c.runID(), true, nil
+	mode := preferred
+	if state == protocol.RunStateIdle {
+		mode = protocol.DeliveryNormal
+	} else if mode == protocol.DeliveryNormal {
+		mode = protocol.DeliverySteer
 	}
 
-	if state != protocol.RunStateIdle {
-		return "", false, adapter.ErrBusy
+	switch mode {
+	case protocol.DeliverySteer:
+		if err := c.rt.Steer(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
+			return mode, "", false, err
+		}
+		return mode, c.runID(), true, nil
+	case protocol.DeliveryFollowUp:
+		if err := c.rt.FollowUp(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
+			return mode, "", false, err
+		}
+		return mode, c.runID(), true, nil
 	}
 
 	// Resolve slash commands, skills and prompt files through docker-agent's
@@ -389,7 +391,7 @@ func (c *chat) Send(ctx context.Context, text string, mode protocol.DeliveryMode
 	c.maybeGenerateTitle(runCtx)
 
 	go c.runLoop(runCtx, gen, runID)
-	return runID, false, nil
+	return mode, runID, false, nil
 }
 
 func (c *chat) runID() string {

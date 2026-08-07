@@ -69,9 +69,11 @@ selection or agent-resolution API.
     Reconnect with the last applied sequence. A replay gap produces a fresh
     snapshot/gap recovery. The server sends heartbeat comments.
 - `POST /api/chats/{id}/messages`
-  - Body: `{text, mode, idempotencyKey}`.
-  - `mode`: `normal` starts while idle, `steer` injects into a running turn,
-    `followUp` queues a later turn. Returns `202 Accepted`.
+  - Body: `{text, mode}`.
+  - The server dispatches from authoritative run state: idle messages start a
+    turn; while running, `followUp` queues a later turn and other messages steer
+    the current turn. A stale in-run mode received after settlement starts a
+    normal turn. Returns `202 Accepted` with the mode actually applied.
 - `POST /api/chats/{id}/abort` → `202 Accepted`
   - Cancels the run and clears queued steering/follow-ups.
 - `PATCH /api/chats/{id}/config`
@@ -295,8 +297,7 @@ interface DashboardAPI {
   createChat(workspaceId:string): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
-  send(chatId:string, text:string, mode:DeliveryMode,
-    idempotencyKey:string): Promise<Accepted>;
+  send(chatId:string, text:string, mode:DeliveryMode): Promise<Accepted>;
   abort(chatId:string): Promise<Accepted>;
   updateConfig(chatId:string,
     patch:{model?:string;thinkingLevel?:string}): Promise<SessionMeta>;
