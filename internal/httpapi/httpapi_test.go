@@ -386,6 +386,88 @@ func TestResumeRestoresStoredHistory(t *testing.T) {
 	}
 }
 
+func TestLiveSessionsListsEveryProject(t *testing.T) {
+	h := newHarness(t)
+
+	empty := decodeJSON[[]protocol.SessionSummary](t,
+		h.do(http.MethodGet, "/api/sessions/live", nil))
+	if len(empty) != 0 {
+		t.Fatalf("expected no live sessions, got %+v", empty)
+	}
+
+	paths := []string{filepath.Join(h.root, "project-a"), filepath.Join(h.root, "project-b")}
+	canonicalPaths := make([]string, 0, len(paths))
+	refs := make([]protocol.ChatRef, 0, len(paths))
+	for _, path := range paths {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		ws := decodeJSON[protocol.Workspace](t, h.do(http.MethodPost, "/api/workspaces/open",
+			protocol.OpenWorkspaceRequest{Path: path}))
+		canonicalPaths = append(canonicalPaths, ws.Path)
+		ref := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats",
+			protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID}))
+		refs = append(refs, ref)
+	}
+
+	live := decodeJSON[[]protocol.SessionSummary](t,
+		h.do(http.MethodGet, "/api/sessions/live", nil))
+	if len(live) != 2 {
+		t.Fatalf("expected live sessions from both projects, got %+v", live)
+	}
+	gotPaths := map[string]bool{}
+	for _, session := range live {
+		if !session.Live || session.ChatID == "" || session.RunState == nil {
+			t.Fatalf("global session is missing live status: %+v", session)
+		}
+		if *session.RunState != protocol.RunStateIdle {
+			t.Fatalf("new session should be idle: %+v", session)
+		}
+		gotPaths[session.WorkingDir] = true
+	}
+	for _, path := range canonicalPaths {
+		if !gotPaths[path] {
+			t.Fatalf("missing live session for %s: %+v", path, live)
+		}
+	}
+
+	h.fake.Delay = time.Second
+	resp := h.do(http.MethodPost, "/api/chats/"+refs[0].ChatID+"/messages",
+		protocol.SendMessageRequest{Text: "/notool keep working", Mode: protocol.DeliveryNormal})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("send: %d", resp.StatusCode)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		live = decodeJSON[[]protocol.SessionSummary](t,
+			h.do(http.MethodGet, "/api/sessions/live", nil))
+		running := false
+		for _, session := range live {
+			running = running || session.SessionID == refs[0].SessionID &&
+				session.RunState != nil && *session.RunState == protocol.RunStateRunning
+		}
+		if running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("executing session was never marked running: %+v", live)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	resp = h.do(http.MethodDelete, "/api/chats/"+refs[0].ChatID, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dispose: %d", resp.StatusCode)
+	}
+	remaining := decodeJSON[[]protocol.SessionSummary](t,
+		h.do(http.MethodGet, "/api/sessions/live", nil))
+	if len(remaining) != 1 || remaining[0].SessionID != refs[1].SessionID {
+		t.Fatalf("disposed session remained live: %+v", remaining)
+	}
+}
+
 // TestSingleOwnership: a second open of the same session attaches to the live
 // chat instead of creating a second writer.
 func TestSingleOwnership(t *testing.T) {

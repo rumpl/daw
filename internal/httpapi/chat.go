@@ -342,6 +342,14 @@ func (l *liveChat) mergeToolLocked(in protocol.ToolActivity) protocol.ToolActivi
 	return out
 }
 
+// runState returns the lightweight status used by the cross-project session
+// index without copying the chat's potentially large timeline.
+func (l *liveChat) runState() protocol.RunState {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.run.State
+}
+
 // snapshot returns the authoritative in-memory state.
 func (l *liveChat) snapshot() protocol.Snapshot {
 	l.mu.Lock()

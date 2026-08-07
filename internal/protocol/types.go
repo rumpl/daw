@@ -497,12 +497,14 @@ type ResolvedAgent struct {
 
 // SessionSummary is one row of the session list.
 type SessionSummary struct {
-	SessionID  string `json:"sessionId"`
-	Title      string `json:"title"`
-	WorkingDir string `json:"workingDir"`
-	CreatedAt  string `json:"createdAt"`
-	Messages   int    `json:"messages"`
-	Live       bool   `json:"live"`
+	SessionID  string    `json:"sessionId"`
+	Title      string    `json:"title"`
+	WorkingDir string    `json:"workingDir"`
+	CreatedAt  string    `json:"createdAt"`
+	Messages   int       `json:"messages"`
+	Live       bool      `json:"live"`
+	ChatID     string    `json:"chatId,omitempty"`
+	RunState   *RunState `json:"runState,omitempty"`
 }
 
 // CreateChatRequest is POST /api/chats.

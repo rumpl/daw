@@ -102,9 +102,12 @@ grouped by provider — each row showing its reference, context window and price
 per million tokens. Type to filter, `↑`/`↓` to move, `Enter` to pick, `Esc` to
 close.
 
-**Sessions.** Every session for the current directory is listed in the sidebar,
-searchable, with live ones marked. Selecting one resumes it with its real
-history from docker-agent's store.
+**Sessions.** The sidebar starts with one live-session list spanning every open
+project, so active work is reachable without switching directories first. Each
+live row shows whether its turn is running or idle and has a **Close** action
+that releases its server runtime without deleting the stored history. Every
+session for the current directory is also listed below and searchable. Selecting
+one resumes it with its real history from docker-agent's store.
 
 ---
 

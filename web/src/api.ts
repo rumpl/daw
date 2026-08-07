@@ -84,6 +84,9 @@ export const api = {
       allowRemoteFetch,
     });
   },
+  liveSessions(): Promise<SessionSummary[]> {
+    return request<SessionSummary[]>('GET', '/api/sessions/live');
+  },
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
   },

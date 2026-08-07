@@ -288,6 +288,8 @@ export interface SessionSummary {
   createdAt: string;
   messages: number;
   live: boolean;
+  chatId?: string;
+  runState?: RunState;
 }
 
 export interface CreateChatRequest {

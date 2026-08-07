@@ -153,6 +153,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
 	m.HandleFunc("POST /api/agents/resolve", s.handleResolveAgent)
+	m.HandleFunc("GET /api/sessions/live", s.handleListLiveSessions)
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions", s.handleListSessions)
 	m.HandleFunc("POST /api/chats", s.handleCreateChat)
 	m.HandleFunc("POST /api/chats/resume", s.handleResumeChat)
@@ -588,6 +589,51 @@ func (s *Server) agentOrDefault(ctx context.Context, id string) (*agentEntry, er
 	return entry, nil
 }
 
+// handleListLiveSessions returns every session currently owned by this server,
+// regardless of project. WorkingDir is taken from the validated workspace used
+// to open the chat rather than trusting stale session-store metadata; the
+// browser can therefore safely use it to switch projects and attach.
+func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.adapter.ListSessions(r.Context(), "")
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "session_list_failed",
+			"the docker-agent session store could not be listed")
+		return
+	}
+
+	type liveInfo struct {
+		path string
+		chat *liveChat
+	}
+	s.mu.Lock()
+	liveChats := make(map[string]liveInfo, len(s.bySession))
+	for sessionID, chatID := range s.bySession {
+		chat := s.chats[chatID]
+		if chat == nil {
+			continue
+		}
+		if ws := s.workspaces[chat.workspaceID]; ws != nil {
+			liveChats[sessionID] = liveInfo{path: ws.path, chat: chat}
+		}
+	}
+	s.mu.Unlock()
+
+	live := make([]protocol.SessionSummary, 0, len(liveChats))
+	for _, summary := range list {
+		info, ok := liveChats[summary.SessionID]
+		if !ok {
+			continue
+		}
+		state := info.chat.runState()
+		summary.Live = true
+		summary.ChatID = info.chat.id
+		summary.RunState = &state
+		summary.WorkingDir = info.path
+		live = append(live, summary)
+	}
+	s.json(w, http.StatusOK, live)
+}
+
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	ws, ok := s.workspace(r.PathValue("workspaceId"))
 	if !ok {
@@ -601,12 +647,21 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	for i := range list {
-		if _, live := s.bySession[list[i].SessionID]; live {
-			list[i].Live = true
+	liveChats := make(map[string]*liveChat, len(s.bySession))
+	for sessionID, chatID := range s.bySession {
+		if chat := s.chats[chatID]; chat != nil {
+			liveChats[sessionID] = chat
 		}
 	}
 	s.mu.Unlock()
+	for i := range list {
+		if chat := liveChats[list[i].SessionID]; chat != nil {
+			state := chat.runState()
+			list[i].Live = true
+			list[i].ChatID = chat.id
+			list[i].RunState = &state
+		}
+	}
 	if list == nil {
 		list = []protocol.SessionSummary{}
 	}

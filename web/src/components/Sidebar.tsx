@@ -6,6 +6,7 @@ interface SidebarProps {
   boot: Bootstrap;
   workspace: Workspace | null;
   sessions: SessionSummary[];
+  liveSessions: SessionSummary[];
   recentWorkspaces: string[];
   workspacePath: string;
   busy: boolean;
@@ -13,13 +14,15 @@ interface SidebarProps {
   onWorkspacePathChange: (path: string) => void;
   onOpenWorkspace: (path: string) => void;
   onNewChat: () => void;
-  onResumeChat: (sessionId: string) => void;
+  onResumeChat: (sessionId: string, workspacePath?: string) => void;
+  onCloseLiveSession: (sessionId: string, chatId: string) => void;
 }
 
 export function Sidebar({
   boot,
   workspace,
   sessions,
+  liveSessions,
   recentWorkspaces,
   workspacePath,
   busy,
@@ -28,6 +31,7 @@ export function Sidebar({
   onOpenWorkspace,
   onNewChat,
   onResumeChat,
+  onCloseLiveSession,
 }: SidebarProps) {
   const [sessionFilter, setSessionFilter] = useState('');
   const filteredSessions = useMemo(() => {
@@ -49,6 +53,53 @@ export function Sidebar({
       <button type="button" className="block" onClick={onNewChat} disabled={!workspace || busy}>
         New chat
       </button>
+
+      <section className="live-sessions">
+        <h2>
+          Live sessions <span className="section-count">{liveSessions.length}</span>
+        </h2>
+        {liveSessions.length === 0 ? (
+          <p className="hint">No live sessions across your projects.</p>
+        ) : (
+          <ul className="live-session-list">
+            {liveSessions.map((session) => {
+              const project =
+                session.workingDir.split('/').filter(Boolean).slice(-2).join('/') || session.workingDir;
+              const status = session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle';
+              return (
+                <li key={session.sessionId} className="live-session-row">
+                  <button
+                    type="button"
+                    className="live-session-open"
+                    aria-label={`Open live session ${session.title || 'Untitled'} in ${session.workingDir}`}
+                    onClick={() => onResumeChat(session.sessionId, session.workingDir)}
+                    disabled={busy}
+                  >
+                    <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
+                    <span className="session-project" title={session.workingDir}>
+                      {clip(project, 48)} ·{' '}
+                      <span className={`run-state run-${session.runState ?? 'idle'}`}>
+                        <span className="run-dot" aria-hidden="true" />
+                        {status}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="close-session-button"
+                    aria-label={`Close live session ${session.title || 'Untitled'}`}
+                    title="Close this live session"
+                    onClick={() => onCloseLiveSession(session.sessionId, session.chatId ?? '')}
+                    disabled={busy || !session.chatId}
+                  >
+                    Close
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <section>
         <h2>Working directory</h2>
@@ -134,7 +185,9 @@ export function Sidebar({
                   <span className="session-meta">
                     {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
                     {session.messages} message{session.messages === 1 ? '' : 's'}
-                    {session.live ? ' · live' : ''}
+                    {session.live
+                      ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
+                      : ''}
                   </span>
                 </button>
               </li>

@@ -80,6 +80,7 @@ export function Dashboard() {
           boot={dashboard.boot}
           workspace={dashboard.workspace}
           sessions={dashboard.sessions}
+          liveSessions={dashboard.liveSessions}
           recentWorkspaces={dashboard.recentWorkspaces}
           workspacePath={dashboard.workspacePath}
           busy={dashboard.busyAction}
@@ -88,6 +89,7 @@ export function Dashboard() {
           onOpenWorkspace={dashboard.openWorkspace}
           onNewChat={dashboard.newChat}
           onResumeChat={dashboard.resumeChat}
+          onCloseLiveSession={dashboard.closeLiveSession}
         />
       </aside>
 

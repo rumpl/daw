@@ -152,6 +152,13 @@ select {
   list-style: none; margin: 8px -8px 0 0; padding: 0 8px 0 0;
   max-height: 150px; overflow-y: auto; overscroll-behavior: contain;
 }
+.live-session-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+}
+.live-session-row .close-session-button {
+  width: auto; padding: 3px 5px; font-size: 10.5px; color: var(--fg-faint);
+}
+.live-session-row .close-session-button:hover:not([disabled]) { color: var(--danger); }
 
 /* The project session list consumes the remaining sidebar height. */
 .sidebar section.sessions {
@@ -183,6 +190,12 @@ select {
 }
 .session-meta, .session-project { display: block; font-size: 11px; color: var(--fg-faint); }
 .session-project { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-state { display: inline-flex; align-items: center; gap: 4px; }
+.run-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--fg-faint); }
+.run-running { color: var(--ok); }
+.run-running .run-dot { background: var(--ok); animation: tool-pulse 1.1s ease-in-out infinite; }
+.run-stopping { color: var(--warn); }
+.run-stopping .run-dot { background: var(--warn); }
 .live-dot {
   width: 5px; height: 5px; border-radius: 50%; background: var(--ok);
   display: inline-block; margin-right: 5px; vertical-align: 1px;

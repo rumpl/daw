@@ -27,6 +27,7 @@ export function useDashboard(route: DashboardRoute) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [workspacePath, setWorkspacePath] = useState('');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [liveSessions, setLiveSessions] = useState<SessionSummary[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -68,6 +69,32 @@ export function useDashboard(route: DashboardRoute) {
     setSessions(await api.sessions(nextWorkspace.workspaceId));
   }, []);
 
+  const refreshLiveSessions = useCallback(async () => {
+    setLiveSessions(await api.liveSessions());
+  }, []);
+
+  // The current chat has an SSE stream, but sessions opened in another tab do
+  // not. Poll this small global index so the cross-project list stays useful
+  // without requiring the user to reopen each project.
+  useEffect(() => {
+    if (!boot) return;
+    void refreshLiveSessions().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      void refreshLiveSessions().catch(() => undefined);
+    }, 3_000);
+    return () => window.clearInterval(timer);
+  }, [boot, refreshLiveSessions]);
+
+  // SSE makes the selected session's status immediate; polling covers the
+  // other live sessions running elsewhere.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const applyRunState = (session: SessionSummary) =>
+      session.sessionId === activeSessionId ? { ...session, runState: state.run.state } : session;
+    setLiveSessions((current) => current.map(applyRunState));
+    setSessions((current) => current.map(applyRunState));
+  }, [activeSessionId, state.run.state]);
+
   const loadChatExtras = useCallback(async (nextChatId: string) => {
     const [nextModels, nextCommands] = await Promise.all([api.models(nextChatId), api.commands(nextChatId)]);
     setModels(nextModels);
@@ -106,8 +133,9 @@ export function useDashboard(route: DashboardRoute) {
       setActiveSessionId(sessionId);
       setDrawerOpen(false);
       await Promise.all([loadChatExtras(nextChatId), refreshSessions(nextWorkspace)]);
+      void refreshLiveSessions().catch(() => undefined);
     },
-    [loadChatExtras, refreshSessions],
+    [loadChatExtras, refreshLiveSessions, refreshSessions],
   );
 
   const newChat = () =>
@@ -119,17 +147,39 @@ export function useDashboard(route: DashboardRoute) {
       setDrawerOpen(false);
       route.openSession(ref.sessionId, workspace.path);
       await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
+      void refreshLiveSessions().catch(() => undefined);
     });
 
-  const resumeChat = (sessionId: string) =>
+  const resumeChat = (sessionId: string, targetWorkspacePath?: string) =>
     void guard(async () => {
-      if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
-      const ref = await api.resumeChat(workspace.workspaceId, '', sessionId);
+      const path = targetWorkspacePath ?? workspace?.path;
+      if (!path) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
+
+      let nextWorkspace = workspace;
+      if (!nextWorkspace || nextWorkspace.path !== path) {
+        nextWorkspace = await applyWorkspace(path, true);
+      }
+      const ref = await api.resumeChat(nextWorkspace.workspaceId, '', sessionId);
       setChatId(ref.chatId);
       setActiveSessionId(ref.sessionId);
       setDrawerOpen(false);
-      route.openSession(ref.sessionId, workspace.path);
-      await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
+      route.openSession(ref.sessionId, nextWorkspace.path);
+      await Promise.all([loadChatExtras(ref.chatId), refreshSessions(nextWorkspace)]);
+      void refreshLiveSessions().catch(() => undefined);
+    });
+
+  const closeLiveSession = (sessionId: string, liveChatId: string) =>
+    void guard(async () => {
+      if (!liveChatId) return;
+      await api.dispose(liveChatId);
+      if (activeSessionId === sessionId) {
+        clearChat();
+        route.leaveSession();
+      }
+      await Promise.all([
+        refreshLiveSessions(),
+        workspace ? refreshSessions(workspace) : Promise.resolve(),
+      ]);
     });
 
   // The URL is the source of truth for browser navigation and hard refreshes.
@@ -218,6 +268,7 @@ export function useDashboard(route: DashboardRoute) {
     workspacePath,
     setWorkspacePath,
     sessions,
+    liveSessions,
     recentWorkspaces,
     chatId,
     activeSessionId,
@@ -235,6 +286,7 @@ export function useDashboard(route: DashboardRoute) {
     openWorkspace,
     newChat,
     resumeChat,
+    closeLiveSession,
     send,
     patchConfig,
     compact: () => runChatAction((id) => api.compact(id)),
