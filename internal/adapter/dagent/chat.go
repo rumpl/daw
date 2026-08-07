@@ -242,6 +242,7 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 				}
 				if res, ok := toolResults[tc.ID]; ok {
 					act.Preview = res.Content
+					act.Images = storedToolImages(res)
 					act.OutputBytes = len(res.Content)
 					act.IsError = res.IsError
 					if res.IsError {

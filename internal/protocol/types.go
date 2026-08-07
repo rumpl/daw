@@ -133,6 +133,13 @@ type MessageItem struct {
 	Model     string `json:"model"`
 }
 
+// ToolImage is a base64-encoded image attachment returned by a tool.
+type ToolImage struct {
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+}
+
 // ToolActivity is one tool call with a bounded preview of its result.
 type ToolActivity struct {
 	ID          string `json:"id"`
@@ -145,6 +152,7 @@ type ToolActivity struct {
 	// structured arguments. Large file contents are represented by counts and
 	// short previews rather than copied wholesale into the browser timeline.
 	Arguments   map[string]any `json:"arguments,omitempty"`
+	Images      []ToolImage    `json:"images,omitempty"`
 	State       ToolState      `json:"state"`
 	Preview     string         `json:"preview"`
 	Truncated   bool           `json:"truncated"`

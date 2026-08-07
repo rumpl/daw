@@ -67,6 +67,17 @@ describe('ToolCard', () => {
     expect(screen.getByText('File contents')).toBeVisible();
   });
 
+  it('renders image attachments without expanding the tool', () => {
+    render(<ToolCard tool={tool({
+      name: 'read_file',
+      preview: 'Read image file screenshot.png',
+      images: [{ name: 'screenshot.png', mimeType: 'image/png', data: 'iVBORw0KGgo=' }],
+    })} />);
+    const image = screen.getByRole('img', { name: 'screenshot.png' });
+    expect(image).toHaveAttribute('src', 'data:image/png;base64,iVBORw0KGgo=');
+    expect(screen.getByText('screenshot.png · image/png')).toBeVisible();
+  });
+
   it('renders edit previews as removed and added text', () => {
     const { container } = render(<ToolCard tool={tool({ name: 'edit_file', category: 'filesystem', displayName: 'Edit', arguments: { path: 'app.ts', editCount: 1, edits: [{ oldText: 'const old = true', newText: 'const next = true', removedLines: 1, addedLines: 1 }] }, preview: 'File edited successfully.' })} />);
     container.querySelector('details')?.setAttribute('open', '');

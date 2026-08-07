@@ -330,6 +330,9 @@ func (l *liveChat) mergeToolLocked(in protocol.ToolActivity) protocol.ToolActivi
 	if in.Arguments != nil {
 		out.Arguments = in.Arguments
 	}
+	if in.Images != nil {
+		out.Images = in.Images
+	}
 	if in.Preview != "" {
 		out.Preview = in.Preview
 		out.OutputBytes = in.OutputBytes

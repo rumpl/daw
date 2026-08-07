@@ -86,7 +86,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
 			ID: e.ToolCallID, Name: e.ToolDefinition.Name, DisplayName: e.ToolDefinition.DisplayName(),
 			Category: e.ToolDefinition.Category, AgentName: e.AgentName, State: state, Preview: e.Response,
-			OutputBytes: len(e.Response), IsError: isErr}})
+			Images: toolResultImages(e.Result), OutputBytes: len(e.Response), IsError: isErr}})
 
 	case *daruntime.HookBlockedEvent:
 		c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{

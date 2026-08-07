@@ -12,7 +12,7 @@ import (
 // reaches the browser; TestTypeScriptInSync fails when the checked-in file
 // drifts from this list.
 var exported = []any{
-	MessageItem{}, ToolActivity{}, Transfer{}, Notice{}, Summary{}, Item{},
+	MessageItem{}, ToolImage{}, ToolActivity{}, Transfer{}, Notice{}, Summary{}, Item{},
 	RejectionReason{}, ToolConfirmationRequest{}, ElicitationRequest{},
 	QueueStatus{}, RunStatus{}, Usage{}, PermissionsView{}, SessionMeta{}, Snapshot{},
 	Delta{}, ItemRef{}, ToolResolved{}, ElicitResolved{}, ChatClosed{}, Event{},

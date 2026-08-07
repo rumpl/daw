@@ -21,6 +21,22 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function ToolImages({ tool }: { tool: ToolActivity }) {
+  if (!tool.images?.length) return null;
+  return (
+    <div className="tool-images">
+      {tool.images.map((image, i) => (
+        <figure key={`${image.name}-${i}`}>
+          <a href={`data:${image.mimeType};base64,${image.data}`} target="_blank" rel="noreferrer">
+            <img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name || `Tool result image ${i + 1}`} loading="lazy" />
+          </a>
+          <figcaption>{image.name || `image-${i + 1}`} · {image.mimeType}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
 function PlainOutput({ tool, label = 'Output' }: { tool: ToolActivity; label?: string }) {
   if (!tool.preview) return <p className="tool-empty">No output</p>;
   return (
@@ -271,8 +287,9 @@ export function ToolCard({ tool }: { tool: ToolActivity }) {
   const body = renderer?.body(tool, args) ?? <PlainOutput tool={tool} />;
 
   return (
-    <details className={`tool tool-${tone} tool-kind-${tool.name}`} aria-label={`tool ${tool.name}`}>
-      <summary>
+    <div className="tool-with-images">
+      <details className={`tool tool-${tone} tool-kind-${tool.name}`} aria-label={`tool ${tool.name}`}>
+        <summary>
         <span className="tool-heading">
           <span className="tool-title-row">
             <span className="tool-name">{clip(title, 80)}</span>
@@ -282,10 +299,12 @@ export function ToolCard({ tool }: { tool: ToolActivity }) {
         </span>
         <span className="tool-state"><span aria-hidden="true">{stateMark[tool.state]}</span>{stateLabel[tool.state]}</span>
         <span className="tool-chevron" aria-hidden="true">›</span>
-      </summary>
-      <div className="tool-body">{body}</div>
-      {tool.truncated ? <p className="tool-note">Output truncated for display.</p> : null}
-    </details>
+        </summary>
+        <div className="tool-body">{body}</div>
+        {tool.truncated ? <p className="tool-note">Output truncated for display.</p> : null}
+      </details>
+      <ToolImages tool={tool} />
+    </div>
   );
 }
 

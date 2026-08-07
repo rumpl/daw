@@ -73,10 +73,14 @@ func TestToolUpdatesMergeInsteadOfReplacing(t *testing.T) {
 	}
 
 	c.publish(protocol.Event{Type: protocol.EventToolEnd, Tool: &protocol.ToolActivity{
-		ID: "t1", Name: "shell", State: protocol.ToolStateSuccess, Preview: "final output"}})
+		ID: "t1", Name: "shell", State: protocol.ToolStateSuccess, Preview: "final output",
+		Images: []protocol.ToolImage{{Name: "result.png", MimeType: "image/png", Data: "aW1n"}}}})
 	tool = c.snapshot().Items[0].Tool
 	if tool.State != protocol.ToolStateSuccess || tool.Preview != "final output" {
 		t.Fatalf("final state not applied: %+v", tool)
+	}
+	if len(tool.Images) != 1 || tool.Images[0].Name != "result.png" {
+		t.Fatalf("tool images not merged: %+v", tool.Images)
 	}
 	if tool.ArgsSummary != "ls -la /workspace" {
 		t.Fatalf("argument summary lost at tool end: %q", tool.ArgsSummary)

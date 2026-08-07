@@ -23,6 +23,12 @@ export interface MessageItem {
   model: string;
 }
 
+export interface ToolImage {
+  name: string;
+  mimeType: string;
+  data: string;
+}
+
 export interface ToolActivity {
   id: string;
   name: string;
@@ -31,6 +37,7 @@ export interface ToolActivity {
   agentName: string;
   argsSummary: string;
   arguments?: Record<string, unknown>;
+  images?: Array<ToolImage>;
   state: ToolState;
   preview: string;
   truncated: boolean;
