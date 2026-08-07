@@ -35,6 +35,19 @@ describe('Conversation', () => {
     expect(container.querySelector('.msg-streaming pre')).toBeNull();
   });
 
+  it('does not render agent or model metadata in messages', () => {
+    const { container } = render(
+      <Conversation
+        items={[assistantMessage({ agentName: 'ROOT', model: 'example/model', text: 'Response' })]}
+        empty={null}
+      />,
+    );
+
+    expect(container.querySelector('.msg-head')).toBeNull();
+    expect(container.querySelector('.msg')).not.toHaveTextContent('ROOT');
+    expect(container.querySelector('.msg')).not.toHaveTextContent('example/model');
+  });
+
   it('renders pending steer and follow-up messages', () => {
     const { container } = render(
       <Conversation

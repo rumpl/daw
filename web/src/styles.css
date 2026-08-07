@@ -314,16 +314,6 @@ select {
 .msg { padding: 10px var(--gutter); width: 100%; }
 .msg-user { background: var(--bg-alt); }
 
-.msg-head {
-  display: flex; align-items: baseline; gap: 8px;
-  font-size: 11px; color: var(--fg-faint); margin-bottom: 3px;
-}
-.msg-role {
-  font-weight: 650; color: var(--fg-dim); text-transform: uppercase;
-  letter-spacing: .06em; font-size: 10.5px;
-}
-.msg-model { margin-left: auto; font-family: var(--mono); font-size: 10.5px; }
-
 .msg-plain {
   white-space: pre-wrap; word-break: break-word; margin: 0; font-family: inherit;
 }
@@ -626,7 +616,6 @@ select {
   .controls-scrim { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(10, 12, 15, .5); }
 
   .composer-actions button { min-height: 40px; }
-  .msg-model { display: none; }
 }
 
 @media (max-width: 380px) {

@@ -9,14 +9,8 @@ const BOTTOM_THRESHOLD_PX = 96;
 
 function MessageBubble({ message }: { message: MessageItem }) {
   const isUser = message.role === 'user';
-  const who = isUser ? 'You' : clip(message.agentName || 'assistant', 60);
   return (
     <article className={`msg msg-${isUser ? 'user' : 'assistant'}`} aria-label={`${message.role} message`}>
-      <header className="msg-head">
-        <span className="msg-role">{who}</span>
-        {message.model ? <span className="msg-model">{clip(message.model, 60)}</span> : null}
-      </header>
-
       {/* Reasoning is model output: always visible, escaped text, never Markdown. */}
       {message.reasoning ? <p className="reasoning">{message.reasoning}</p> : null}
 
