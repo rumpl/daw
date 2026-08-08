@@ -49,7 +49,10 @@ export function NewChatPrompt({
     <section className="new-chat-prompt" aria-labelledby="new-chat-title">
       <header className="new-chat-intro">
         <div className="new-chat-mark" aria-hidden="true">
-          <span>&gt;</span>_
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path className="new-chat-mark-prompt" d="m7 7 4 5-4 5" />
+            <path d="M13 17h5" />
+          </svg>
         </div>
         <div>
           <p className="new-chat-status"><span aria-hidden="true" /> Workspace ready</p>
