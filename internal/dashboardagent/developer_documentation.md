@@ -69,8 +69,15 @@ selection or agent-resolution API.
   - Each `data:` frame is one `Event`. Event `seq` is monotonic per live chat.
     Reconnect with the last applied sequence. A replay gap produces a fresh
     snapshot/gap recovery. The server sends heartbeat comments.
+- `POST /api/chats/{id}/attachments`
+  - Multipart form with one `file` field. Returns `201 Attachment`. Files are
+    limited to 10 MB; text, PDF, JPEG, PNG, GIF, and WebP are accepted. Up to
+    four unsent uploads may be pending per chat.
+- `DELETE /api/chats/{id}/attachments/{attachmentId}` → `204`
+  - Discards an uploaded attachment before it is sent.
 - `POST /api/chats/{id}/messages`
-  - Body: `{text, mode}`.
+  - Body: `{text, mode, attachments?: string[]}` where attachments contains
+    opaque IDs returned by the upload endpoint.
   - The server dispatches from authoritative run state: idle messages start a
     turn; while running, `followUp` queues a later turn and other messages steer
     the current turn. A stale in-run mode received after settlement starts a
@@ -151,9 +158,10 @@ interface SessionMeta {
   workingDir: string; agentName: string; model: string; thinkingLevel: string;
   thinkingLevels: string[] | null; permissions: PermissionsView; createdAt: string;
 }
+interface Attachment { id: string; name: string; mimeType: string; size: number; data?: string }
 interface MessageItem {
   id: string; role: string; agentName: string; text: string; reasoning: string;
-  streaming: boolean; createdAt: string; model: string; cost?: number;
+  streaming: boolean; createdAt: string; model: string; attachments?: Attachment[]; cost?: number;
   inputTokens?: number; outputTokens?: number; cachedInputTokens?: number;
   cacheWriteTokens?: number; reasoningTokens?: number;
 }
@@ -336,7 +344,11 @@ interface DashboardAPI {
   createChat(workspaceId:string): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
-  send(chatId:string, text:string, mode:DeliveryMode): Promise<Accepted>;
+  uploadAttachment(chatId:string, file:File,
+    options?:{signal?:AbortSignal}): Promise<Attachment>;
+  deleteAttachment(chatId:string, attachmentId:string): Promise<void>;
+  send(chatId:string, text:string, mode:DeliveryMode,
+    attachments?:string[]): Promise<Accepted>;
   abort(chatId:string): Promise<Accepted>;
   updateConfig(chatId:string,
     patch:{model?:string;thinkingLevel?:string}): Promise<SessionMeta>;
@@ -428,13 +440,17 @@ Composer({
   run: RunStatus;
   disabled: boolean;
   commands: CommandInfo[];
+  attachments: Attachment[];
+  uploading: boolean;
+  onAddAttachments(files:File[]): void;
+  onRemoveAttachment(id:string): void;
   onSend(text:string, mode:DeliveryMode): void;
   onStop(): void;
 })
 ```
 
-Provides multiline input, slash completion, queue controls, and keyboard/touch
-behavior. The owner performs API calls.
+Provides multiline input, slash completion, file selection, paste and drag/drop,
+queue controls, and keyboard/touch behavior. The owner performs API calls.
 
 ### `components.ChatHeader`
 

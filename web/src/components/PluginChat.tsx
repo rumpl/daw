@@ -69,6 +69,10 @@ export function PluginChat({ chatId }: { chatId: string }) {
         run={state.run}
         disabled={!chatId || state.closed}
         commands={commands}
+        attachments={[]}
+        uploading={false}
+        onAddAttachments={() => undefined}
+        onRemoveAttachment={() => undefined}
         onSend={send}
         onStop={() => void run(() => api.abort(chatId))}
       />

@@ -123,6 +123,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/chats/resume", s.handleResumeChat)
 	m.HandleFunc("GET /api/chats/{id}", s.handleGetChat)
 	m.HandleFunc("GET /api/chats/{id}/events", s.handleEvents)
+	m.HandleFunc("POST /api/chats/{id}/attachments", s.handleAttachment)
+	m.HandleFunc("DELETE /api/chats/{id}/attachments/{attachmentId}", s.handleDeleteAttachment)
 	m.HandleFunc("POST /api/chats/{id}/messages", s.handleMessages)
 	m.HandleFunc("POST /api/chats/{id}/abort", s.handleAbort)
 	m.HandleFunc("PATCH /api/chats/{id}/config", s.handleConfig)

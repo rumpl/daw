@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CommandInfo, RunStatus } from '../protocol.gen';
+import type { Attachment, CommandInfo, RunStatus } from '../protocol.gen';
 import { clip } from '../safety';
 
 export type SendMode = 'normal' | 'steer' | 'followUp';
@@ -16,6 +16,10 @@ export function Composer({
   run,
   disabled,
   commands,
+  attachments,
+  uploading,
+  onAddAttachments,
+  onRemoveAttachment,
   onSend,
   onStop,
 }: {
@@ -24,10 +28,15 @@ export function Composer({
   run: RunStatus;
   disabled: boolean;
   commands: CommandInfo[];
+  attachments: Attachment[];
+  uploading: boolean;
+  onAddAttachments: (files: File[]) => void;
+  onRemoveAttachment: (id: string) => void;
   onSend: (text: string, mode: SendMode) => void;
   onStop: () => void;
 }) {
   const textarea = useRef<HTMLTextAreaElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
   const busy = run.state !== 'idle';
 
@@ -43,7 +52,7 @@ export function Composer({
 
   const submit = (mode: SendMode) => {
     const text = draft.trim();
-    if (!text || disabled) return;
+    if ((!text && attachments.length === 0) || disabled || uploading) return;
     onSend(text, mode);
   };
 
@@ -106,6 +115,18 @@ export function Composer({
         </ul>
       ) : null}
 
+      {attachments.length > 0 ? (
+        <ul className="composer-attachments" aria-label="Attachments">
+          {attachments.map((attachment) => (
+            <li key={attachment.id}>
+              <span>{clip(attachment.name, 60)}</span>
+              <small>{Math.ceil(attachment.size / 1024)} KB</small>
+              <button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => onRemoveAttachment(attachment.id)}>×</button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       <div className="composer-inner">
         <label className="sr-only" htmlFor="composer-input">
           Message
@@ -119,7 +140,26 @@ export function Composer({
           placeholder={busy ? 'Enter to steer · Alt+Enter for follow-up…' : 'Send a message…'}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.files);
+            if (files.length > 0) onAddAttachments(files);
+          }}
         />
+
+        <input
+          ref={fileInput}
+          className="sr-only"
+          type="file"
+          multiple
+          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/*,.txt,.json,.yaml,.yml,.toml,.go,.js,.jsx,.ts,.tsx,.py,.rs,.java,.log,.md"
+          onChange={(event) => {
+            onAddAttachments(Array.from(event.target.files ?? []));
+            event.target.value = '';
+          }}
+        />
+        <button type="button" className="attach-btn" disabled={disabled || uploading || attachments.length >= 4} onClick={() => fileInput.current?.click()}>
+          {uploading ? 'Adding…' : 'Attach'}
+        </button>
 
         <div className="composer-actions">
           {busy ? (
@@ -127,7 +167,7 @@ export function Composer({
               {run.state === 'stopping' ? 'Stopping…' : 'Stop'}
             </button>
           ) : (
-            <button type="submit" className="primary send-btn" disabled={disabled || !draft.trim()}>
+            <button type="submit" className="primary send-btn" disabled={disabled || uploading || (!draft.trim() && attachments.length === 0)}>
               Send
             </button>
           )}

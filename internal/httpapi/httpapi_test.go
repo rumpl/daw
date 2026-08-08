@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,6 +82,36 @@ func (h *harness) do(method, path string, body any, mutate ...func(*http.Request
 	return resp
 }
 
+func (h *harness) upload(chatID, name, contentType string, data []byte) *http.Response {
+	h.t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := part.Write(data); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		h.t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(h.t.Context(), http.MethodPost, h.srv.URL+"/api/chats/"+chatID+"/attachments", &body)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set(httpapi.CSRFHeader, h.csrf)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	_ = contentType
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
 func decodeJSON[T any](t *testing.T, resp *http.Response) T {
 	t.Helper()
 	defer resp.Body.Close()
@@ -115,6 +146,42 @@ func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace) {
 }
 
 // ---------------------------------------------------------------------------
+
+func TestMessageAttachmentRoundTrip(t *testing.T) {
+	h := newHarness(t)
+	ref, _ := h.newChat()
+	upload := h.upload(ref.ChatID, "notes.txt", "text/plain", []byte("important context"))
+	if upload.StatusCode != http.StatusCreated {
+		t.Fatalf("upload: %d", upload.StatusCode)
+	}
+	attachment := decodeJSON[protocol.Attachment](t, upload)
+	if attachment.Name != "notes.txt" || attachment.Size != 17 {
+		t.Fatalf("unexpected attachment: %+v", attachment)
+	}
+	resp := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages", protocol.SendMessageRequest{
+		Text: "review this", Mode: protocol.DeliveryNormal, Attachments: []string{attachment.ID},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("send attachment: %d", resp.StatusCode)
+	}
+	time.Sleep(20 * time.Millisecond)
+	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
+	if len(snap.Items) == 0 || snap.Items[0].Message == nil || len(snap.Items[0].Message.Attachments) != 1 {
+		t.Fatalf("attachment missing from snapshot: %+v", snap.Items)
+	}
+	if snap.Items[0].Message.Attachments[0].Name != "notes.txt" {
+		t.Fatalf("wrong attachment metadata: %+v", snap.Items[0].Message.Attachments)
+	}
+}
+
+func TestAttachmentRejectsUnsupportedBinary(t *testing.T) {
+	h := newHarness(t)
+	ref, _ := h.newChat()
+	resp := h.upload(ref.ChatID, "program.bin", "application/octet-stream", []byte{0, 1, 2, 3})
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("unsupported upload: %d", resp.StatusCode)
+	}
+}
 
 func TestHealthAndBootstrap(t *testing.T) {
 	h := newHarness(t)

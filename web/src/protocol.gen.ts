@@ -11,6 +11,14 @@ export type RunState = 'idle' | 'running' | 'stopping';
 export type ToolDecision = 'approve' | 'approveAlways' | 'reject';
 export type ToolState = 'pending' | 'awaiting_confirmation' | 'running' | 'success' | 'error' | 'rejected';
 
+export interface Attachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  data?: string;
+}
+
 export interface MessageItem {
   id: string;
   role: string;
@@ -20,6 +28,7 @@ export interface MessageItem {
   streaming: boolean;
   createdAt: string;
   model: string;
+  attachments?: Array<Attachment>;
   cost?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -314,6 +323,7 @@ export interface ChatRef {
 export interface SendMessageRequest {
   text: string;
   mode: DeliveryMode;
+  attachments?: Array<string>;
 }
 
 export interface Accepted {

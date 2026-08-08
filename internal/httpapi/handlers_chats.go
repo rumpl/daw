@@ -160,7 +160,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(req.Text) == "" {
+	if strings.TrimSpace(req.Text) == "" && len(req.Attachments) == 0 {
 		s.fail(w, http.StatusBadRequest, "empty_message", "the message is empty")
 		return
 	}
@@ -177,7 +177,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mode, runID, queued, err := c.chat.Send(r.Context(), req.Text, req.Mode)
+	attachments, ok := c.takeAttachments(req.Attachments)
+	if !ok {
+		s.fail(w, http.StatusBadRequest, "unknown_attachment", "an attachment is missing or has already been sent")
+		return
+	}
+	mode, runID, queued, err := c.chat.Send(r.Context(), req.Text, attachments, req.Mode)
 	if err != nil {
 		switch {
 		case errors.Is(err, adapter.ErrBusy):

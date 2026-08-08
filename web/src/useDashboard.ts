@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
 import type {
+  Attachment,
   Bootstrap,
   CommandInfo,
   ModelOption,
@@ -31,6 +32,8 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [busyAction, setBusyAction] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -100,6 +103,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     setActiveSessionId(null);
     setModels([]);
     setCommands([]);
+    setAttachments([]);
   }, []);
 
   const applyWorkspace = useCallback(
@@ -236,10 +240,30 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     workspace,
   ]);
 
+  const addAttachments = (files: File[]) => {
+    if (!chatId || files.length === 0) return;
+    void guard(async () => {
+      setUploading(true);
+      try {
+        const room = Math.max(0, 4 - attachments.length);
+        const uploaded = await Promise.all(files.slice(0, room).map((file) => api.uploadAttachment(chatId, file)));
+        setAttachments((current) => [...current, ...uploaded]);
+      } finally {
+        setUploading(false);
+      }
+    });
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
+    if (chatId) void api.deleteAttachment(chatId, id).catch(() => undefined);
+  };
+
   const send = (text: string, mode: SendMode) =>
     void guard(async () => {
       if (!chatId) return;
-      await api.send(chatId, text, mode);
+      await api.send(chatId, text, mode, attachments.map((item) => item.id));
+      setAttachments([]);
       setDraft('');
     });
 
@@ -271,6 +295,8 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     activeSessionId,
     models,
     commands,
+    attachments,
+    uploading,
     error,
     busyAction,
     drawerOpen,
@@ -285,6 +311,8 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     resumeChat,
     closeLiveSession,
     send,
+    addAttachments,
+    removeAttachment,
     patchConfig,
     compact: () => runChatAction((id) => api.compact(id)),
     rename: (title: string) => runChatAction((id) => api.retitle(id, title)),

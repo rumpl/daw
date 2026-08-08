@@ -4,6 +4,7 @@
 import type {
   Accepted,
   APIError,
+  Attachment,
   Bootstrap,
   ChatRef,
   CommandInfo,
@@ -101,10 +102,30 @@ export const api = {
   snapshot(chatId: string): Promise<Snapshot> {
     return request<Snapshot>('GET', `/api/chats/${encodeURIComponent(chatId)}`);
   },
-  send(chatId: string, text: string, mode: 'normal' | 'steer' | 'followUp'): Promise<Accepted> {
+  uploadAttachment(chatId: string, file: File, options: RequestOptions = {}): Promise<Attachment> {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    return fetch(`/api/chats/${encodeURIComponent(chatId)}/attachments`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', [CSRF_HEADER]: csrfToken },
+      body,
+      credentials: 'same-origin',
+      redirect: 'error',
+      signal: options.signal,
+    }).then(async (res) => {
+      const parsed = await res.json().catch(() => ({})) as Partial<APIError> & Partial<Attachment>;
+      if (!res.ok) throw new ApiError(res.status, parsed.code ?? 'unknown', parsed.error ?? `upload failed (${res.status})`);
+      return parsed as Attachment;
+    });
+  },
+  deleteAttachment(chatId: string, attachmentId: string): Promise<void> {
+    return request<void>('DELETE', `/api/chats/${encodeURIComponent(chatId)}/attachments/${encodeURIComponent(attachmentId)}`);
+  },
+  send(chatId: string, text: string, mode: 'normal' | 'steer' | 'followUp', attachments: string[] = []): Promise<Accepted> {
     return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/messages`, {
       text,
       mode,
+      attachments,
     });
   },
   abort(chatId: string): Promise<Accepted> {

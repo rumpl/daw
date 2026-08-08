@@ -82,6 +82,27 @@ describe('Conversation', () => {
     expect(container.querySelector('.pending-queue')).toHaveTextContent('Follow-upthen run tests');
   });
 
+  it('renders image attachments in user messages', () => {
+    const { container } = render(
+      <Conversation
+        items={[assistantMessage({
+          role: 'user',
+          text: 'What is this?',
+          streaming: false,
+          attachments: [{
+            id: 'image-1', name: 'screen.png', mimeType: 'image/png', size: 3, data: 'YWJj',
+          }],
+        })]}
+        empty={null}
+      />,
+    );
+
+    const image = container.querySelector('.message-attachment-image img') as HTMLImageElement;
+    expect(image).not.toBeNull();
+    expect(image.src).toBe('data:image/png;base64,YWJj');
+    expect(image).toHaveAttribute('alt', 'screen.png');
+  });
+
   it('does not render user messages as Markdown', () => {
     const { container } = render(
       <Conversation

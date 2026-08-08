@@ -92,16 +92,28 @@ const (
 	ItemKindSummary  ItemKind = "summary"
 )
 
+// Attachment describes an uploaded file without exposing its contents on the wire.
+type Attachment struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Size     int64  `json:"size"`
+	// Data is base64-encoded and populated only for image attachments already
+	// present in a message. Upload responses omit it.
+	Data string `json:"data,omitempty"`
+}
+
 // MessageItem is a user, assistant or system message.
 type MessageItem struct {
-	ID        string `json:"id"`
-	Role      string `json:"role"`
-	AgentName string `json:"agentName"`
-	Text      string `json:"text"`
-	Reasoning string `json:"reasoning"`
-	Streaming bool   `json:"streaming"`
-	CreatedAt string `json:"createdAt"`
-	Model     string `json:"model"`
+	ID          string       `json:"id"`
+	Role        string       `json:"role"`
+	AgentName   string       `json:"agentName"`
+	Text        string       `json:"text"`
+	Reasoning   string       `json:"reasoning"`
+	Streaming   bool         `json:"streaming"`
+	CreatedAt   string       `json:"createdAt"`
+	Model       string       `json:"model"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 	// Cost is the exact provider-reported cost for this stored message in USD.
 	// It is zero for messages that do not carry usage, including user messages
 	// and assistant messages that are still streaming.
@@ -514,8 +526,9 @@ type ChatRef struct {
 
 // SendMessageRequest is POST /api/chats/:id/messages.
 type SendMessageRequest struct {
-	Text string       `json:"text"`
-	Mode DeliveryMode `json:"mode"`
+	Text        string       `json:"text"`
+	Mode        DeliveryMode `json:"mode"`
+	Attachments []string     `json:"attachments,omitempty"`
 }
 
 // Accepted is the 202 body for accepted prompts.

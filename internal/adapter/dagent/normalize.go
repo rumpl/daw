@@ -56,7 +56,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 			createdAt = time.Now()
 		}
 		c.emit(protocol.Event{Type: protocol.EventMessageItem, Message: &protocol.MessageItem{
-			ID: id, Role: "user", Text: e.Message,
+			ID: id, Role: "user", Text: e.Message, Attachments: attachmentMetadata(e.MultiContent),
 			CreatedAt: createdAt.UTC().Format(time.RFC3339),
 		}})
 

@@ -34,17 +34,18 @@ type liveChat struct {
 	chat          adapter.Chat
 	onIndexChange func(sessionID, workspaceID, reason string)
 
-	mu       sync.Mutex
-	seq      uint64
-	buf      []protocol.Event
-	subs     map[*subscriber]struct{}
-	items    []protocol.Item
-	index    map[string]int
-	meta     protocol.SessionMeta
-	run      protocol.RunStatus
-	usage    protocol.Usage
-	pendingC map[string]protocol.ToolConfirmationRequest
-	pendingE map[string]protocol.ElicitationRequest
+	mu          sync.Mutex
+	seq         uint64
+	buf         []protocol.Event
+	subs        map[*subscriber]struct{}
+	items       []protocol.Item
+	index       map[string]int
+	meta        protocol.SessionMeta
+	run         protocol.RunStatus
+	usage       protocol.Usage
+	pendingC    map[string]protocol.ToolConfirmationRequest
+	pendingE    map[string]protocol.ElicitationRequest
+	attachments map[string]uploadedAttachment
 	// generation invalidates events from a runtime we already replaced or
 	// closed. The pump goroutine carries its generation and drops everything
 	// once it no longer matches.
@@ -52,14 +53,20 @@ type liveChat struct {
 	closed     bool
 }
 
+type uploadedAttachment struct {
+	meta protocol.Attachment
+	data []byte
+}
+
 func newLiveChat(id, workspaceID string, c adapter.Chat) *liveChat {
 	return &liveChat{
 		id: id, workspaceID: workspaceID, chat: c,
-		subs:     map[*subscriber]struct{}{},
-		index:    map[string]int{},
-		pendingC: map[string]protocol.ToolConfirmationRequest{},
-		pendingE: map[string]protocol.ElicitationRequest{},
-		run:      protocol.RunStatus{State: protocol.RunStateIdle},
+		subs:        map[*subscriber]struct{}{},
+		index:       map[string]int{},
+		pendingC:    map[string]protocol.ToolConfirmationRequest{},
+		pendingE:    map[string]protocol.ElicitationRequest{},
+		attachments: map[string]uploadedAttachment{},
+		run:         protocol.RunStatus{State: protocol.RunStateIdle},
 	}
 }
 
@@ -434,6 +441,31 @@ func (l *liveChat) unsubscribe(s *subscriber) {
 	}
 }
 
+func (l *liveChat) takeAttachments(ids []string) ([]adapter.Attachment, bool) {
+	if len(ids) == 0 {
+		return nil, true
+	}
+	if len(ids) > maxAttachmentCount {
+		return nil, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	seen := map[string]bool{}
+	out := make([]adapter.Attachment, 0, len(ids))
+	for _, id := range ids {
+		upload, ok := l.attachments[id]
+		if !ok || seen[id] {
+			return nil, false
+		}
+		seen[id] = true
+		out = append(out, adapter.Attachment{Name: upload.meta.Name, MimeType: upload.meta.MimeType, Data: append([]byte(nil), upload.data...)})
+	}
+	for _, id := range ids {
+		delete(l.attachments, id)
+	}
+	return out, true
+}
+
 // close disposes the chat: cancels pending dialogs via the adapter, marks the
 // generation stale, emits a terminal event and disconnects subscribers.
 func (l *liveChat) close(ctx context.Context, reason string) {
@@ -462,6 +494,7 @@ func (l *liveChat) close(ctx context.Context, reason string) {
 	l.subs = map[*subscriber]struct{}{}
 	l.pendingC = map[string]protocol.ToolConfirmationRequest{}
 	l.pendingE = map[string]protocol.ElicitationRequest{}
+	l.attachments = map[string]uploadedAttachment{}
 	l.mu.Unlock()
 
 	for _, s := range subs {

@@ -18,6 +18,10 @@ function setup(run: RunStatus, draft = '') {
       run={run}
       disabled={false}
       commands={[{ name: 'compact', description: 'Compact history', kind: 'command' }]}
+      attachments={[]}
+      uploading={false}
+      onAddAttachments={vi.fn()}
+      onRemoveAttachment={vi.fn()}
       onSend={onSend}
       onStop={onStop}
     />,
@@ -70,6 +74,31 @@ describe('Composer', () => {
   it('offers slash-command autocomplete', async () => {
     setup(idle, '/comp');
     expect(screen.getByRole('option', { name: /compact/ })).toBeInTheDocument();
+  });
+
+  it('uploads files selected from the attachment picker', async () => {
+    const user = userEvent.setup();
+    const onAddAttachments = vi.fn();
+    render(
+      <Composer
+        draft=""
+        onDraftChange={vi.fn()}
+        run={idle}
+        disabled={false}
+        commands={[]}
+        attachments={[]}
+        uploading={false}
+        onAddAttachments={onAddAttachments}
+        onRemoveAttachment={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Attach' }));
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+    await user.upload(input, file);
+    expect(onAddAttachments).toHaveBeenCalledWith([file]);
   });
 
   it('disables Send for an empty draft', () => {

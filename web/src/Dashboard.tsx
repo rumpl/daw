@@ -54,6 +54,32 @@ export function Dashboard() {
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [newChatMessage, setNewChatMessage] = useState('');
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const dragDepth = useRef(0);
+
+  const canDropAttachments = Boolean(dashboard.chatId && !routePluginId && !dashboard.uploading);
+  const onChatDragEnter = (event: React.DragEvent<HTMLElement>) => {
+    if (!canDropAttachments || !event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDraggingFiles(true);
+  };
+  const onChatDragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (canDropAttachments && event.dataTransfer.types.includes('Files')) event.preventDefault();
+  };
+  const onChatDragLeave = (event: React.DragEvent<HTMLElement>) => {
+    if (!draggingFiles) return;
+    event.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDraggingFiles(false);
+  };
+  const onChatDrop = (event: React.DragEvent<HTMLElement>) => {
+    if (!canDropAttachments) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFiles(false);
+    dashboard.addAttachments(Array.from(event.dataTransfer.files));
+  };
 
   useEffect(() => {
     if (dashboard.chatId) setNewChatMessage('');
@@ -126,7 +152,15 @@ export function Dashboard() {
         />
       </aside>
 
-      <main id="main" className="main">
+      <main
+        id="main"
+        className={`main ${draggingFiles ? 'main-dragging' : ''}`}
+        onDragEnter={onChatDragEnter}
+        onDragOver={onChatDragOver}
+        onDragLeave={onChatDragLeave}
+        onDrop={onChatDrop}
+      >
+        {draggingFiles ? <div className="chat-drop-hint">Drop files to attach</div> : null}
         {routePluginId ? (
           <PluginPage
             boot={dashboard.boot}
@@ -211,6 +245,10 @@ export function Dashboard() {
             run={dashboard.state.run}
             disabled={dashboard.busyAction || dashboard.state.closed}
             commands={dashboard.commands}
+            attachments={dashboard.attachments}
+            uploading={dashboard.uploading}
+            onAddAttachments={dashboard.addAttachments}
+            onRemoveAttachment={dashboard.removeAttachment}
             onSend={dashboard.send}
             onStop={dashboard.abort}
           />

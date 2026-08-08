@@ -61,6 +61,12 @@ type Adapter interface {
 	Close() error
 }
 
+type Attachment struct {
+	Name     string
+	MimeType string
+	Data     []byte
+}
+
 // Chat is one live runtime + session pair.
 //
 // Events returns the adapter's normalized stream. The channel is closed when
@@ -74,7 +80,7 @@ type Chat interface {
 	Snapshot(ctx context.Context) ([]protocol.Item, protocol.Usage, error)
 	Events() <-chan protocol.Event
 
-	Send(ctx context.Context, text string, preferred protocol.DeliveryMode) (mode protocol.DeliveryMode, runID string, queued bool, err error)
+	Send(ctx context.Context, text string, attachments []Attachment, preferred protocol.DeliveryMode) (mode protocol.DeliveryMode, runID string, queued bool, err error)
 	Abort()
 
 	Confirm(ctx context.Context, toolCallID string, decision protocol.ToolDecision, reason string) error

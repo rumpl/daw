@@ -9,6 +9,7 @@ package fake
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -240,7 +241,7 @@ func (c *chat) emit(ev protocol.Event) {
 	}
 }
 
-func (c *chat) Send(ctx context.Context, text string, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
+func (c *chat) Send(ctx context.Context, text string, attachments []adapter.Attachment, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
 	c.dispatchMu.Lock()
 	defer c.dispatchMu.Unlock()
 
@@ -299,7 +300,7 @@ func (c *chat) Send(ctx context.Context, text string, preferred protocol.Deliver
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	c.appendUserMessage(text)
+	c.appendUserMessage(text, attachments)
 	// Announce the running turn immediately, exactly as the real adapter does
 	// on StreamStarted, so the UI can switch Send to Stop.
 	c.mu.Lock()
@@ -311,13 +312,24 @@ func (c *chat) Send(ctx context.Context, text string, preferred protocol.Deliver
 	return mode, runID, false, nil
 }
 
-func (c *chat) appendUserMessage(text string) {
+func (c *chat) appendUserMessage(text string, attachments []adapter.Attachment) {
 	c.mu.Lock()
 	c.msgN++
 	id := fmt.Sprintf("%s-msg-%d", c.st.id, c.msgN)
 	c.mu.Unlock()
+	metadata := make([]protocol.Attachment, 0, len(attachments))
+	for i, attachment := range attachments {
+		item := protocol.Attachment{
+			ID: fmt.Sprintf("fake-att-%d", i), Name: attachment.Name,
+			MimeType: attachment.MimeType, Size: int64(len(attachment.Data)),
+		}
+		if strings.HasPrefix(attachment.MimeType, "image/") {
+			item.Data = base64.StdEncoding.EncodeToString(attachment.Data)
+		}
+		metadata = append(metadata, item)
+	}
 	m := &protocol.MessageItem{
-		ID: id, Role: "user", Text: text,
+		ID: id, Role: "user", Text: text, Attachments: metadata,
 		CreatedAt: c.a.now().UTC().Format(time.RFC3339),
 	}
 	c.a.mu.Lock()
@@ -589,7 +601,7 @@ func (c *chat) settle(gen int, runID string) {
 	_ = runID
 	c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
 	if next != "" {
-		_, _, _, _ = c.Send(context.Background(), next, protocol.DeliveryNormal)
+		_, _, _, _ = c.Send(context.Background(), next, nil, protocol.DeliveryNormal)
 	}
 }
 

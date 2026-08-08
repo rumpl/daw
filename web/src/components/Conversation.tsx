@@ -7,10 +7,33 @@ import { ToolCard } from './ToolActivity';
 
 const BOTTOM_THRESHOLD_PX = 96;
 
+function attachmentImageSrc(attachment: NonNullable<MessageItem['attachments']>[number]): string | null {
+  if (!attachment.mimeType.startsWith('image/') || !attachment.data) return null;
+  return `data:${attachment.mimeType};base64,${attachment.data}`;
+}
+
 function MessageBubble({ message }: { message: MessageItem }) {
   const isUser = message.role === 'user';
   return (
     <article className={`msg msg-${isUser ? 'user' : 'assistant'}`} aria-label={`${message.role} message`}>
+      {message.attachments?.length ? (
+        <div className="message-attachments" aria-label="Message attachments">
+          {message.attachments.map((attachment) => {
+            const src = attachmentImageSrc(attachment);
+            return src ? (
+              <figure className="message-attachment-image" key={attachment.id}>
+                <img src={src} alt={attachment.name} />
+                <figcaption>{clip(attachment.name, 80)}</figcaption>
+              </figure>
+            ) : (
+              <div className="message-attachment-file" key={attachment.id}>
+                <span>{clip(attachment.name, 80)}</span>
+                <small>{attachment.mimeType}</small>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {message.reasoning ? (
         <div className="reasoning">
           <Markdown>{message.reasoning}</Markdown>

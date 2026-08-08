@@ -2,6 +2,7 @@ package dagent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -236,7 +237,8 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 			mi := &protocol.MessageItem{
 				ID: id, Role: string(m.Message.Role), AgentName: m.AgentName,
 				Text: m.Message.Content, Reasoning: m.Message.ReasoningContent,
-				CreatedAt: m.Message.CreatedAt, Model: m.Message.Model, Cost: m.Message.Cost,
+				Attachments: attachmentMetadata(m.Message.MultiContent),
+				CreatedAt:   m.Message.CreatedAt, Model: m.Message.Model, Cost: m.Message.Cost,
 			}
 			if m.Message.Usage != nil {
 				mi.InputTokens = m.Message.Usage.InputTokens
@@ -280,6 +282,28 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 	return out, usage, nil
 }
 
+func attachmentMetadata(parts []dachat.MessagePart) []protocol.Attachment {
+	var out []protocol.Attachment
+	for i, part := range parts {
+		if part.Type != dachat.MessagePartTypeDocument || part.Document == nil {
+			continue
+		}
+		doc := part.Document
+		size := doc.Size
+		if size == 0 {
+			size = int64(len(doc.Source.InlineData) + len(doc.Source.InlineText))
+		}
+		attachment := protocol.Attachment{
+			ID: fmt.Sprintf("stored-%d", i), Name: doc.Name, MimeType: doc.MimeType, Size: size,
+		}
+		if dachat.IsImageMimeType(doc.MimeType) && len(doc.Source.InlineData) > 0 {
+			attachment.Data = base64.StdEncoding.EncodeToString(doc.Source.InlineData)
+		}
+		out = append(out, attachment)
+	}
+	return out
+}
+
 // summarizeArgs renders a short, safe one-line summary of a tool call's
 // arguments. It never returns the whole payload.
 func summarizeArgs(tc tools.ToolCall) string {
@@ -316,7 +340,38 @@ func truncate(s string, n int) string {
 // run lifecycle
 // ---------------------------------------------------------------------------
 
-func (c *chat) Send(ctx context.Context, text string, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
+func buildAttachments(text string, attachments []adapter.Attachment) (string, []dachat.MessagePart, error) {
+	if len(attachments) == 0 {
+		return text, nil, nil
+	}
+	var content strings.Builder
+	content.WriteString(text)
+	parts := make([]dachat.MessagePart, 0, len(attachments)+1)
+	for _, attachment := range attachments {
+		doc := dachat.Document{
+			Name: attachment.Name, MimeType: attachment.MimeType, Size: int64(len(attachment.Data)),
+		}
+		if strings.HasPrefix(attachment.MimeType, "text/") {
+			doc.Source.InlineText = string(attachment.Data)
+			parts = append(parts, dachat.MessagePart{Type: dachat.MessagePartTypeDocument, Document: &doc})
+			continue
+		}
+		doc.Source.InlineData = attachment.Data
+		processed, _, err := dachat.ProcessAttachmentWithMetadata(dachat.MessagePart{Type: dachat.MessagePartTypeDocument, Document: &doc})
+		if err != nil {
+			return "", nil, fmt.Errorf("process attachment: %w", err)
+		}
+		parts = append(parts, dachat.MessagePart{Type: dachat.MessagePartTypeDocument, Document: &processed})
+	}
+	parts = append([]dachat.MessagePart{{Type: dachat.MessagePartTypeText, Text: content.String()}}, parts...)
+	return text, parts, nil
+}
+
+func (c *chat) Send(ctx context.Context, text string, attachments []adapter.Attachment, preferred protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
+	text, parts, err := buildAttachments(text, attachments)
+	if err != nil {
+		return preferred, "", false, err
+	}
 	// Dispatch and the idle→running transition are one serialized operation.
 	// The browser's SSE state can lag, so the runtime state—not the requested
 	// hint—decides whether this starts a turn or joins the active one.
@@ -340,12 +395,12 @@ func (c *chat) Send(ctx context.Context, text string, preferred protocol.Deliver
 
 	switch mode {
 	case protocol.DeliverySteer:
-		if err := c.rt.Steer(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
+		if err := c.rt.Steer(ctx, daruntime.QueuedMessage{Content: text, MultiContent: parts}); err != nil {
 			return mode, "", false, err
 		}
 		return mode, c.runID(), true, nil
 	case protocol.DeliveryFollowUp:
-		if err := c.rt.FollowUp(ctx, daruntime.QueuedMessage{Content: text}); err != nil {
+		if err := c.rt.FollowUp(ctx, daruntime.QueuedMessage{Content: text, MultiContent: parts}); err != nil {
 			return mode, "", false, err
 		}
 		return mode, c.runID(), true, nil
@@ -380,7 +435,7 @@ func (c *chat) Send(ctx context.Context, text string, preferred protocol.Deliver
 		}
 	}
 
-	msg := session.UserMessage(resolved)
+	msg := session.UserMessage(resolved, parts...)
 	c.sess.AddMessage(msg)
 	c.publishRun()
 

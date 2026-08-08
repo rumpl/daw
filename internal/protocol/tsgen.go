@@ -13,6 +13,7 @@ import (
 // reaches the browser; TestTypeScriptInSync fails when the checked-in file
 // drifts from this list.
 var exported = []any{
+	Attachment{},
 	MessageItem{},
 	ToolImage{},
 	ToolActivity{},
