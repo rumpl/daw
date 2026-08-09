@@ -48,6 +48,32 @@ describe('reducer', () => {
     expect(s.items[0]?.tool?.state).toBe('success');
   });
 
+  it('appends live tool output chunks and accepts the final complete response', () => {
+    let s = initialChatState();
+    s = reduce(s, ev({
+      type: 'tool_start', seq: 1,
+      tool: { id: 't1', name: 'shell', category: 'shell', agentName: 'root', argsSummary: 'run', state: 'running', preview: '', truncated: false, outputBytes: 0, isError: false },
+    }));
+    s = reduce(s, ev({
+      type: 'tool_update', seq: 2,
+      tool: { id: 't1', name: 'shell', category: '', agentName: '', argsSummary: '', state: 'running', preview: 'first\n', truncated: false, outputBytes: 6, isError: false },
+    }));
+    s = reduce(s, ev({
+      type: 'tool_update', seq: 3,
+      tool: { id: 't1', name: 'shell', category: '', agentName: '', argsSummary: '', state: 'running', preview: 'second\n', truncated: false, outputBytes: 7, isError: false },
+    }));
+
+    expect(s.items[0]?.tool?.preview).toBe('first\nsecond\n');
+    expect(s.items[0]?.tool?.outputBytes).toBe(13);
+
+    s = reduce(s, ev({
+      type: 'tool_end', seq: 4,
+      tool: { id: 't1', name: 'shell', category: '', agentName: '', argsSummary: '', state: 'success', preview: 'complete output', truncated: false, outputBytes: 15, isError: false },
+    }));
+    expect(s.items[0]?.tool?.preview).toBe('complete output');
+    expect(s.items[0]?.tool?.outputBytes).toBe(15);
+  });
+
   it('shows a live compaction summary and reconciles it by ID', () => {
     let s = initialChatState();
     const summary = { id: 'session-sum-4', text: 'The compacted conversation result.', cost: 0.0042 };

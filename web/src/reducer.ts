@@ -79,7 +79,11 @@ function upsert(items: Item[], item: Item): Item[] {
   return next;
 }
 
-function upsertTool(items: Item[], tool: NonNullable<Item['tool']>): Item[] {
+function upsertTool(
+  items: Item[],
+  tool: NonNullable<Item['tool']>,
+  appendPreview = false,
+): Item[] {
   const key = `t:${tool.id}`;
   const idx = items.findIndex((existing) => itemKey(existing) === key);
   if (idx === -1) return [...items, { kind: 'tool', tool }];
@@ -92,6 +96,8 @@ function upsertTool(items: Item[], tool: NonNullable<Item['tool']>): Item[] {
     displayName: tool.displayName || current.displayName,
     argsSummary: tool.argsSummary || current.argsSummary,
     arguments: tool.arguments ?? current.arguments,
+    preview: appendPreview ? current.preview + tool.preview : tool.preview,
+    outputBytes: appendPreview ? current.outputBytes + tool.outputBytes : tool.outputBytes,
   };
   const next = items.slice();
   next[idx] = { kind: 'tool', tool: merged };
@@ -179,10 +185,13 @@ export function reduce(state: ChatState, event: Event): ChatState {
           }
         : { ...state, seq };
     case 'tool_start':
-    case 'tool_update':
     case 'tool_end':
       return event.tool
         ? { ...state, seq, items: upsertTool(state.items, event.tool) }
+        : { ...state, seq };
+    case 'tool_update':
+      return event.tool
+        ? { ...state, seq, items: upsertTool(state.items, event.tool, true) }
         : { ...state, seq };
     case 'transfer':
       return event.transfer
