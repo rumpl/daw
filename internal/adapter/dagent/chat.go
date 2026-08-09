@@ -22,6 +22,7 @@ import (
 	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessionlineage"
 )
 
 type pendingTool struct {
@@ -146,11 +147,15 @@ func (c *chat) Meta() protocol.SessionMeta {
 		view.Deny = append(sp.Deny, view.Deny...)
 	}
 
+	origin := sessionlineage.FromAttributes(c.sess.AttributesSnapshot())
 	return protocol.SessionMeta{
 		SessionID: c.sess.ID, Title: c.sess.TitleSnapshot(),
 		WorkingDir: c.workingDir, AgentName: c.agentName,
 		Model: model, ThinkingLevel: thinking, ThinkingLevels: levels,
 		Permissions: view, CreatedAt: c.sess.CreatedAt.UTC().Format(time.RFC3339),
+		ParentSessionID: origin.ParentSessionID, RootSessionID: origin.RootSessionID,
+		OriginKind: origin.Kind, OriginPluginID: origin.PluginID,
+		Attributes: c.sess.AttributesSnapshot(),
 	}
 }
 

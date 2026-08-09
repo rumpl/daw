@@ -141,10 +141,11 @@ func TestMCPServersAreNamespacedAndWorkspaceResolved(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspace := t.TempDir()
-	servers := MCPServers(base, workspace, "chat_test")
+	servers := MCPServers(base, workspace, "chat_test", "context_test")
 	if len(servers) != 2 || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != filepath.Join(workspace, "tools") ||
-		len(servers[0].Env) != 2 || !slices.Contains(servers[0].Env, "TOKEN=x") ||
-		!slices.Contains(servers[0].Env, "DAW_CHAT_ID=chat_test") || servers[1].Name != "mcp-plugin-remote" {
+		len(servers[0].Env) != 3 || !slices.Contains(servers[0].Env, "TOKEN=x") ||
+		!slices.Contains(servers[0].Env, "DAW_CHAT_ID=chat_test") ||
+		!slices.Contains(servers[0].Env, "DAW_SESSION_CONTEXT=context_test") || servers[1].Name != "mcp-plugin-remote" {
 		t.Fatalf("unexpected MCP servers: %#v", servers)
 	}
 }

@@ -161,6 +161,10 @@ export interface SessionMeta {
   thinkingLevels: Array<string> | null;
   permissions: PermissionsView;
   createdAt: string;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  originKind?: string;
+  originPluginId?: string;
 }
 
 export interface Snapshot {
@@ -344,6 +348,10 @@ export interface SessionSummary {
   live: boolean;
   chatId?: string;
   runState?: RunState;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  originKind?: string;
+  originPluginId?: string;
 }
 
 export interface ExecutionLocationRequest {

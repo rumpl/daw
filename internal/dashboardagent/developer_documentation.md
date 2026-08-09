@@ -174,6 +174,8 @@ interface PermissionsView {
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
   messages: number; live: boolean; chatId?: string; runState?: RunState;
+  parentSessionId?: string; rootSessionId?: string; originKind?: string;
+  originPluginId?: string;
 }
 interface ChatRef { chatId: string; sessionId: string }
 interface QueuedMessage { id: string; text: string }
@@ -190,6 +192,8 @@ interface SessionMeta {
   chatId: string; sessionId: string; title: string; workspaceId: string;
   workingDir: string; agentName: string; model: string; thinkingLevel: string;
   thinkingLevels: string[] | null; permissions: PermissionsView; createdAt: string;
+  parentSessionId?: string; rootSessionId?: string; originKind?: string;
+  originPluginId?: string;
 }
 interface Attachment { id: string; name: string; mimeType: string; size: number; data?: string }
 interface MessageItem {
@@ -369,8 +373,10 @@ export default async function handler(request) {
 
 `dashboard.request(method, path, body?, options?)` parses JSON, authenticates
 mutations, and throws `DashboardApiError`; `dashboard.raw(...)` returns the raw
-fetch `Response`. Request and response bodies stream with cancellation. The SDK
-also exports:
+fetch `Response`. A chat-scoped MCP process may propagate its opaque
+`DAW_SESSION_CONTEXT` through `options.sessionContext`; the SDK transports it
+as an authenticated header and chat creation records durable provenance.
+Request and response bodies stream with cancellation. The SDK also exports:
 
 - `registerExecutionLocation(workspaceId, workingDir, {ttlSeconds?})`
   registers a backend-selected directory and returns

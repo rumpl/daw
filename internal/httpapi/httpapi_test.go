@@ -388,6 +388,55 @@ func TestPluginBackendProxyAndDashboardSDK(t *testing.T) {
 	}
 }
 
+func TestAmbientSessionContextCreatesDurableLineage(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.pluginDir, "lineage-test")
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"apiVersion":1,"id":"lineage-test","name":"Lineage test","backend":{"entry":"backend/index.mjs","mcp":[{"id":"spawn","command":"node","args":["noop.mjs"]}]}}`
+	backend := `
+		import { dashboard } from "@daw/plugin-backend";
+		export default async function(request) {
+			const body = await request.json();
+			return Response.json(await dashboard.request("POST", "/api/chats", {workspaceId: body.workspaceId}, {sessionContext: body.sessionContext}));
+		}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "backend", "index.mjs"), []byte(backend), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ws := h.openWorkspace()
+	parent := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID}))
+	var creationContext string
+	for _, server := range h.fake.LastOpenRequest.MCPServers {
+		for _, value := range server.Env {
+			if strings.HasPrefix(value, "DAW_SESSION_CONTEXT=") {
+				creationContext = strings.TrimPrefix(value, "DAW_SESSION_CONTEXT=")
+			}
+		}
+	}
+	if creationContext == "" {
+		t.Fatal("parent MCP environment did not receive a session context")
+	}
+	child := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/plugins/lineage-test/backend/spawn", map[string]string{
+		"workspaceId": ws.WorkspaceID, "sessionContext": creationContext,
+	}))
+	list := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/workspaces/"+ws.WorkspaceID+"/sessions", nil))
+	var got *protocol.SessionSummary
+	for i := range list {
+		if list[i].SessionID == child.SessionID {
+			got = &list[i]
+		}
+	}
+	if got == nil || got.ParentSessionID != parent.SessionID || got.RootSessionID != parent.SessionID ||
+		got.OriginKind != "agent" || got.OriginPluginID != "lineage-test" {
+		t.Fatalf("child lineage was not exposed: %+v", got)
+	}
+}
+
 func TestCreateChatIncludesPluginMCPServers(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.pluginDir, "mcp-tools")

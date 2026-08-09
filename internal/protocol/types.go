@@ -280,17 +280,22 @@ type PermissionsView struct {
 
 // SessionMeta is per-chat metadata shown in the header and sidebar.
 type SessionMeta struct {
-	ChatID         string          `json:"chatId"`
-	SessionID      string          `json:"sessionId"`
-	Title          string          `json:"title"`
-	WorkspaceID    string          `json:"workspaceId"`
-	WorkingDir     string          `json:"workingDir"`
-	AgentName      string          `json:"agentName"`
-	Model          string          `json:"model"`
-	ThinkingLevel  string          `json:"thinkingLevel"`
-	ThinkingLevels []string        `json:"thinkingLevels"`
-	Permissions    PermissionsView `json:"permissions"`
-	CreatedAt      string          `json:"createdAt"`
+	ChatID          string            `json:"chatId"`
+	SessionID       string            `json:"sessionId"`
+	Title           string            `json:"title"`
+	WorkspaceID     string            `json:"workspaceId"`
+	WorkingDir      string            `json:"workingDir"`
+	AgentName       string            `json:"agentName"`
+	Model           string            `json:"model"`
+	ThinkingLevel   string            `json:"thinkingLevel"`
+	ThinkingLevels  []string          `json:"thinkingLevels"`
+	Permissions     PermissionsView   `json:"permissions"`
+	CreatedAt       string            `json:"createdAt"`
+	ParentSessionID string            `json:"parentSessionId,omitempty"`
+	RootSessionID   string            `json:"rootSessionId,omitempty"`
+	OriginKind      string            `json:"originKind,omitempty"`
+	OriginPluginID  string            `json:"originPluginId,omitempty"`
+	Attributes      map[string]string `json:"-"`
 }
 
 // Snapshot is the complete, authoritative state of a chat.
@@ -542,15 +547,19 @@ type Workspace struct {
 
 // SessionSummary is one row of the session list.
 type SessionSummary struct {
-	SessionID  string            `json:"sessionId"`
-	Title      string            `json:"title"`
-	WorkingDir string            `json:"workingDir"`
-	Attributes map[string]string `json:"-"`
-	CreatedAt  string            `json:"createdAt"`
-	Messages   int               `json:"messages"`
-	Live       bool              `json:"live"`
-	ChatID     string            `json:"chatId,omitempty"`
-	RunState   *RunState         `json:"runState,omitempty"`
+	SessionID       string            `json:"sessionId"`
+	Title           string            `json:"title"`
+	WorkingDir      string            `json:"workingDir"`
+	Attributes      map[string]string `json:"-"`
+	CreatedAt       string            `json:"createdAt"`
+	Messages        int               `json:"messages"`
+	Live            bool              `json:"live"`
+	ChatID          string            `json:"chatId,omitempty"`
+	RunState        *RunState         `json:"runState,omitempty"`
+	ParentSessionID string            `json:"parentSessionId,omitempty"`
+	RootSessionID   string            `json:"rootSessionId,omitempty"`
+	OriginKind      string            `json:"originKind,omitempty"`
+	OriginPluginID  string            `json:"originPluginId,omitempty"`
 }
 
 // ExecutionLocationRequest registers a backend-selected working directory for

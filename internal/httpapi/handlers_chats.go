@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"sort"
@@ -11,6 +12,8 @@ import (
 	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessioncontext"
+	"github.com/rumpl/daw/internal/sessionlineage"
 )
 
 func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
@@ -18,7 +21,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil)
+	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"))
 }
 
 func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
@@ -62,10 +65,10 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored)
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "")
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string) {
 	ws, ok := s.workspaces.Get(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
@@ -84,6 +87,27 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 
 	workingDir := ws.Path
 	var attributes map[string]string
+	if contextToken != "" {
+		if pluginID == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-DAW-Plugin-Token")), []byte(s.backends.internalToken)) != 1 || !s.pluginManagement.running(pluginID) {
+			s.fail(w, http.StatusForbidden, "invalid_session_context", "the session creation context is unavailable")
+			return
+		}
+		creation, found := s.sessionContexts.Resolve(contextToken)
+		parent, live := s.chat(creation.ParentChatID)
+		if !found || !live || parent.workspaceID != workspaceID {
+			s.fail(w, http.StatusBadRequest, "invalid_session_context", "the session creation context is invalid or expired")
+			return
+		}
+		parentOrigin := sessionlineage.FromAttributes(parent.chat.Meta().Attributes)
+		rootSessionID := parentOrigin.RootSessionID
+		if rootSessionID == "" {
+			rootSessionID = parent.chat.SessionID()
+		}
+		attributes = sessionlineage.Origin{
+			ParentSessionID: parent.chat.SessionID(), RootSessionID: rootSessionID,
+			Kind: sessionlineage.KindAgent, PluginID: pluginID,
+		}.Attributes()
+	}
 	persistImmediately := false
 	if resumeID != "" && stored != nil && stored.Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
 		if stored.Attributes[executionlocations.AttributeWorkspacePath] != ws.Path ||
@@ -99,7 +123,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 			return
 		}
 		workingDir = resolved
-		attributes = stored.Attributes
+		attributes = sessionlineage.Merge(attributes, stored.Attributes)
 	} else if executionLocationID != "" {
 		location, err := s.executionLocations.Consume(executionLocationID, ws.Path)
 		if err != nil {
@@ -107,11 +131,12 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 			return
 		}
 		workingDir = location.WorkingDir
-		attributes = location.Attributes()
+		attributes = sessionlineage.Merge(attributes, location.Attributes())
 		persistImmediately = true
 	}
 
 	chatID := newOpaqueID("chat")
+	creationContext := s.sessionContexts.Issue(sessioncontext.Context{ParentChatID: chatID})
 	preference := s.preferences.Get(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
 		ChatID: chatID, WorkingDir: workingDir, ResumeSessionID: resumeID,
@@ -119,9 +144,10 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		PersistImmediately: persistImmediately,
 		Model:              preference.Model,
 		ThinkingLevel:      preference.ThinkingLevel,
-		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID, s.pluginManagement.running),
+		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID, creationContext, s.pluginManagement.running),
 	})
 	if err != nil {
+		s.sessionContexts.Revoke(creationContext)
 		switch {
 		case errors.Is(err, adapter.ErrNotFound):
 			s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
@@ -145,6 +171,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	if resumeID == "" && (preference.Model != "" || preference.ThinkingLevel != "") {
 		if err := s.preferences.Remember(sessionID, preference); err != nil {
 			s.log.Error("persist new chat preferences", "error", err)
+			s.sessionContexts.Revoke(creationContext)
 			_ = c.Close(r.Context())
 			s.fail(w, http.StatusInternalServerError, "preference_save_failed",
 				"the chat opened but its settings could not be saved to disk")
@@ -152,11 +179,13 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		}
 	}
 	lc := newLiveChat(chatID, ws.ID, c)
+	lc.creationContext = creationContext
 	lc.onIndexChange = func(sessionID, workspaceID, reason string) {
 		s.publishSessionsChanged(workspaceID, sessionID, reason)
 	}
 	lc.generation = 1
 	if other := s.chats.register(sessionID, lc); other != nil {
+		s.sessionContexts.Revoke(creationContext)
 		_ = c.Close(r.Context())
 		s.log.Info("attached to concurrently opened chat", "chat", other.id, "session", sessionID, "workspace", workspaceID)
 		s.json(w, http.StatusOK, protocol.ChatRef{ChatID: other.id, SessionID: sessionID})

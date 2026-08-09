@@ -507,7 +507,7 @@ func backendRevision(root string) (string, error) {
 }
 
 // MCPServers resolves every manifest-declared MCP server for a workspace.
-func MCPServers(dir, workingDir, chatID string, active ...func(string) bool) []adapter.MCPServer {
+func MCPServers(dir, workingDir, chatID, sessionContext string, active ...func(string) bool) []adapter.MCPServer {
 	var out []adapter.MCPServer
 	for _, plugin := range Catalog(dir).Plugins {
 		if len(active) > 0 && !active[0](plugin.ID) {
@@ -523,7 +523,7 @@ func MCPServers(dir, workingDir, chatID string, active ...func(string) bool) []a
 			continue
 		}
 		for _, server := range m.Backend.MCP {
-			env := make([]string, 0, len(server.Env)+1)
+			env := make([]string, 0, len(server.Env)+2)
 			for key, value := range server.Env {
 				env = append(env, key+"="+value)
 			}
@@ -531,6 +531,9 @@ func MCPServers(dir, workingDir, chatID string, active ...func(string) bool) []a
 			// tools can identify their caller without relying on model-supplied IDs.
 			if chatID != "" {
 				env = append(env, "DAW_CHAT_ID="+chatID)
+			}
+			if sessionContext != "" {
+				env = append(env, "DAW_SESSION_CONTEXT="+sessionContext)
 			}
 			sort.Strings(env)
 			cwd := workingDir

@@ -161,6 +161,25 @@ describe('Sidebar', () => {
     expect(screen.getByRole('heading', { name: /Wednesday, Jan 1/ })).toBeVisible();
   });
 
+  it('renders creation provenance as a session tree', () => {
+    const sessions: SessionSummary[] = [
+      { ...liveSession, sessionId: 'parent', title: 'Parent task', createdAt: new Date().toISOString() },
+      { ...liveSession, sessionId: 'child', parentSessionId: 'parent', title: 'Delegated task', createdAt: new Date().toISOString() },
+    ];
+    render(
+      <Sidebar
+        boot={boot} workspace={workspace} sessions={sessions} recentWorkspaces={[]} plugins={[]}
+        pluginErrors={[]} activePluginId={null} activePluginPath="" workspacePath={workspace.path}
+        busy={false} drawerRef={createRef<HTMLDivElement>()} onWorkspacePathChange={vi.fn()}
+        onOpenWorkspace={vi.fn()} onNewChat={vi.fn()} onResumeChat={vi.fn()} onOpenPlugin={vi.fn()}
+      />,
+    );
+
+    const parent = screen.getByRole('treeitem', { name: /Parent task/ });
+    expect(parent).toHaveAttribute('aria-expanded', 'true');
+    expect(parent.querySelector('[role="group"]')).toContainElement(screen.getByText('Delegated task').closest('[role="treeitem"]'));
+  });
+
   it('shows live state in the sessions list without a separate live-sessions menu', () => {
     render(
       <Sidebar

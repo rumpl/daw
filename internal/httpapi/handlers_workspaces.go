@@ -9,6 +9,7 @@ import (
 	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessionlineage"
 )
 
 func (s *Server) handleOpenWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +60,14 @@ func (s *Server) failPath(w http.ResponseWriter, err error) {
 // to open the chat rather than trusting stale session-store metadata; the
 // browser can therefore safely use it to switch projects and attach.
 
+func exposeSessionOrigin(summary *protocol.SessionSummary) {
+	origin := sessionlineage.FromAttributes(summary.Attributes)
+	summary.ParentSessionID = origin.ParentSessionID
+	summary.RootSessionID = origin.RootSessionID
+	summary.OriginKind = origin.Kind
+	summary.OriginPluginID = origin.PluginID
+}
+
 func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) {
 	list, err := s.adapter.ListSessions(r.Context(), "")
 	if err != nil {
@@ -82,6 +91,7 @@ func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) 
 
 	live := make([]protocol.SessionSummary, 0, len(liveChats))
 	for _, summary := range list {
+		exposeSessionOrigin(&summary)
 		info, ok := liveChats[summary.SessionID]
 		if !ok {
 			continue
@@ -112,6 +122,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	liveChats := s.chats.bySessionSnapshot()
 	filtered := make([]protocol.SessionSummary, 0, len(list))
 	for i := range list {
+		exposeSessionOrigin(&list[i])
 		logicalPath := list[i].WorkingDir
 		if list[i].Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
 			logicalPath = list[i].Attributes[executionlocations.AttributeWorkspacePath]

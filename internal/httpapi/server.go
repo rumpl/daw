@@ -18,6 +18,7 @@ import (
 	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessioncontext"
 	"github.com/rumpl/daw/internal/workspaces"
 )
 
@@ -75,6 +76,7 @@ type Server struct {
 	chats              *chatRegistry
 	preferences        *chatprefs.Service
 	executionLocations *executionlocations.Service
+	sessionContexts    *sessioncontext.Service
 	events             *dashboardEvents
 	plugins            *pluginWatcher
 	backends           *pluginBackendManager
@@ -114,6 +116,7 @@ func New(opts Options) *Server {
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
 	s.executionLocations = executionlocations.New()
+	s.sessionContexts = sessioncontext.New()
 	s.chats = newChatRegistry()
 	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
 	s.pluginManagement = newPluginManagement(strings.TrimSpace(opts.PluginDataDir))
@@ -267,6 +270,7 @@ func newOpaqueID(prefix string) string {
 func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 	c := s.chats.remove(chatID)
 	if c != nil {
+		s.sessionContexts.Revoke(c.creationContext)
 		s.log.Info("closing chat", "chat", chatID, "session", c.chat.SessionID(), "workspace", c.workspaceID, "reason", reason)
 		c.close(ctx, reason)
 		s.publishSessionsChanged(c.workspaceID, c.chat.SessionID(), reason)

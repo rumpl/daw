@@ -317,17 +317,21 @@ export function createDashboardClient() {
   const token = process.env.DAW_API_TOKEN;
   if (!origin || !token) throw new Error("dashboard backend environment is unavailable");
   return {
+    // sessionContext is an opaque capability supplied by a chat-scoped MCP
+    // process. The backend SDK transports it as provenance, not request data.
     async raw(method, requestPath, body, options = {}) {
       if (typeof requestPath !== "string" || !requestPath.startsWith("/api/")) throw new TypeError("dashboard API paths must start with /api/");
       const headers = new Headers(options.headers);
+      const {sessionContext, ...fetchOptions} = options;
       if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) headers.set("X-DAW-CSRF", token);
       headers.set("X-DAW-Plugin-ID", pluginId);
       headers.set("X-DAW-Plugin-Token", process.env.DAW_PLUGIN_TOKEN);
+      if (sessionContext) headers.set("X-DAW-Session-Context", sessionContext);
       let payload = body;
       if (body !== undefined && !(body instanceof FormData) && typeof body !== "string" && !ArrayBuffer.isView(body)) {
         headers.set("Content-Type", "application/json"); payload = JSON.stringify(body);
       }
-      return fetch(new URL(requestPath, origin), { ...options, method, headers, body: payload, redirect: "error" });
+      return fetch(new URL(requestPath, origin), { ...fetchOptions, method, headers, body: payload, redirect: "error" });
     },
     async request(method, requestPath, body, options) {
       const response = await this.raw(method, requestPath, body, options);

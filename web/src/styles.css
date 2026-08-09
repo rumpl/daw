@@ -194,6 +194,13 @@ select {
 .session-day:first-child h3 { margin-top: 0; }
 .session-day-current h3 { color: var(--accent); border-bottom-color: var(--accent); }
 .session-day ul { list-style: none; margin: 0; padding: 0; }
+.session-day ul[role="group"] {
+  margin-left: 13px; padding-left: 8px; border-left: 1px solid var(--rule);
+}
+.session-day [role="treeitem"] { position: relative; }
+.session-day ul[role="group"] > [role="treeitem"]::before {
+  content: ''; position: absolute; left: -8px; top: 18px; width: 7px; border-top: 1px solid var(--rule);
+}
 .session-title {
   display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0;
 }

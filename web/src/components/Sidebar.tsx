@@ -45,15 +45,59 @@ function sessionDay(createdAt: string): string {
   }).format(date);
 }
 
+interface SessionNode {
+  session: SessionSummary;
+  children: SessionNode[];
+}
+
+function sessionForest(sessions: SessionSummary[]): SessionNode[] {
+  const nodes = new Map(sessions.map((session) => [session.sessionId, { session, children: [] as SessionNode[] }]));
+  const roots: SessionNode[] = [];
+  for (const node of nodes.values()) {
+    const parent = node.session.parentSessionId ? nodes.get(node.session.parentSessionId) : undefined;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sort = (items: SessionNode[]) => {
+    items.sort((a, b) => b.session.createdAt.localeCompare(a.session.createdAt));
+    items.forEach((item) => sort(item.children));
+  };
+  sort(roots);
+  return roots;
+}
+
 function groupSessionsByDay(sessions: SessionSummary[]) {
-  const groups = new Map<string, SessionSummary[]>();
-  for (const session of sessions) {
-    const label = sessionDay(session.createdAt);
+  const groups = new Map<string, SessionNode[]>();
+  for (const node of sessionForest(sessions)) {
+    const label = sessionDay(node.session.createdAt);
     const group = groups.get(label);
-    if (group) group.push(session);
-    else groups.set(label, [session]);
+    if (group) group.push(node);
+    else groups.set(label, [node]);
   }
   return Array.from(groups, ([label, groupedSessions]) => ({ label, sessions: groupedSessions }));
+}
+
+function SessionTreeItem({ node, busy, onResumeChat }: {
+  node: SessionNode;
+  busy: boolean;
+  onResumeChat: (sessionId: string) => void;
+}) {
+  const session = node.session;
+  return (
+    <li role="treeitem" aria-expanded={node.children.length ? true : undefined}>
+      <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
+        <span className="session-title">
+          <span>{clip(session.title || 'Untitled', 80)}</span>
+          {session.runState === 'running' ? <span className="run-dot run-running" aria-label="Running" /> : null}
+        </span>
+      </button>
+      {node.children.length ? (
+        <ul role="group">
+          {node.children.map((child) => <SessionTreeItem key={child.session.sessionId} node={child} busy={busy} onResumeChat={onResumeChat} />)}
+        </ul>
+      ) : null}
+    </li>
+  );
 }
 
 export function Sidebar({
@@ -87,10 +131,17 @@ export function Sidebar({
   const filteredSessions = useMemo(() => {
     const query = sessionFilter.trim().toLowerCase();
     if (!query) return sessions;
-    return sessions.filter(
-      (session) =>
-        session.title.toLowerCase().includes(query) || session.sessionId.toLowerCase().includes(query),
-    );
+    const byID = new Map(sessions.map((session) => [session.sessionId, session]));
+    const included = new Set<string>();
+    for (const session of sessions) {
+      if (!session.title.toLowerCase().includes(query) && !session.sessionId.toLowerCase().includes(query)) continue;
+      let current: SessionSummary | undefined = session;
+      while (current && !included.has(current.sessionId)) {
+        included.add(current.sessionId);
+        current = current.parentSessionId ? byID.get(current.parentSessionId) : undefined;
+      }
+    }
+    return sessions.filter((session) => included.has(session.sessionId));
   }, [sessions, sessionFilter]);
 
   const groupedSessions = useMemo(() => groupSessionsByDay(filteredSessions), [filteredSessions]);
@@ -281,18 +332,9 @@ export function Sidebar({
                   aria-labelledby={`session-day-${index}`}
                 >
                   <h3 id={`session-day-${index}`}>{group.label}</h3>
-                  <ul>
-                    {group.sessions.map((session) => (
-                      <li key={session.sessionId}>
-                        <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
-                          <span className="session-title">
-                            <span>{clip(session.title || 'Untitled', 80)}</span>
-                            {session.runState === 'running' ? (
-                              <span className="run-dot run-running" aria-label="Running" />
-                            ) : null}
-                          </span>
-                        </button>
-                      </li>
+                  <ul role="tree">
+                    {group.sessions.map((node) => (
+                      <SessionTreeItem key={node.session.sessionId} node={node} busy={busy} onResumeChat={onResumeChat} />
                     ))}
                   </ul>
                 </section>

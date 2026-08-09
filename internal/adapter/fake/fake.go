@@ -18,6 +18,7 @@ import (
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessionlineage"
 )
 
 // Adapter is the fake docker-agent facade.
@@ -211,16 +212,22 @@ func (c *chat) Meta() protocol.SessionMeta {
 }
 
 func (c *chat) meta() protocol.SessionMeta {
+	origin := sessionlineage.FromAttributes(c.st.attributes)
 	return protocol.SessionMeta{
-		SessionID:      c.st.id,
-		Title:          c.st.title,
-		WorkingDir:     c.st.workingDir,
-		AgentName:      c.st.agentName,
-		Model:          c.st.model,
-		ThinkingLevel:  c.st.thinking,
-		ThinkingLevels: []string{"none", "low", "medium", "high"},
-		Permissions:    c.permissions(),
-		CreatedAt:      c.st.createdAt.UTC().Format(time.RFC3339),
+		SessionID:       c.st.id,
+		Title:           c.st.title,
+		WorkingDir:      c.st.workingDir,
+		AgentName:       c.st.agentName,
+		Model:           c.st.model,
+		ThinkingLevel:   c.st.thinking,
+		ThinkingLevels:  []string{"none", "low", "medium", "high"},
+		Permissions:     c.permissions(),
+		CreatedAt:       c.st.createdAt.UTC().Format(time.RFC3339),
+		ParentSessionID: origin.ParentSessionID,
+		RootSessionID:   origin.RootSessionID,
+		OriginKind:      origin.Kind,
+		OriginPluginID:  origin.PluginID,
+		Attributes:      cloneMap(c.st.attributes),
 	}
 }
 
