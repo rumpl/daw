@@ -50,6 +50,8 @@ var exported = []any{
 	OpenWorkspaceRequest{},
 	Workspace{},
 	SessionSummary{},
+	ExecutionLocationRequest{},
+	ExecutionLocationRef{},
 	CreateChatRequest{},
 	ResumeChatRequest{},
 	ChatRef{},

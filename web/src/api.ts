@@ -100,8 +100,8 @@ export const api = {
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
   },
-  createChat(workspaceId: string): Promise<ChatRef> {
-    return request<ChatRef>('POST', '/api/chats', { workspaceId });
+  createChat(workspaceId: string, executionLocationId?: string): Promise<ChatRef> {
+    return request<ChatRef>('POST', '/api/chats', { workspaceId, ...(executionLocationId ? { executionLocationId } : {}) });
   },
   resumeChat(workspaceId: string, sessionId: string): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, sessionId });

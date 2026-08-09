@@ -38,6 +38,10 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - `GET /api/plugins/{pluginId}/events` → plugin-owned SSE stream
   - Reconnects with `lastEventId`; carries `{type,seq,data?}` events published
     by that plugin's backend.
+- `POST /api/plugins/{pluginId}/execution-locations`
+  - Backend-only registration of a short-lived, single-use execution directory
+    capability. Body: `{workspaceId, workingDir, ttlSeconds?}`. Plugin backends
+    should call the injected `registerExecutionLocation` helper.
 - `GET /api/plugins/{pluginId}/config` → `PluginConfiguration`
 - `PUT /api/plugins/{pluginId}/config` → `PluginConfiguration`
   - Reads or replaces the plugin's host-managed public JSON configuration.
@@ -73,7 +77,10 @@ selection or agent-resolution API.
 - `GET /api/workspaces/{workspaceId}/sessions` → `200 SessionSummary[]`
   - Stored sessions for one opened workspace, including live status.
 - `POST /api/chats`
-  - Body: `{workspaceId: string}`. Returns `201 ChatRef`.
+  - Body: `{workspaceId: string, executionLocationId?: string}`. A trusted
+    plugin backend can issue the opaque location ID to run the session in a
+    different directory while keeping it grouped under the logical workspace.
+    Returns `201 ChatRef`.
 - `POST /api/chats/resume`
   - Body: `{workspaceId: string, sessionId: string}`.
   - Returns `201 ChatRef` when opening a stored session, or `200 ChatRef` when
@@ -355,6 +362,10 @@ mutations, and throws `DashboardApiError`; `dashboard.raw(...)` returns the raw
 fetch `Response`. Request and response bodies stream with cancellation. The SDK
 also exports:
 
+- `registerExecutionLocation(workspaceId, workingDir, {ttlSeconds?})`
+  registers a backend-selected directory and returns
+  `{executionLocationId, expiresAt}`. Capabilities are single-use and expire
+  after five minutes by default.
 - `storage.get/set/delete(key)` for backend-only namespaced JSON storage
 - `configuration.get/set()` for host-managed public configuration
 - `events.subscribeDashboard()` and `events.publish()`
@@ -487,7 +498,7 @@ interface DashboardAPI {
   openWorkspace(path:string): Promise<Workspace>;
   liveSessions(): Promise<SessionSummary[]>;
   sessions(workspaceId:string): Promise<SessionSummary[]>;
-  createChat(workspaceId:string): Promise<ChatRef>;
+  createChat(workspaceId:string, executionLocationId?:string): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
   uploadAttachment(chatId:string, file:File,

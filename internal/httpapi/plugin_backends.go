@@ -319,6 +319,11 @@ export function createDashboardClient() {
 }
 export const dashboard = createDashboardClient();
 export const pluginId = process.env.DAW_PLUGIN_ID;
+export async function registerExecutionLocation(workspaceId, workingDir, options = {}) {
+  return dashboard.request("POST", "/api/plugins/" + pluginId + "/execution-locations", {
+    workspaceId, workingDir, ...(options.ttlSeconds ? {ttlSeconds: options.ttlSeconds} : {})
+  });
+}
 const dataDir = process.env.DAW_PLUGIN_DATA_DIR;
 function storagePath(key) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(key)) throw new TypeError("storage keys must be simple names");

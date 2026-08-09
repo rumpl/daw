@@ -8,6 +8,7 @@ import (
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/chatprefs"
+	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
 )
@@ -17,7 +18,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, "")
+	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil)
 }
 
 func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
@@ -42,22 +43,29 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 			"the docker-agent session store could not be listed")
 		return
 	}
-	valid := false
-	for _, sum := range list {
-		if sum.SessionID == req.SessionID {
-			valid = true
+	var stored *protocol.SessionSummary
+	for i := range list {
+		if list[i].SessionID == req.SessionID {
+			stored = &list[i]
 			break
 		}
 	}
-	if !valid {
+	if stored == nil {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	_ = ws
-	s.openChat(w, r, req.WorkspaceID, req.SessionID)
+	logicalPath := stored.WorkingDir
+	if stored.Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
+		logicalPath = stored.Attributes[executionlocations.AttributeWorkspacePath]
+	}
+	if logicalPath != ws.Path {
+		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
+		return
+	}
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored)
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID string) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary) {
 	ws, ok := s.workspaces.Get(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
@@ -74,13 +82,44 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		}
 	}
 
+	workingDir := ws.Path
+	var attributes map[string]string
+	persistImmediately := false
+	if resumeID != "" && stored != nil && stored.Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
+		if stored.Attributes[executionlocations.AttributeWorkspacePath] != ws.Path ||
+			stored.Attributes[executionlocations.AttributeLocationID] == "" ||
+			stored.Attributes[executionlocations.AttributeLocationOwner] == "" {
+			s.fail(w, http.StatusConflict, "execution_location_unavailable", "this session's execution location is invalid")
+			return
+		}
+		resolved, err := s.guard.ResolveDir(stored.WorkingDir)
+		if err != nil {
+			s.log.Warn("validate session execution location failed", "workspace", workspaceID, "session", resumeID, "error", err)
+			s.fail(w, http.StatusConflict, "execution_location_unavailable", "this session's execution directory is missing or invalid")
+			return
+		}
+		workingDir = resolved
+		attributes = stored.Attributes
+	} else if executionLocationID != "" {
+		location, err := s.executionLocations.Consume(executionLocationID, ws.Path)
+		if err != nil {
+			s.fail(w, http.StatusConflict, "execution_location_unavailable", "the execution location is expired, unknown, or belongs to another workspace")
+			return
+		}
+		workingDir = location.WorkingDir
+		attributes = location.Attributes()
+		persistImmediately = true
+	}
+
 	chatID := newOpaqueID("chat")
 	preference := s.preferences.Get(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
-		ChatID: chatID, WorkingDir: ws.Path, ResumeSessionID: resumeID,
-		Model:         preference.Model,
-		ThinkingLevel: preference.ThinkingLevel,
-		MCPServers:    plugins.MCPServers(s.pluginDir, ws.Path, chatID),
+		ChatID: chatID, WorkingDir: workingDir, ResumeSessionID: resumeID,
+		SessionAttributes:  attributes,
+		PersistImmediately: persistImmediately,
+		Model:              preference.Model,
+		ThinkingLevel:      preference.ThinkingLevel,
+		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID),
 	})
 	if err != nil {
 		switch {
@@ -95,6 +134,8 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		}
 		return
 	}
+	// Location-backed sessions are persisted during OpenChat so their execution
+	// directory remains discoverable if the server restarts before a prompt.
 
 	sessionID := c.SessionID()
 	// A new chat may have inherited the persisted defaults without the user

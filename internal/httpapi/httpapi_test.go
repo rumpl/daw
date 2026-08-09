@@ -663,6 +663,76 @@ func TestResumeRestoresStoredHistory(t *testing.T) {
 	}
 }
 
+func TestExecutionLocationStaysInLogicalWorkspaceAndResumes(t *testing.T) {
+	h := newHarness(t)
+	project := filepath.Join(h.root, "project")
+	executionDir := filepath.Join(h.root, "isolated-checkout")
+	if err := os.Mkdir(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(executionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ws := decodeJSON[protocol.Workspace](t, h.do(http.MethodPost, "/api/workspaces/open",
+		protocol.OpenWorkspaceRequest{Path: project}))
+
+	dir := filepath.Join(h.pluginDir, "location-test")
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"apiVersion":1,"id":"location-test","name":"Location test","backend":{"entry":"backend/index.mjs"}}`
+	backend := `
+		import { registerExecutionLocation } from "@daw/plugin-backend";
+		export default async function(request) {
+			const body = await request.json();
+			return Response.json(await registerExecutionLocation(body.workspaceId, body.workingDir));
+		}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "backend", "index.mjs"), []byte(backend), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	location := decodeJSON[protocol.ExecutionLocationRef](t, h.do(http.MethodPost,
+		"/api/plugins/location-test/backend/register", protocol.ExecutionLocationRequest{
+			WorkspaceID: ws.WorkspaceID, WorkingDir: executionDir,
+		}))
+	if location.ExecutionLocationID == "" {
+		t.Fatal("plugin backend did not receive an execution location")
+	}
+
+	ref := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{
+		WorkspaceID: ws.WorkspaceID, ExecutionLocationID: location.ExecutionLocationID,
+	}))
+	snapshot := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
+	canonicalExecutionDir, err := filepath.EvalSymlinks(executionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Meta.WorkingDir != canonicalExecutionDir {
+		t.Fatalf("execution dir = %q, want %q", snapshot.Meta.WorkingDir, canonicalExecutionDir)
+	}
+
+	list := decodeJSON[[]protocol.SessionSummary](t,
+		h.do(http.MethodGet, "/api/workspaces/"+ws.WorkspaceID+"/sessions", nil))
+	if len(list) != 1 || list[0].SessionID != ref.SessionID || list[0].WorkingDir != ws.Path {
+		t.Fatalf("location session not grouped under logical workspace: %+v", list)
+	}
+	if list[0].Attributes != nil {
+		t.Fatalf("internal execution attributes leaked in session summary: %+v", list[0].Attributes)
+	}
+
+	if resp := h.do(http.MethodDelete, "/api/chats/"+ref.ChatID, nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("dispose: %d", resp.StatusCode)
+	}
+	resumed := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats/resume",
+		protocol.ResumeChatRequest{WorkspaceID: ws.WorkspaceID, SessionID: ref.SessionID}))
+	resumedSnapshot := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+resumed.ChatID, nil))
+	if resumedSnapshot.Meta.WorkingDir != canonicalExecutionDir {
+		t.Fatalf("resume working dir = %q, want %q", resumedSnapshot.Meta.WorkingDir, canonicalExecutionDir)
+	}
+}
+
 func TestLiveSessionsListsEveryProject(t *testing.T) {
 	h := newHarness(t)
 

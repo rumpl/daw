@@ -512,20 +512,36 @@ type Workspace struct {
 
 // SessionSummary is one row of the session list.
 type SessionSummary struct {
-	SessionID  string    `json:"sessionId"`
-	Title      string    `json:"title"`
-	WorkingDir string    `json:"workingDir"`
-	CreatedAt  string    `json:"createdAt"`
-	Messages   int       `json:"messages"`
-	Live       bool      `json:"live"`
-	ChatID     string    `json:"chatId,omitempty"`
-	RunState   *RunState `json:"runState,omitempty"`
+	SessionID  string            `json:"sessionId"`
+	Title      string            `json:"title"`
+	WorkingDir string            `json:"workingDir"`
+	Attributes map[string]string `json:"-"`
+	CreatedAt  string            `json:"createdAt"`
+	Messages   int               `json:"messages"`
+	Live       bool              `json:"live"`
+	ChatID     string            `json:"chatId,omitempty"`
+	RunState   *RunState         `json:"runState,omitempty"`
+}
+
+// ExecutionLocationRequest registers a backend-selected working directory for
+// one logical workspace. It is accepted only from a trusted plugin backend.
+type ExecutionLocationRequest struct {
+	WorkspaceID string `json:"workspaceId"`
+	WorkingDir  string `json:"workingDir"`
+	TTLSeconds  int    `json:"ttlSeconds,omitempty"`
+}
+
+// ExecutionLocationRef is an opaque, short-lived, single-use capability.
+type ExecutionLocationRef struct {
+	ExecutionLocationID string `json:"executionLocationId"`
+	ExpiresAt           string `json:"expiresAt"`
 }
 
 // CreateChatRequest is POST /api/chats. Every chat uses the dashboard's
 // single SDK-built coding agent.
 type CreateChatRequest struct {
-	WorkspaceID string `json:"workspaceId"`
+	WorkspaceID         string `json:"workspaceId"`
+	ExecutionLocationID string `json:"executionLocationId,omitempty"`
 }
 
 // ResumeChatRequest is POST /api/chats/resume.

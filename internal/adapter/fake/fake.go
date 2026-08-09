@@ -37,6 +37,7 @@ type storedSession struct {
 	id         string
 	title      string
 	workingDir string
+	attributes map[string]string
 	createdAt  time.Time
 	items      []protocol.Item
 	usage      protocol.Usage
@@ -88,11 +89,23 @@ func (a *Adapter) ListSessions(_ context.Context, workingDir string) ([]protocol
 		}
 		out = append(out, protocol.SessionSummary{
 			SessionID: s.id, Title: s.title, WorkingDir: s.workingDir,
-			CreatedAt: s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items),
+			Attributes: cloneMap(s.attributes),
+			CreatedAt:  s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items),
 		})
 	}
 	sortSummaries(out)
 	return out, nil
+}
+
+func cloneMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func sortSummaries(s []protocol.SessionSummary) {
@@ -105,10 +118,15 @@ func sortSummaries(s []protocol.SessionSummary) {
 
 // Seed inserts a pre-existing session so resume paths can be tested.
 func (a *Adapter) Seed(id, title, workingDir string, items []protocol.Item) {
+	a.SeedWithAttributes(id, title, workingDir, nil, items)
+}
+
+// SeedWithAttributes inserts a pre-existing session with persisted metadata.
+func (a *Adapter) SeedWithAttributes(id, title, workingDir string, attributes map[string]string, items []protocol.Item) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sessions[id] = &storedSession{
-		id: id, title: title, workingDir: workingDir, createdAt: a.now(),
+		id: id, title: title, workingDir: workingDir, attributes: cloneMap(attributes), createdAt: a.now(),
 		items: items, agentName: "root", model: "fake/model-a", thinking: "medium",
 	}
 }
@@ -129,7 +147,7 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 	} else {
 		id := a.nextID("sess")
 		st = &storedSession{
-			id: id, title: "New chat", workingDir: req.WorkingDir, createdAt: a.now(),
+			id: id, title: "New chat", workingDir: req.WorkingDir, attributes: cloneMap(req.SessionAttributes), createdAt: a.now(),
 			agentName: "root", model: "fake/model-a", thinking: "medium",
 		}
 		a.sessions[id] = st

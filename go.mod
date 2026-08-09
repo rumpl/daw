@@ -2,6 +2,8 @@ module github.com/rumpl/daw
 
 go 1.26.5
 
+replace github.com/docker/docker-agent => /Users/rumpl/dev/cagent
+
 require (
 	github.com/docker/docker-agent v1.123.0
 	github.com/fsnotify/fsnotify v1.10.1

@@ -320,8 +320,20 @@ export interface SessionSummary {
   runState?: RunState;
 }
 
+export interface ExecutionLocationRequest {
+  workspaceId: string;
+  workingDir: string;
+  ttlSeconds?: number;
+}
+
+export interface ExecutionLocationRef {
+  executionLocationId: string;
+  expiresAt: string;
+}
+
 export interface CreateChatRequest {
   workspaceId: string;
+  executionLocationId?: string;
 }
 
 export interface ResumeChatRequest {

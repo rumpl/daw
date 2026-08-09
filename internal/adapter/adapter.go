@@ -53,6 +53,12 @@ type OpenRequest struct {
 	ChatID          string
 	WorkingDir      string
 	ResumeSessionID string
+	// SessionAttributes are persisted by docker-agent on newly-created sessions.
+	SessionAttributes map[string]string
+	// PersistImmediately creates the session row during open instead of waiting
+	// for the first prompt. Alternate execution locations require this so their
+	// working directory remains discoverable after a restart.
+	PersistImmediately bool
 	// Model and ThinkingLevel are dashboard preferences restored from disk.
 	// Adapters apply them, in that order, before publishing startup metadata.
 	// Empty values leave the agent or resumed session's own configuration in

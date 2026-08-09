@@ -15,6 +15,7 @@ import (
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/chatprefs"
+	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/workspaces"
@@ -69,14 +70,16 @@ type Server struct {
 	started        time.Time
 	pluginDir      string
 
-	workspaces   *workspaces.Service
-	chats        *chatRegistry
-	preferences  *chatprefs.Service
-	events       *dashboardEvents
-	plugins      *pluginWatcher
-	backends     *pluginBackendManager
-	pluginEvents *pluginEventHub
-	pluginConfig *pluginConfigStore
+	guard              *pathsec.Guard
+	workspaces         *workspaces.Service
+	chats              *chatRegistry
+	preferences        *chatprefs.Service
+	executionLocations *executionlocations.Service
+	events             *dashboardEvents
+	plugins            *pluginWatcher
+	backends           *pluginBackendManager
+	pluginEvents       *pluginEventHub
+	pluginConfig       *pluginConfigStore
 }
 
 // New builds the server and registers every route.
@@ -94,6 +97,7 @@ func New(opts Options) *Server {
 	}
 	s := &Server{
 		pluginDir:      strings.TrimSpace(opts.PluginDir),
+		guard:          opts.Guard,
 		mux:            http.NewServeMux(),
 		adapter:        opts.Adapter,
 		hosts:          newHostPolicy(opts.TailscaleHosts),
@@ -108,6 +112,7 @@ func New(opts Options) *Server {
 	}
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
+	s.executionLocations = executionlocations.New()
 	s.chats = newChatRegistry()
 	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
 	s.plugins = startPluginWatcher(s.pluginDir, s.events, log)
@@ -126,6 +131,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
+	m.HandleFunc("POST /api/plugins/{pluginId}/execution-locations", s.handleRegisterExecutionLocation)
 	m.HandleFunc("GET /api/plugins/{pluginId}/events", s.handlePluginEvents)
 	m.HandleFunc("GET /api/plugins/{pluginId}/config", s.handleGetPluginConfig)
 	m.HandleFunc("PUT /api/plugins/{pluginId}/config", s.handlePutPluginConfig)

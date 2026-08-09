@@ -172,6 +172,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 			SessionID:  summary.ID,
 			Title:      summary.Title,
 			WorkingDir: summary.WorkingDir,
+			Attributes: summary.Attributes,
 			CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339),
 			Messages:   summary.NumMessages,
 		})
@@ -266,12 +267,21 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 			session.WithMaxOldToolCallTokens(ag.MaxOldToolCallTokens()),
 			session.WithMaxToolResultTokens(ag.MaxToolResultTokens()),
 			session.WithWorkingDir(req.WorkingDir),
+			session.WithAttributes(req.SessionAttributes),
 			session.WithTitle(placeholderTitle),
 		)
 		// Like the CLI, the session row is created lazily on the first real
 		// message so browsing the dashboard never litters the user's store
 		// with empty sessions.
 		newSession = true
+		if req.PersistImmediately {
+			if err := a.store.AddSession(ctx, sess); err != nil {
+				_ = rt.Close()
+				_ = t.StopToolSets(context.WithoutCancel(ctx))
+				return nil, fmt.Errorf("persisting new session: %w", err)
+			}
+			newSession = false
+		}
 	}
 
 	// The dashboard has one safety policy: tools are always auto-approved.

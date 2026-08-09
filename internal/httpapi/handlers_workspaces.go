@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rumpl/daw/internal/executionlocations"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
 )
@@ -101,7 +102,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
 		return
 	}
-	list, err := s.adapter.ListSessions(r.Context(), ws.Path)
+	list, err := s.adapter.ListSessions(r.Context(), "")
 	if err != nil {
 		s.log.Warn("list workspace sessions failed", "workspace", ws.ID, "error", err)
 		s.fail(w, http.StatusInternalServerError, "session_list_failed",
@@ -109,14 +110,27 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	liveChats := s.chats.bySessionSnapshot()
+	filtered := make([]protocol.SessionSummary, 0, len(list))
 	for i := range list {
+		logicalPath := list[i].WorkingDir
+		if list[i].Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
+			logicalPath = list[i].Attributes[executionlocations.AttributeWorkspacePath]
+		}
+		if logicalPath != ws.Path {
+			continue
+		}
+		// Session navigation is by logical workspace; the actual execution path
+		// remains available in chat metadata.
+		list[i].WorkingDir = ws.Path
 		if chat := liveChats[list[i].SessionID]; chat != nil {
 			state := chat.runState()
 			list[i].Live = true
 			list[i].ChatID = chat.id
 			list[i].RunState = &state
 		}
+		filtered = append(filtered, list[i])
 	}
+	list = filtered
 	if list == nil {
 		list = []protocol.SessionSummary{}
 	}
