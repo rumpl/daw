@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChatPane } from './components/ChatPane';
 import { PluginPage } from './components/PluginPage';
+import { PluginCommandPalette, PluginNotifications } from './components/PluginSurfaces';
+import { PluginRuntime } from './PluginRuntime';
 import { Sidebar } from './components/Sidebar';
 import { SessionTabs } from './components/SessionTabs';
 import { pluginRoute, sessionRoute } from './routes';
@@ -84,6 +86,11 @@ export function Dashboard() {
     dashboardEvents.pluginsRevision,
   );
   const activePlugin = pluginCatalog.plugins?.find((plugin) => plugin.id === routePluginId) ?? null;
+  const contributionContext = useMemo(() => ({
+    workspace: dashboard.workspace,
+    chatId: dashboard.chatId,
+    session: dashboard.state.meta,
+  }), [dashboard.chatId, dashboard.state.meta, dashboard.workspace]);
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
@@ -267,6 +274,9 @@ export function Dashboard() {
 
   return (
     <div className="app">
+      <PluginRuntime boot={dashboard.boot} plugins={pluginCatalog.plugins ?? []} workspace={dashboard.workspace} />
+      <PluginNotifications />
+      <PluginCommandPalette context={contributionContext} />
       <a className="skip" href="#main">Skip to main content</a>
       {dashboard.drawerOpen ? <div className="scrim" onClick={() => dashboard.setDrawerOpen(false)} role="presentation" /> : null}
       <aside id="sidebar" className={`sidebar ${dashboard.drawerOpen ? 'open' : ''}`} aria-label="Workspace and sessions">

@@ -11,6 +11,7 @@ import type {
   ElicitationReply,
   ModelOption,
   PluginCatalog,
+  PluginConfiguration,
   SessionSummary,
   Snapshot,
   SessionMeta,
@@ -83,6 +84,12 @@ export const api = {
   },
   plugins(): Promise<PluginCatalog> {
     return request<PluginCatalog>('GET', '/api/plugins');
+  },
+  pluginConfiguration(pluginId: string): Promise<PluginConfiguration> {
+    return request<PluginConfiguration>('GET', `/api/plugins/${encodeURIComponent(pluginId)}/config`);
+  },
+  updatePluginConfiguration(pluginId: string, values: Record<string, unknown>): Promise<PluginConfiguration> {
+    return request<PluginConfiguration>('PUT', `/api/plugins/${encodeURIComponent(pluginId)}/config`, { values });
   },
   openWorkspace(path: string): Promise<Workspace> {
     return request<Workspace>('POST', '/api/workspaces/open', { path });

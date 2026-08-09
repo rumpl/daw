@@ -1,10 +1,12 @@
 import { useEffect, useState, type RefObject } from 'react';
 import { ChatHeader } from './ChatHeader';
+import { PluginActionButtons, PluginSlotView } from './PluginSurfaces';
 import { Composer } from './Composer';
 import { Conversation } from './Conversation';
 import { NewChatPrompt } from './NewChatPrompt';
 import { PendingDialogs } from './PendingDialogs';
 import { clip } from '../safety';
+import { usePluginContributions } from '../plugin-contributions';
 import type { useDashboard } from '../useDashboard';
 
 type DashboardController = ReturnType<typeof useDashboard>;
@@ -17,6 +19,27 @@ interface ChatPaneProps {
 
 export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPaneProps) {
   const [newChatMessage, setNewChatMessage] = useState('');
+  const { commands: pluginCommands } = usePluginContributions();
+  const contributionContext = {
+    workspace: dashboard.workspace,
+    chatId: dashboard.chatId,
+    session: dashboard.state.meta,
+  };
+
+  const sendWithPlugins = async (text: string, mode: 'normal' | 'steer' | 'followUp') => {
+    let resolved = text;
+    if (mode === 'normal' && text.startsWith('/')) {
+      const [name, ...rest] = text.slice(1).split(/\s+/);
+      const command = pluginCommands.find((item) => item.name === name);
+      if (command) {
+        const result = await command.run(rest.join(' '), contributionContext);
+        if (result === undefined) return;
+        resolved = result;
+      }
+    }
+    if (dashboard.chatId) dashboard.send(resolved, mode);
+    else dashboard.newChat(resolved);
+  };
 
   useEffect(() => {
     if (dashboard.chatId) setNewChatMessage('');
@@ -66,8 +89,7 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
               onMessageChange={setNewChatMessage}
               onSubmit={(message) => {
                 setNewChatMessage('');
-                if (dashboard.chatId) dashboard.send(message, 'normal');
-                else dashboard.newChat(message);
+                void sendWithPlugins(message, 'normal');
               }}
             />
           ) : (
@@ -77,19 +99,23 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
       />
 
       {dashboard.chatId && dashboard.state.items.length > 0 ? (
-        <Composer
+        <>
+          <PluginActionButtons location="composer" context={contributionContext} />
+          <PluginSlotView slot="composer.actions" context={contributionContext} />
+          <Composer
           draft={dashboard.draft}
           onDraftChange={dashboard.setDraft}
           run={dashboard.state.run}
           disabled={dashboard.busyAction || dashboard.state.closed}
-          commands={dashboard.commands}
+          commands={[...dashboard.commands, ...pluginCommands.map((command) => ({name: command.name, description: command.description, kind: 'plugin'}))]}
           attachments={dashboard.attachments}
           uploading={dashboard.uploading}
           onAddAttachments={dashboard.addAttachments}
           onRemoveAttachment={dashboard.removeAttachment}
-          onSend={dashboard.send}
+          onSend={(text, mode) => void sendWithPlugins(text, mode)}
           onStop={dashboard.abort}
-        />
+          />
+        </>
       ) : null}
 
       <PendingDialogs

@@ -56,7 +56,7 @@ export function PluginPage({
 
   useEffect(() => {
     const root = rootRef.current;
-    if (!root || !plugin || !page) return;
+    if (!root || !plugin || !page || !plugin.entryUrl) return;
 
     let disposed = false;
     let cleanup: Cleanup | undefined;
@@ -65,15 +65,6 @@ export function PluginPage({
     const pluginUI = createPluginUI(root);
     setStatus('loading');
     setError('');
-
-    let stylesheet: HTMLLinkElement | null = null;
-    if (plugin.styleUrl) {
-      stylesheet = document.createElement('link');
-      stylesheet.rel = 'stylesheet';
-      stylesheet.href = plugin.styleUrl;
-      stylesheet.dataset.dawPlugin = plugin.id;
-      document.head.append(stylesheet);
-    }
 
     void import(/* @vite-ignore */ plugin.entryUrl)
       .then(async (module: PluginModule) => {
@@ -109,7 +100,6 @@ export function PluginPage({
     return () => {
       disposed = true;
       controller.abort();
-      stylesheet?.remove();
       void cleanup?.();
       pluginUI.cleanup();
       root.replaceChildren();

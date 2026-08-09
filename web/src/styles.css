@@ -395,6 +395,45 @@ select {
   color: var(--fg-faint); font-size: 11.5px; text-transform: capitalize;
 }
 
+/* --- plugin contributions -------------------------------------------------- */
+
+.plugin-tool-renderer, .plugin-attachment-renderer { min-width: 0; }
+
+.plugin-actions, .plugin-slot { display: flex; align-items: center; gap: 6px; flex: none; }
+.plugin-actions-composer, .plugin-slot-composer-actions {
+  min-height: 34px; padding: 4px var(--gutter); border-top: 1px solid var(--rule); justify-content: flex-end;
+}
+.plugin-slot-sidebar-footer { margin-top: 8px; }
+.plugin-slot-session-tab-badge { margin-left: 4px; overflow: hidden; }
+.plugin-session-badge {
+  flex: none; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 0 4px; border: 1px solid var(--rule); font-size: 9.5px; line-height: 16px;
+}
+.plugin-session-badge-info { color: var(--accent); }
+.plugin-session-badge-warning { color: var(--warn); }
+.plugin-session-badge-error { color: var(--danger); }
+.plugin-session-badge-success { color: var(--ok); }
+.plugin-contribution-error { color: var(--danger); font-size: 11px; }
+.plugin-notifications {
+  position: fixed; z-index: 80; top: 12px; right: 12px; width: min(380px, calc(100vw - 24px));
+  display: flex; flex-direction: column; gap: 7px;
+}
+.plugin-notification {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 9px 10px; border: 1px solid var(--rule); background: var(--bg);
+}
+.plugin-notification p { margin: 2px 0 0; color: var(--fg-dim); font-size: 12px; }
+.plugin-notification button { border: 0; padding: 0 3px; font-size: 17px; }
+.plugin-notification-warning strong { color: var(--warn); }
+.plugin-notification-error strong { color: var(--danger); }
+.plugin-command-palette { max-width: 620px; padding: 0; align-self: flex-start; margin-top: 12vh; }
+.plugin-command-palette > input { width: 100%; padding: 11px 13px; border: 0; border-bottom: 1px solid var(--rule); }
+.plugin-command-palette ul { list-style: none; padding: 4px 0; margin: 0; max-height: 55vh; overflow: auto; }
+.plugin-command-palette li button { width: 100%; border: 0; padding: 8px 13px; text-align: left; }
+.plugin-command-palette li strong, .plugin-command-palette li span { display: block; }
+.plugin-command-palette li span { color: var(--fg-faint); font-size: 11.5px; }
+.plugin-command-palette > .hint { padding: 0 13px 12px; }
+
 /* --- conversation: full width, flat --------------------------------------- */
 
 .conversation-wrap { position: relative; flex: 1; min-height: 0; }

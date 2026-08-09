@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Bootstrap, Plugin, PluginError, SessionSummary, Workspace } from '../protocol.gen';
 import { clip } from '../safety';
+import { PluginSlotView } from './PluginSurfaces';
 
 interface SidebarProps {
   boot: Bootstrap;
@@ -71,6 +72,7 @@ export function Sidebar({
   onResumeChat,
   onOpenPlugin,
 }: SidebarProps) {
+  const contributionContext = { workspace, chatId: null, session: null };
   const [sessionFilter, setSessionFilter] = useState('');
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [showPathInput, setShowPathInput] = useState(false);
@@ -295,6 +297,7 @@ export function Sidebar({
           )}
       </section>
 
+      <PluginSlotView slot="sidebar.footer" context={contributionContext} />
       <p className="sidebar-version">docker-agent {clip(boot.agentVersion, 40)}</p>
     </div>
   );

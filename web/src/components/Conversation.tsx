@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { Component, memo, useEffect, useRef, useState } from 'react';
 import { Download } from 'lucide-react';
 import type { Item, MessageItem, Notice, QueueStatus, Transfer, Summary } from '../protocol.gen';
 import { Markdown } from '../Markdown';
 import { clip } from '../safety';
 import { itemKey } from '../reducer';
 import { ToolCard } from './ToolActivity';
+import { usePluginContributions } from '../plugin-contributions';
 
 const BOTTOM_THRESHOLD_PX = 96;
 
@@ -31,7 +32,20 @@ function downloadMarkdown(message: MessageItem) {
   URL.revokeObjectURL(url);
 }
 
-function MessageBubble({ message }: { message: MessageItem }) {
+class PluginRendererBoundary extends Component<{children: React.ReactNode}, {failed: boolean}> {
+  override state = {failed: false};
+  static getDerivedStateFromError() { return {failed: true}; }
+  override render() { return this.state.failed ? <p className="plugin-contribution-error">Plugin renderer failed</p> : this.props.children; }
+}
+
+function PluginToolContent({renderer, tool}: {renderer: ReturnType<typeof usePluginContributions>['toolRenderers'][number]; tool: NonNullable<Item['tool']>}) {
+  return <>{renderer.render(tool)}</>;
+}
+function PluginAttachmentContent({renderer, attachment}: {renderer: ReturnType<typeof usePluginContributions>['attachmentRenderers'][number]; attachment: NonNullable<MessageItem['attachments']>[number]}) {
+  return <>{renderer.render(attachment)}</>;
+}
+
+function MessageBubble({ message, attachmentRenderers }: { message: MessageItem; attachmentRenderers: ReturnType<typeof usePluginContributions>['attachmentRenderers'] }) {
   const isUser = message.role === 'user';
   const canDownload = !isUser && !message.streaming;
   return (
@@ -50,6 +64,8 @@ function MessageBubble({ message }: { message: MessageItem }) {
       {message.attachments?.length ? (
         <div className="message-attachments" aria-label="Message attachments">
           {message.attachments.map((attachment) => {
+            const renderer = attachmentRenderers.find((candidate) => candidate.match(attachment));
+            if (renderer) return <PluginRendererBoundary key={attachment.id}><div className="plugin-attachment-renderer"><PluginAttachmentContent renderer={renderer} attachment={attachment} /></div></PluginRendererBoundary>;
             const src = attachmentImageSrc(attachment);
             return src ? (
               <figure className="message-attachment-image" key={attachment.id}>
@@ -112,12 +128,18 @@ function SummaryCard({ summary }: { summary: Summary }) {
   );
 }
 
-const Row = memo(function Row({ item }: { item: Item }) {
+const Row = memo(function Row({ item, toolRenderers, attachmentRenderers }: {
+  item: Item;
+  toolRenderers: ReturnType<typeof usePluginContributions>['toolRenderers'];
+  attachmentRenderers: ReturnType<typeof usePluginContributions>['attachmentRenderers'];
+}) {
   switch (item.kind) {
     case 'message':
-      return item.message ? <MessageBubble message={item.message} /> : null;
+      return item.message ? <MessageBubble message={item.message} attachmentRenderers={attachmentRenderers} /> : null;
     case 'tool':
-      return item.tool ? <ToolCard tool={item.tool} /> : null;
+      if (!item.tool) return null;
+      const renderer = toolRenderers.find((candidate) => candidate.match(item.tool!));
+      return renderer ? <PluginRendererBoundary><div className="plugin-tool-renderer"><PluginToolContent renderer={renderer} tool={item.tool} /></div></PluginRendererBoundary> : <ToolCard tool={item.tool} />;
     case 'transfer':
       return item.transfer ? <TransferCard transfer={item.transfer} /> : null;
     case 'notice':
@@ -132,6 +154,7 @@ const Row = memo(function Row({ item }: { item: Item }) {
 export function Conversation({ items, queue, empty }: { items: Item[]; queue?: QueueStatus; empty: React.ReactNode }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState(true);
+  const {toolRenderers, attachmentRenderers} = usePluginContributions();
 
   useEffect(() => {
     const el = ref.current;
@@ -151,7 +174,7 @@ export function Conversation({ items, queue, empty }: { items: Item[]; queue?: Q
       <div className="conversation" ref={ref} onScroll={onScroll} role="log" aria-live="polite" aria-label="Conversation">
         {items.length === 0 ? <div className="empty">{empty}</div> : null}
         {items.map((item) => (
-          <Row key={itemKey(item)} item={item} />
+          <Row key={itemKey(item)} item={item} toolRenderers={toolRenderers} attachmentRenderers={attachmentRenderers} />
         ))}
         {queue && ((queue.steer?.length ?? 0) > 0 || (queue.followUps?.length ?? 0) > 0) ? (
           <section className="pending-queue" aria-label="Pending messages">

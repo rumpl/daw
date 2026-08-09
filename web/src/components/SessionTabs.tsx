@@ -1,6 +1,8 @@
 import { useState, type DragEvent } from 'react';
 import type { Plugin, SessionSummary } from '../protocol.gen';
 import { clip } from '../safety';
+import { usePluginContributions } from '../plugin-contributions';
+import { PluginSlotView } from './PluginSurfaces';
 
 interface PluginTab {
   plugin: Plugin;
@@ -40,6 +42,7 @@ export function SessionTabs({
 }: SessionTabsProps) {
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const { badges } = usePluginContributions();
 
   const finishDrag = () => {
     setDraggedSessionId(null);
@@ -103,6 +106,10 @@ export function SessionTabs({
               {session.runState === 'running' ? (
                 <span className="session-tab-status run-dot run-running" aria-hidden="true" />
               ) : null}
+              {badges.filter((badge) => badge.sessionId === session.sessionId).map((badge) => (
+                <span className={`plugin-session-badge plugin-session-badge-${badge.tone}`} key={badge._key}>{badge.value}</span>
+              ))}
+              <PluginSlotView slot="session-tab.badge" context={{workspace: null, chatId: session.chatId ?? null, session: null, sessionId: session.sessionId}} />
             </button>
             <button
               type="button"
