@@ -64,7 +64,10 @@ func (m *pluginBackendManager) run() {
 }
 
 func (m *pluginBackendManager) activateAll() {
-	if m.apiOrigin == "" {
+	m.mu.Lock()
+	apiOriginReady := m.apiOrigin != ""
+	m.mu.Unlock()
+	if !apiOriginReady {
 		return
 	}
 	active := map[string]bool{}
@@ -94,13 +97,11 @@ func (m *pluginBackendManager) activateAll() {
 }
 
 func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, pluginID string) error {
+	m.mu.Lock()
 	if m.apiOrigin == "" {
-		m.mu.Lock()
-		if m.apiOrigin == "" {
-			m.apiOrigin = "http://" + r.Host
-		}
-		m.mu.Unlock()
+		m.apiOrigin = "http://" + r.Host
 	}
+	m.mu.Unlock()
 	backend, err := plugins.ResolveBackend(m.dir, pluginID)
 	if err != nil {
 		return os.ErrNotExist

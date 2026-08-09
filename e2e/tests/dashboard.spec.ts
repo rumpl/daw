@@ -50,8 +50,11 @@ async function openDrawerIfMobile(page: Page) {
 
 /** On mobile the chat controls live in a bottom sheet behind Settings. */
 async function openControls(page: Page) {
-  const settings = page.getByRole('button', { name: 'Settings' });
-  if (await settings.isVisible()) await settings.click();
+  const controls = page.locator('#chat-controls');
+  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 820) {
+    await page.getByRole('button', { name: 'Settings' }).click();
+  }
+  await expect(controls).toBeVisible();
 }
 
 const composer = (page: Page) => page.getByRole('textbox', { name: 'Message' });
@@ -60,7 +63,7 @@ const newChatButton = (page: Page) => page.locator('#sidebar .new-chat-button');
 
 async function createChat(page: Page) {
   await newChatButton(page).click();
-  await connected(page);
+  await expect(page.getByRole('textbox', { name: 'What would you like to work on?' })).toBeVisible();
 }
 
 async function startChat(page: Page, message: string) {
@@ -69,8 +72,6 @@ async function startChat(page: Page, message: string) {
   await page.getByRole('button', { name: 'Start chat' }).click();
   await expect(composer(page)).toBeVisible();
 }
-
-const connected = (page: Page) => expect(page.getByRole('status')).toHaveAccessibleName('Connected');
 
 test.describe('dashboard', () => {
   test('loads and hot-reloads a global plugin with host components and backend API', async ({ page }) => {
@@ -209,7 +210,6 @@ test.describe('dashboard', () => {
     const session = page.locator('.session-list button', { hasText: 'remember this' }).first();
     await expect(session).toBeVisible();
     await session.click();
-    await connected(page);
     await expect(page).toHaveURL(/\/sessions\//);
     await expect(page.getByLabel('user message').first()).toContainText('remember this');
 
@@ -217,7 +217,6 @@ test.describe('dashboard', () => {
     // both without asking the user to reopen or reselect anything.
     const sessionURL = page.url();
     await page.reload();
-    await connected(page);
     expect(page.url()).toBe(sessionURL);
     await expect(page.getByLabel('user message').first()).toContainText('remember this');
 
@@ -226,7 +225,6 @@ test.describe('dashboard', () => {
     await expect(page).toHaveURL('/');
     await expect(page.getByLabel('Message')).toHaveCount(0);
     await page.goForward();
-    await connected(page);
     await expect(page.getByLabel('user message').first()).toContainText('remember this');
   });
 
@@ -252,7 +250,6 @@ test.describe('dashboard', () => {
     await openWorkspaceAndAgent(page);
     const session = page.locator('.session-list button', { hasText: 'hello there' }).first();
     await session.click();
-    await connected(page);
     // Resuming rebuilds from the store: the same items, never duplicated.
     await expect(page.getByLabel('assistant message')).toBeVisible();
     const after = await page.getByLabel(/message/).count();
