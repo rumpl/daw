@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
+import { Download } from 'lucide-react';
 import type { Item, MessageItem, Notice, QueueStatus, Transfer, Summary } from '../protocol.gen';
 import { Markdown } from '../Markdown';
 import { clip } from '../safety';
@@ -12,10 +13,40 @@ function attachmentImageSrc(attachment: NonNullable<MessageItem['attachments']>[
   return `data:${attachment.mimeType};base64,${attachment.data}`;
 }
 
+function markdownFilename(message: MessageItem): string {
+  const agent = message.agentName.trim().replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'agent';
+  const timestamp = message.createdAt ? message.createdAt.replace(/[:.]/g, '-') : message.id;
+  return `${agent}-${timestamp}.md`;
+}
+
+function downloadMarkdown(message: MessageItem) {
+  const blob = new Blob([message.text], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = markdownFilename(message);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function MessageBubble({ message }: { message: MessageItem }) {
   const isUser = message.role === 'user';
+  const canDownload = !isUser && !message.streaming;
   return (
-    <article className={`msg msg-${isUser ? 'user' : 'assistant'}`} aria-label={`${message.role} message`}>
+    <article className={`msg msg-${isUser ? 'user' : 'assistant'}${canDownload ? ' msg-downloadable' : ''}`} aria-label={`${message.role} message`}>
+      {canDownload ? (
+        <button
+          type="button"
+          className="msg-download"
+          aria-label="Download message as Markdown"
+          title="Download as Markdown"
+          onClick={() => downloadMarkdown(message)}
+        >
+          <Download size={15} aria-hidden="true" />
+        </button>
+      ) : null}
       {message.attachments?.length ? (
         <div className="message-attachments" aria-label="Message attachments">
           {message.attachments.map((attachment) => {

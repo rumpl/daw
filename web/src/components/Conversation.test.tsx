@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Item, MessageItem } from '../protocol.gen';
 import { Conversation } from './Conversation';
 
@@ -21,6 +21,55 @@ function assistantMessage(overrides: Partial<MessageItem> = {}): Item {
 }
 
 describe('Conversation', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('downloads each complete agent message as its original Markdown', () => {
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:message');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperties(URL, {
+      createObjectURL: { value: createObjectURL, configurable: true },
+      revokeObjectURL: { value: revokeObjectURL, configurable: true },
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(
+      <Conversation
+        items={[assistantMessage({
+          text: '# Result\n\n- one\n- two',
+          streaming: false,
+          agentName: 'code agent',
+          createdAt: '2026-08-07T12:34:56Z',
+        })]}
+        empty={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download message as Markdown' }));
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    const blob = createObjectURL.mock.calls[0]?.[0] as Blob;
+    expect(blob.type).toBe('text/markdown;charset=utf-8');
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:message');
+  });
+
+  it('only offers downloads for complete agent messages', () => {
+    render(
+      <Conversation
+        items={[
+          assistantMessage({ id: 'streaming', text: 'Still working', streaming: true }),
+          assistantMessage({ id: 'user', role: 'user', text: 'Question', streaming: false }),
+          assistantMessage({ id: 'complete', text: 'Done', streaming: false }),
+        ]}
+        empty={null}
+      />,
+    );
+
+    expect(screen.getAllByRole('button', { name: 'Download message as Markdown' })).toHaveLength(1);
+  });
+
   it('renders assistant Markdown while the message is streaming', () => {
     const { container } = render(
       <Conversation
