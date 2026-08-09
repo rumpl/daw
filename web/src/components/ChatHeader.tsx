@@ -1,14 +1,13 @@
 import { Edit } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { ModelOption, UpdateConfigRequest } from '../protocol.gen';
-import type { ChatState, ConnectionState } from '../reducer';
+import type { ChatState } from '../reducer';
 import { clip, formatCost, formatTokens } from '../safety';
 import { ModelPicker } from './ModelPicker';
 
 interface ChatHeaderProps {
   hasChat: boolean;
   state: ChatState;
-  connection: ConnectionState;
   models: ModelOption[];
   busyAction: boolean;
   menuButton: RefObject<HTMLButtonElement | null>;
@@ -22,7 +21,6 @@ interface ChatHeaderProps {
 export function ChatHeader({
   hasChat,
   state,
-  connection,
   models,
   busyAction,
   menuButton,
@@ -35,14 +33,6 @@ export function ChatHeader({
   const [controlsOpen, setControlsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement | null>(null);
   const busy = state.run.state !== 'idle';
-  const connectionLabel =
-    connection === 'connected'
-      ? 'Connected'
-      : connection === 'reconnecting'
-        ? 'Reconnecting…'
-        : connection === 'connecting'
-          ? 'Connecting…'
-          : 'Disconnected';
 
   useEffect(() => {
     if (!controlsOpen) return;
@@ -90,12 +80,6 @@ export function ChatHeader({
           >
             <Edit size={14} aria-hidden="true" />
           </button>
-        ) : null}
-        {hasChat ? (
-          <span className={`conn conn-${connection}`} role="status" aria-label={connectionLabel}>
-            <span className="conn-dot" aria-hidden="true" />
-            <span className="conn-text">{connectionLabel}</span>
-          </span>
         ) : null}
       </div>
 

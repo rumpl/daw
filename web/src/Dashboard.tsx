@@ -185,7 +185,6 @@ export function Dashboard() {
         <ChatHeader
           hasChat={Boolean(dashboard.chatId)}
           state={dashboard.state}
-          connection={dashboard.connection}
           models={dashboard.models}
           busyAction={dashboard.busyAction}
           menuButton={menuButton}

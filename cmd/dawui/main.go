@@ -51,7 +51,10 @@ func run() error {
 		logLevel = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
-	slog.SetDefault(log)
+	// docker-agent logs through slog's process-global default. DAW passes its
+	// own logger explicitly, so discard the global logger to keep SDK internals
+	// out of the dashboard's output.
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	port, err := resolvePort(os.Getenv("PORT"))
 	if err != nil {

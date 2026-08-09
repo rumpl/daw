@@ -15,10 +15,12 @@ import (
 	"github.com/docker/docker-agent/pkg/model/provider/dmr"
 	"github.com/docker/docker-agent/pkg/model/provider/options"
 	"github.com/docker/docker-agent/pkg/model/provider/providers"
+	"github.com/docker/docker-agent/pkg/skills"
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/teamloader"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tools/builtin/shell"
+	skillstool "github.com/docker/docker-agent/pkg/tools/builtin/skills"
 )
 
 // Name is the source name exposed by the dashboard API.
@@ -43,9 +45,7 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 		options.WithGateway(runConfig.ModelsGateway),
 		options.WithProviders(runConfig.Providers),
 	}
-	if modelConfig.MaxTokens != nil {
-		modelOpts = append(modelOpts, options.WithMaxTokens(*modelConfig.MaxTokens))
-	}
+
 	if store, err := runConfig.ModelsDevStore(); err == nil {
 		modelOpts = append(modelOpts, options.WithModelsDevStore(store))
 	}
@@ -57,10 +57,8 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 	root := agent.New(
 		"root",
 		instruction,
-		agent.WithDescription("Dashboard coding agent with global plugin support"),
-		agent.WithWelcomeMessage(`Ask for a code change or a dashboard plugin.`),
+		agent.WithAddPromptFiles([]string{"AGENTS.md"}),
 		agent.WithModel(model),
-		agent.WithTools(DeveloperDocumentationTool()),
 		agent.WithCommands(types.Commands{
 			"commit-and-push": types.Command{
 				Description: "Commit and push changes to the current git repository",
@@ -69,10 +67,11 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 		}),
 		agent.WithAddDate(true),
 		agent.WithAddEnvironmentInfo(true),
-		agent.WithAddPromptFiles([]string{"AGENTS.md"}),
+		agent.WithTools(DeveloperDocumentationTool()),
 		agent.WithToolSets(
 			filesystem.New(runConfig.WorkingDir),
 			shell.New(os.Environ(), runConfig),
+			skillstool.New(skills.Load(ctx, []string{"local"}), runConfig.WorkingDir),
 		),
 	)
 
