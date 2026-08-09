@@ -146,6 +146,7 @@ func run() error {
 		WorkspaceHistoryFile: workspaceHistoryFile,
 		ChatPreferencesFile:  chatPreferencesFile,
 		PluginDir:            pluginDir,
+		PluginAPIOrigin:      "http://" + net.JoinHostPort(bindHost, strconv.Itoa(port)),
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))

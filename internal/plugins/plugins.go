@@ -43,7 +43,19 @@ type manifest struct {
 	Version     string                `json:"version"`
 	Entry       string                `json:"entry"`
 	Style       string                `json:"style"`
+	Backend     *backendManifest      `json:"backend"`
 	Pages       []protocol.PluginPage `json:"pages"`
+}
+
+type backendManifest struct {
+	Entry string `json:"entry"`
+}
+
+type Backend struct {
+	PluginID  string
+	Directory string
+	Entry     string
+	Revision  string
 }
 
 // Catalog scans dir and returns every valid plugin plus bounded diagnostics for
@@ -123,6 +135,14 @@ func load(base, directory string) (protocol.Plugin, error) {
 			return protocol.Plugin{}, fmt.Errorf("style %w", err)
 		}
 	}
+	if m.Backend != nil {
+		if err := validBackendEntry(m.Backend.Entry); err != nil {
+			return protocol.Plugin{}, fmt.Errorf("backend entry %w", err)
+		}
+		if !regularFile(filepath.Join(root, filepath.FromSlash(m.Backend.Entry))) {
+			return protocol.Plugin{}, errors.New("backend entry file is missing or is not a regular file")
+		}
+	}
 	if len(m.Pages) == 0 || len(m.Pages) > 30 {
 		return protocol.Plugin{}, errors.New("pages must contain between 1 and 30 entries")
 	}
@@ -144,7 +164,7 @@ func load(base, directory string) (protocol.Plugin, error) {
 		}
 		pageIDs[page.ID], pagePaths[page.Path] = true, true
 	}
-	fingerprint, err := fingerprint(root)
+	fingerprint, err := fingerprint(root, backendDirectory(m.Backend))
 	if err != nil {
 		return protocol.Plugin{}, err
 	}
@@ -159,6 +179,9 @@ func load(base, directory string) (protocol.Plugin, error) {
 		APIVersion: m.APIVersion, ID: m.ID, Name: m.Name,
 		Description: m.Description, Version: m.Version, Fingerprint: fingerprint,
 		EntryURL: prefix + escapeAssetPath(m.Entry), Pages: m.Pages,
+	}
+	if m.Backend != nil {
+		plugin.BackendURL = "/api/plugins/" + m.ID + "/backend"
 	}
 	if m.Style != "" {
 		plugin.StyleURL = prefix + escapeAssetPath(m.Style)
@@ -185,12 +208,29 @@ func validAssetPath(value string, extensions ...string) error {
 	return fmt.Errorf("must use one of these extensions: %s", strings.Join(extensions, ", "))
 }
 
+func validBackendEntry(value string) error {
+	if err := validAssetPath(value, ".js", ".mjs", ".cjs"); err != nil {
+		return err
+	}
+	if !strings.Contains(value, "/") {
+		return errors.New("must be inside a backend directory")
+	}
+	return nil
+}
+
+func backendDirectory(backend *backendManifest) string {
+	if backend == nil {
+		return ""
+	}
+	return strings.Split(backend.Entry, "/")[0]
+}
+
 func regularFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
 }
 
-func fingerprint(root string) (string, error) {
+func fingerprint(root, excludedDirectory string) (string, error) {
 	type file struct {
 		path string
 		size int64
@@ -202,6 +242,17 @@ func fingerprint(root string) (string, error) {
 			return errors.New("plugin files could not be read")
 		}
 		if path == root {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return errors.New("plugin files could not be indexed")
+		}
+		relSlash := filepath.ToSlash(rel)
+		if excludedDirectory != "" && (relSlash == excludedDirectory || strings.HasPrefix(relSlash, excludedDirectory+"/")) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
@@ -221,11 +272,7 @@ func fingerprint(root string) (string, error) {
 		if total > maxPluginSize {
 			return errors.New("plugin exceeds the 16 MiB limit")
 		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return errors.New("plugin files could not be indexed")
-		}
-		files = append(files, file{path: filepath.ToSlash(rel), size: info.Size()})
+		files = append(files, file{path: relSlash, size: info.Size()})
 		if len(files) > maxPluginFiles {
 			return errors.New("plugin contains more than 200 files")
 		}
@@ -258,6 +305,17 @@ func Asset(dir, pluginID, expectedFingerprint, assetPath string) (string, os.Fil
 	if !fs.ValidPath(assetPath) || strings.HasPrefix(assetPath, ".") {
 		return "", nil, os.ErrNotExist
 	}
+	backendDir := ""
+	data, readErr := os.ReadFile(filepath.Join(dir, pluginID, manifestName))
+	if readErr == nil {
+		var m manifest
+		if json.Unmarshal(data, &m) == nil {
+			backendDir = backendDirectory(m.Backend)
+		}
+	}
+	if backendDir != "" && (assetPath == backendDir || strings.HasPrefix(assetPath, backendDir+"/")) {
+		return "", nil, os.ErrNotExist
+	}
 	root, err := os.OpenRoot(filepath.Join(dir, pluginID))
 	if err != nil {
 		return "", nil, os.ErrNotExist
@@ -274,6 +332,75 @@ func Asset(dir, pluginID, expectedFingerprint, assetPath string) (string, os.Fil
 	}
 	path := filepath.Join(dir, pluginID, filepath.FromSlash(assetPath))
 	return path, info, nil
+}
+
+// ResolveBackend validates and locates a plugin's optional Node backend.
+func ResolveBackend(dir, pluginID string) (Backend, error) {
+	plugin, err := load(dir, pluginID)
+	if err != nil || plugin.BackendURL == "" {
+		return Backend{}, os.ErrNotExist
+	}
+	root := filepath.Join(dir, pluginID)
+	data, err := os.ReadFile(filepath.Join(root, manifestName))
+	if err != nil || len(data) > maxManifest {
+		return Backend{}, os.ErrNotExist
+	}
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	var m manifest
+	if dec.Decode(&m) != nil || m.ID != pluginID || m.Backend == nil || validBackendEntry(m.Backend.Entry) != nil {
+		return Backend{}, os.ErrNotExist
+	}
+	entry := filepath.Join(root, filepath.FromSlash(m.Backend.Entry))
+	if !regularFile(entry) {
+		return Backend{}, os.ErrNotExist
+	}
+	backendRoot := filepath.Join(root, backendDirectory(m.Backend))
+	revision, err := backendRevision(backendRoot)
+	if err != nil {
+		return Backend{}, os.ErrNotExist
+	}
+	return Backend{PluginID: pluginID, Directory: backendRoot, Entry: entry, Revision: revision}, nil
+}
+
+func backendRevision(root string) (string, error) {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return "", err
+	}
+	defer rootFS.Close()
+
+	hash := sha256.New()
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() && entry.Name() == "node_modules" {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			return errors.New("invalid backend file")
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		data, err := rootFS.ReadFile(rel)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(hash, "%s\x00%d\x00", filepath.ToSlash(rel), info.Size())
+		_, _ = hash.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:16], nil
 }
 
 // ContentType returns explicit module and stylesheet MIME types; other assets

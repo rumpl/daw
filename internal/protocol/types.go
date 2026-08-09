@@ -464,6 +464,7 @@ type Plugin struct {
 	Fingerprint string       `json:"fingerprint"`
 	EntryURL    string       `json:"entryUrl"`
 	StyleURL    string       `json:"styleUrl,omitempty"`
+	BackendURL  string       `json:"backendUrl,omitempty"`
 	Pages       []PluginPage `json:"pages"`
 }
 

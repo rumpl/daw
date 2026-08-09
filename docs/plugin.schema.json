@@ -13,6 +13,14 @@
     "version": { "type": "string", "maxLength": 40 },
     "entry": { "type": "string", "pattern": "^[^.].*\\.(m?js)$" },
     "style": { "type": "string", "pattern": "^[^.].*\\.css$" },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry"],
+      "properties": {
+        "entry": { "type": "string", "pattern": "^[^.].+/(?:[^/]+)\\.(?:mjs|cjs|js)$" }
+      }
+    },
     "pages": {
       "type": "array",
       "minItems": 1,

@@ -26,7 +26,8 @@ Open a folder, hit **New chat**, and type.
 - **Sessions** — list, resume and search every docker-agent session for the
   current directory; they survive restarts because they are docker-agent's.
 - **Global plugins** — trusted runtime JavaScript modules can add sidebar items,
-  pages, reuse dashboard components, and call the complete backend API.
+  pages, reuse dashboard components, call the complete API, and optionally run
+  a proxied Node backend with an injected dashboard API library.
 - **Works on your phone** — responsive down to 320px, over Tailscale.
 - **One binary** — the frontend is embedded; `make start` serves API and UI from
   a single process bound to `127.0.0.1`.
@@ -149,7 +150,7 @@ credential helpers.
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
 | `DAWUI_WORKSPACE_HISTORY_FILE` | `<data>/dawui-workspaces.json` | Opened-project history path |
 | `DAWUI_CHAT_PREFERENCES_FILE` | `<data>/dawui-chat-preferences.json` | Model and thinking preference path |
-| `DAWUI_PLUGIN_DIR` | `<data>/dawui/plugins` | Global trusted plugin directory |
+| `DAWUI_PLUGIN_DIR` | `<data>/dawui/plugins` | Global trusted frontend and Node backend plugin directory |
 | `DAWUI_DEBUG` | — | Debug logging |
 
 The server binds to `127.0.0.1` only; there is no host override. Workspaces are

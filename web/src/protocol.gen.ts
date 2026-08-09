@@ -269,6 +269,7 @@ export interface Plugin {
   fingerprint: string;
   entryUrl: string;
   styleUrl?: string;
+  backendUrl?: string;
   pages: Array<PluginPage> | null;
 }
 

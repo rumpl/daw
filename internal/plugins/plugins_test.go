@@ -57,6 +57,37 @@ func TestCatalogAndAssetFingerprint(t *testing.T) {
 	}
 }
 
+func TestCatalogWithBackend(t *testing.T) {
+	base := t.TempDir()
+	writePlugin(t, base, "full-stack", `{
+		"apiVersion":1,"id":"full-stack","name":"Full stack","entry":"index.js",
+		"backend":{"entry":"backend/index.js"},
+		"pages":[{"id":"main","path":"","label":"Full stack","sidebar":true}]
+	}`, `export function mount() {}`)
+	backendDir := filepath.Join(base, "full-stack", "backend")
+	if err := os.MkdirAll(filepath.Join(backendDir, "node_modules", "example"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backendDir, "index.js"), []byte(`export default () => new Response("ok")`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backendDir, "node_modules", "example", "large.bin"), make([]byte, maxPluginFile+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := Catalog(base)
+	if len(catalog.Errors) != 0 || len(catalog.Plugins) != 1 || catalog.Plugins[0].BackendURL == "" {
+		t.Fatalf("unexpected backend catalog: %#v", catalog)
+	}
+	backend, err := ResolveBackend(base, "full-stack")
+	if err != nil || backend.Entry != filepath.Join(backendDir, "index.js") {
+		t.Fatalf("resolve backend: %+v, %v", backend, err)
+	}
+	if _, _, err := Asset(base, "full-stack", catalog.Plugins[0].Fingerprint, "backend/index.js"); err == nil {
+		t.Fatal("backend files must not be browser assets")
+	}
+}
+
 func TestCatalogReportsInvalidPluginsAndRejectsSymlinks(t *testing.T) {
 	base := t.TempDir()
 	writePlugin(t, base, "Bad_Name", `{}`, ``)

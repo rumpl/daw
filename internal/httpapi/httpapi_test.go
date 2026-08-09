@@ -256,6 +256,52 @@ func TestGlobalPluginCatalogAndAssets(t *testing.T) {
 	}
 }
 
+func TestPluginBackendProxyAndDashboardSDK(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.pluginDir, "full-stack")
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"apiVersion":1,"id":"full-stack","name":"Full stack","entry":"index.js",
+		"backend":{"entry":"backend/index.mjs"},
+		"pages":[{"id":"main","path":"","label":"Full stack","sidebar":true}]
+	}`
+	files := map[string]string{
+		"plugin.json": manifest,
+		"index.js":    `export function mount() {}`,
+		"backend/index.mjs": `
+			import { dashboard, pluginId } from "@daw/plugin-backend";
+			export default async function(request) {
+				const health = await dashboard.request("GET", "/api/health");
+				return Response.json({ path: new URL(request.url).pathname, pluginId, status: health.status });
+			}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := h.do(http.MethodGet, "/api/plugins/full-stack/backend/check?value=1", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("plugin backend: %d %s", resp.StatusCode, body)
+	}
+	var result struct {
+		Path     string `json:"path"`
+		PluginID string `json:"pluginId"`
+		Status   string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != "/check" || result.PluginID != "full-stack" || result.Status != "ok" {
+		t.Fatalf("unexpected plugin backend response: %+v", result)
+	}
+}
+
 func TestWorkspaceContainmentEnforcedByAPI(t *testing.T) {
 	h := newHarness(t)
 	outside := t.TempDir()

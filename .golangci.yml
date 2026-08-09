@@ -73,8 +73,8 @@ linters:
       forbid:
         - pattern: context\.Background()
           msg: "do not use context.Background() in tests, use t.Context()"
-        - pattern: context\.TODO()
-          msg: "do not use context.TODO() in tests, use t.Context()"
+        - pattern: context\.[T]ODO$
+          msg: "do not use placeholder contexts in tests, use t.Context()"
         - pattern: os\.MkdirTemp()
           msg: "do not use os.MkdirTemp() in tests, use t.TempDir()"
         - pattern: os\.Setenv()

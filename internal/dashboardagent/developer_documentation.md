@@ -32,6 +32,9 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
     workspace hints, and model availability.
 - `GET /api/plugins` → `200 PluginCatalog`
   - Lists all valid global plugins plus validation diagnostics.
+- `GET|POST|PUT|PATCH|DELETE /api/plugins/{pluginId}/backend[/{path...}]`
+  - Proxies to the plugin's optional Node backend with the prefix removed.
+  - Browser mutations use the normal CSRF rules through `context.api`.
 - `GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}` → asset bytes
   - URL comes from `Plugin.entryUrl`/`styleUrl`. It is immutable and may be
     cached for one year. A stale fingerprint or invalid path returns 404.
@@ -260,8 +263,9 @@ point is unavailable; refresh authoritative REST resources.
 
 ## Plugin manifest and routing
 
-A plugin directory contains `plugin.json`, a `.js`/`.mjs` entry, optional CSS,
-and relative assets. No JSX/TypeScript/npm build or bare imports are available.
+A plugin directory contains `plugin.json`, a `.js`/`.mjs` frontend entry,
+optional CSS and relative assets, and may contain a Node backend JavaScript
+project. Frontend modules have no JSX/TypeScript/npm build or bare imports.
 Relative module imports work.
 
 ```json
@@ -273,6 +277,7 @@ Relative module imports work.
   "version": "1.0.0",
   "entry": "index.js",
   "style": "style.css",
+  "backend": {"entry": "backend/index.js"},
   "pages": [
     {"id":"overview", "path":"", "label":"Example", "sidebar":true},
     {"id":"details", "path":"details", "label":"Details", "sidebar":false}
@@ -293,8 +298,31 @@ required and at most 60 characters; `description` is at most 300 characters;
 path and optional `style` must be a relative `.css` path. Both must name regular
 files within the plugin.
 
+`description`, `version`, `style`, and `backend` are optional. A backend entry
+must be a relative `.js`, `.mjs`, or `.cjs` path inside a backend directory.
+The backend directory is a normal Node project and may use npm dependencies.
+It is excluded from browser assets and frontend size limits.
+
+Backend entries export a default function or `handler(request, context)` and
+return a Web `Response`. The dashboard starts them lazily with Node, binds them
+to loopback, and proxies `/api/plugins/{pluginId}/backend/{path...}` with the
+backend prefix removed. The plugin catalog exposes `backendUrl` when present.
+Backend code can import the injected `@daw/plugin-backend` package:
+
+```js
+import { dashboard } from "@daw/plugin-backend";
+export default async function handler(request) {
+  const health = await dashboard.request("GET", "/api/health");
+  return Response.json(health);
+}
+```
+
+`dashboard.request(method, path, body?, options?)` parses JSON, authenticates
+mutations, and throws `DashboardApiError`; `dashboard.raw(...)` returns the raw
+fetch `Response`. Never expose the injected API credential to the browser.
+
 Plugin symlinks and special filesystem entries are not supported; nested
-regular directories and files are allowed. A plugin may contain at most 200
+regular directories and files are allowed. A plugin frontend may contain at most 200
 files, each at most 4 MiB, with a maximum total size of 16 MiB. The catalog
 shapes are:
 
@@ -302,7 +330,7 @@ shapes are:
 interface PluginPage { id:string; path:string; label:string; sidebar:boolean }
 interface Plugin {
   apiVersion:number; id:string; name:string; description:string; version:string;
-  fingerprint:string; entryUrl:string; styleUrl?:string;
+  fingerprint:string; entryUrl:string; styleUrl?:string; backendUrl?:string;
   pages:PluginPage[]|null;
 }
 interface PluginError { pluginId?:string; message:string }

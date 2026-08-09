@@ -54,6 +54,17 @@ func (s *Server) handlePlugins(w http.ResponseWriter, _ *http.Request) {
 	s.json(w, http.StatusOK, plugins.Catalog(s.pluginDir))
 }
 
+func (s *Server) handlePluginBackend(w http.ResponseWriter, r *http.Request) {
+	if err := s.backends.proxy(w, r, r.PathValue("pluginId")); err != nil {
+		if os.IsNotExist(err) {
+			s.fail(w, http.StatusNotFound, "plugin_backend_not_found", "plugin backend not found")
+			return
+		}
+		s.log.Warn("plugin backend request", "plugin", r.PathValue("pluginId"), "error", err)
+		s.fail(w, http.StatusBadGateway, "plugin_backend_unavailable", "plugin backend unavailable")
+	}
+}
+
 func (s *Server) handlePluginAsset(w http.ResponseWriter, r *http.Request) {
 	path, info, err := plugins.Asset(
 		s.pluginDir,

@@ -44,9 +44,12 @@ type Options struct {
 	// both as defaults for new chats and as per-session overrides. Empty
 	// disables persistence (primarily useful for tests).
 	ChatPreferencesFile string
-	// PluginDir contains trusted, global browser plugins. It is configured by
-	// the operator and is never selected by a browser request.
+	// PluginDir contains trusted, global browser and Node backend plugins. It is
+	// configured by the operator and is never selected by a browser request.
 	PluginDir string
+	// PluginAPIOrigin is the loopback origin plugin backends use to call the
+	// dashboard API. It must not be a public or forwarded origin.
+	PluginAPIOrigin string
 }
 
 // Server is the HTTP transport and application composition root. Stateful
@@ -68,6 +71,7 @@ type Server struct {
 	preferences *chatprefs.Service
 	events      *dashboardEvents
 	plugins     *pluginWatcher
+	backends    *pluginBackendManager
 }
 
 // New builds the server and registers every route.
@@ -102,6 +106,9 @@ func New(opts Options) *Server {
 	s.plugins = startPluginWatcher(s.pluginDir, s.events, func(err error) {
 		s.log.Warn("plugin watcher", "error", err)
 	})
+	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, func(id string, err error) {
+		s.log.Warn("plugin backend", "plugin", id, "error", err)
+	})
 	s.routes()
 	return s
 }
@@ -116,6 +123,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
+	m.HandleFunc("/api/plugins/{pluginId}/backend", s.handlePluginBackend)
+	m.HandleFunc("/api/plugins/{pluginId}/backend/{path...}", s.handlePluginBackend)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
 	m.HandleFunc("GET /api/sessions/live", s.handleListLiveSessions)
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions", s.handleListSessions)
@@ -244,6 +253,7 @@ func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 // single shared session store).
 func (s *Server) Shutdown(ctx context.Context) {
 	s.plugins.close()
+	s.backends.close(ctx)
 	s.events.close()
 	for _, chat := range s.chats.all() {
 		s.disposeChat(ctx, chat.id, "server shutting down")
