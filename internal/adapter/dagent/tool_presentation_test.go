@@ -35,6 +35,18 @@ func TestPresentationArgsForDefaultTools(t *testing.T) {
 		}
 	})
 
+	t.Run("custom tools receive bounded generic arguments", func(t *testing.T) {
+		large := strings.Repeat("x", maxArgumentString+100)
+		got := presentationArgs(presentationCall("plugin_custom_tool", `{"chatId":"chat_peer","message":"`+large+`"}`))
+		if got["chatId"] != "chat_peer" {
+			t.Fatalf("custom argument missing: %#v", got)
+		}
+		message, ok := got["message"].(string)
+		if !ok || len(message) > maxArgumentString+len("…") {
+			t.Fatalf("custom string was not bounded: %#v", got)
+		}
+	})
+
 	t.Run("edit previews are bounded", func(t *testing.T) {
 		payload := `{"path":"app.go","edits":[{"oldText":"` + strings.Repeat("a", maxEditPreview*2) + `","newText":"b"}]}`
 		got := presentationArgs(presentationCall("edit_file", payload))

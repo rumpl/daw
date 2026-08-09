@@ -2,24 +2,28 @@ package dagent
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
 const (
-	maxArgumentString = 4000
-	maxArgumentPaths  = 40
-	maxEditPreviews   = 8
-	maxEditPreview    = 1200
-	maxWritePreview   = 16 * 1024
+	maxArgumentString       = 4000
+	maxArgumentPaths        = 40
+	maxEditPreviews         = 8
+	maxEditPreview          = 1200
+	maxWritePreview         = 16 * 1024
+	maxCustomArgumentBytes  = 16 * 1024
+	maxCustomArgumentItems  = 40
+	maxCustomArgumentDepth  = 4
+	maxCustomArgumentKeyLen = 200
 )
 
-// presentationArgs returns only the argument data the dashboard needs to
-// render docker-agent's built-in filesystem and shell tools. File writes and
-// edits include bounded content previews in addition to counts, so snapshots
-// remain useful without echoing arbitrarily large model-generated payloads
-// into every SSE event.
+// presentationArgs returns a bounded view of tool arguments for dashboard
+// renderers. Built-in tools get purpose-built projections; custom tools get a
+// generic, recursively bounded projection so plugin renderers do not require
+// plugin-specific allowlists in core.
 func presentationArgs(tc tools.ToolCall) map[string]any {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &raw); err != nil {
@@ -131,12 +135,75 @@ func presentationArgs(tc tools.ToolCall) map[string]any {
 		}
 	case "create_directory", "remove_directory":
 		copyPaths()
+	default:
+		return boundedCustomArguments(raw)
 	}
 
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func boundedCustomArguments(raw map[string]any) map[string]any {
+	budget := maxCustomArgumentBytes
+	value, ok := boundedCustomValue(raw, 0, &budget)
+	if !ok {
+		return nil
+	}
+	result, _ := value.(map[string]any)
+	return result
+}
+
+func boundedCustomValue(value any, depth int, budget *int) (any, bool) {
+	if depth > maxCustomArgumentDepth || *budget <= 0 {
+		return nil, false
+	}
+	switch typed := value.(type) {
+	case string:
+		limit := min(maxArgumentString, *budget)
+		text := truncateMultiline(typed, limit)
+		*budget -= min(len(text), *budget)
+		return text, true
+	case nil, bool, float64:
+		return typed, true
+	case []any:
+		out := make([]any, 0, min(len(typed), maxCustomArgumentItems))
+		for _, item := range typed[:min(len(typed), maxCustomArgumentItems)] {
+			clean, ok := boundedCustomValue(item, depth+1, budget)
+			if ok {
+				out = append(out, clean)
+			}
+			if *budget <= 0 {
+				break
+			}
+		}
+		return out, true
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make(map[string]any, min(len(keys), maxCustomArgumentItems))
+		for _, key := range keys[:min(len(keys), maxCustomArgumentItems)] {
+			cleanKey := truncateMultiline(key, maxCustomArgumentKeyLen)
+			if len(cleanKey) > *budget {
+				break
+			}
+			*budget -= len(cleanKey)
+			clean, ok := boundedCustomValue(typed[key], depth+1, budget)
+			if ok {
+				out[cleanKey] = clean
+			}
+			if *budget <= 0 {
+				break
+			}
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func truncateMultiline(value string, limit int) string {
