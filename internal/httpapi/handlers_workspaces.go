@@ -17,10 +17,12 @@ func (s *Server) handleOpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, err := s.workspaces.Open(req.Path)
 	if err != nil {
+		s.log.Warn("open workspace failed", "error", err)
 		s.failPath(w, err)
 		return
 	}
 	canon := entry.Path
+	s.log.Info("workspace opened", "workspace", entry.ID, "path", canon)
 
 	ws := protocol.Workspace{WorkspaceID: entry.ID, Path: canon, Label: filepath.Base(canon)}
 	if fi, err := os.Stat(filepath.Join(canon, "AGENTS.md")); err == nil && !fi.IsDir() {
@@ -59,6 +61,7 @@ func (s *Server) failPath(w http.ResponseWriter, err error) {
 func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) {
 	list, err := s.adapter.ListSessions(r.Context(), "")
 	if err != nil {
+		s.log.Warn("list live sessions failed", "error", err)
 		s.fail(w, http.StatusInternalServerError, "session_list_failed",
 			"the docker-agent session store could not be listed")
 		return
@@ -100,6 +103,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.adapter.ListSessions(r.Context(), ws.Path)
 	if err != nil {
+		s.log.Warn("list workspace sessions failed", "workspace", ws.ID, "error", err)
 		s.fail(w, http.StatusInternalServerError, "session_list_failed",
 			"the docker-agent session store could not be listed")
 		return

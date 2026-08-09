@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -29,7 +30,7 @@ type pluginBackendManager struct {
 	apiOrigin     string
 	csrf          string
 	internalToken string
-	logError      func(string, error)
+	log           *slog.Logger
 	processes     map[string]*pluginBackendProcess
 	stop          chan struct{}
 	done          chan struct{}
@@ -42,8 +43,8 @@ type pluginBackendProcess struct {
 	done     chan struct{}
 }
 
-func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, logError func(string, error)) *pluginBackendManager {
-	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), logError: logError, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
+func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, log *slog.Logger) *pluginBackendManager {
+	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), log: log, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
 	go manager.run()
 	return manager
 }
@@ -64,10 +65,7 @@ func (m *pluginBackendManager) run() {
 }
 
 func (m *pluginBackendManager) activateAll() {
-	m.mu.Lock()
-	apiOriginReady := m.apiOrigin != ""
-	m.mu.Unlock()
-	if !apiOriginReady {
+	if m.apiOrigin == "" {
 		return
 	}
 	active := map[string]bool{}
@@ -78,10 +76,11 @@ func (m *pluginBackendManager) activateAll() {
 		active[plugin.ID] = true
 		backend, err := plugins.ResolveBackend(m.dir, plugin.ID)
 		if err != nil {
+			m.log.Warn("resolving plugin backend", "plugin", plugin.ID, "error", err)
 			continue
 		}
 		if _, err := m.process(backend); err != nil {
-			m.logError(plugin.ID, err)
+			m.log.Warn("plugin backend activation failed", "plugin", plugin.ID, "error", err)
 		}
 	}
 	m.mu.Lock()
@@ -90,6 +89,7 @@ func (m *pluginBackendManager) activateAll() {
 		if active[pluginID] {
 			continue
 		}
+		m.log.Info("stopping plugin backend", "plugin", pluginID, "reason", "plugin removed or backend disabled")
 		_ = process.cmd.Process.Kill()
 		<-process.done
 		delete(m.processes, pluginID)
@@ -97,11 +97,13 @@ func (m *pluginBackendManager) activateAll() {
 }
 
 func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, pluginID string) error {
-	m.mu.Lock()
 	if m.apiOrigin == "" {
-		m.apiOrigin = "http://" + r.Host
+		m.mu.Lock()
+		if m.apiOrigin == "" {
+			m.apiOrigin = "http://" + r.Host
+		}
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 	backend, err := plugins.ResolveBackend(m.dir, pluginID)
 	if err != nil {
 		return os.ErrNotExist
@@ -144,6 +146,7 @@ func (m *pluginBackendManager) process(backend plugins.Backend) (*pluginBackendP
 			if current.revision == backend.Revision {
 				return current, nil
 			}
+			m.log.Info("restarting plugin backend", "plugin", backend.PluginID, "reason", "backend changed")
 			_ = current.cmd.Process.Kill()
 			<-current.done
 			delete(m.processes, backend.PluginID)
@@ -158,6 +161,7 @@ func (m *pluginBackendManager) process(backend plugins.Backend) (*pluginBackendP
 }
 
 func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendProcess, error) {
+	m.log.Info("starting plugin backend", "plugin", backend.PluginID, "revision", backend.Revision)
 	if err := installBackendSDK(backend.Directory); err != nil {
 		return nil, fmt.Errorf("installing backend SDK: %w", err)
 	}
@@ -188,7 +192,7 @@ func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendPro
 	go func() {
 		data, _ := io.ReadAll(io.LimitReader(stderr, 1<<20))
 		if len(data) > 0 {
-			m.logError(backend.PluginID, errors.New(strings.TrimSpace(string(data))))
+			m.log.Warn("plugin backend stderr", "plugin", backend.PluginID, "error", errors.New(strings.TrimSpace(string(data))))
 		}
 	}()
 
@@ -223,11 +227,16 @@ func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendPro
 		target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", result.message.Port))
 		proxy := httputil.NewSingleHostReverseProxy(target)
 		proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
-			m.logError(backend.PluginID, proxyErr)
+			m.log.Warn("plugin backend proxy", "plugin", backend.PluginID, "error", proxyErr)
 			http.Error(w, `{"error":"plugin backend unavailable","code":"plugin_backend_unavailable"}`, http.StatusBadGateway)
 		}
 		done := make(chan struct{})
-		go func() { _ = cmd.Wait(); close(done) }()
+		go func() {
+			err := cmd.Wait()
+			close(done)
+			m.log.Info("plugin backend exited", "plugin", backend.PluginID, "pid", cmd.Process.Pid, "error", err)
+		}()
+		m.log.Info("plugin backend activated", "plugin", backend.PluginID, "revision", backend.Revision, "pid", cmd.Process.Pid, "port", result.message.Port)
 		return &pluginBackendProcess{revision: backend.Revision, cmd: cmd, proxy: proxy, done: done}, nil
 	case <-time.After(backendStartupTimeout):
 		_ = cmd.Process.Kill()
@@ -241,6 +250,7 @@ func (m *pluginBackendManager) close(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, process := range m.processes {
+		m.log.Info("stopping plugin backend", "plugin", id, "reason", "server shutdown")
 		_ = process.cmd.Process.Signal(os.Interrupt)
 		select {
 		case <-process.done:

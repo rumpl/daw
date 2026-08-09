@@ -146,6 +146,7 @@ func run() error {
 	if err := os.MkdirAll(pluginDataDir, 0o700); err != nil {
 		return fmt.Errorf("creating plugin data directory: %w", err)
 	}
+	log.Info("dashboard starting", "version", appVersion, "port", port, "plugin_directory", pluginDir, "plugin_data_directory", pluginDataDir, "fake_adapter", fakeAdapter)
 
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,

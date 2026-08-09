@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -24,26 +25,32 @@ type pluginWatcher struct {
 	once    sync.Once
 }
 
-func startPluginWatcher(dir string, events *dashboardEvents, logError func(error)) *pluginWatcher {
+func startPluginWatcher(dir string, events *dashboardEvents, log *slog.Logger) *pluginWatcher {
 	if dir == "" {
+		log.Info("plugin watcher disabled", "reason", "plugin directory is empty")
 		return nil
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		logError(err)
+		log.Warn("starting plugin watcher", "directory", dir, "error", err)
 		return nil
 	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		logError(err)
+		log.Warn("starting plugin watcher", "directory", dir, "error", err)
 		return nil
 	}
 	pw := &pluginWatcher{watcher: watcher, stop: make(chan struct{}), done: make(chan struct{})}
 	if err := pw.addDirectories(dir); err != nil {
 		watcher.Close()
-		logError(err)
+		log.Warn("starting plugin watcher", "directory", dir, "error", err)
 		return nil
 	}
-	go pw.run(dir, events, logError)
+	catalog := plugins.Catalog(dir)
+	log.Info("plugin catalog loaded", "directory", dir, "plugins", len(catalog.Plugins), "errors", len(catalog.Errors))
+	for _, diagnostic := range catalog.Errors {
+		log.Warn("invalid plugin", "plugin", diagnostic.PluginID, "error", diagnostic.Message)
+	}
+	go pw.run(dir, events, log)
 	return pw
 }
 
@@ -65,7 +72,7 @@ func pluginCatalogRevision(catalog protocol.PluginCatalog) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (p *pluginWatcher) run(dir string, events *dashboardEvents, logError func(error)) {
+func (p *pluginWatcher) run(dir string, events *dashboardEvents, log *slog.Logger) {
 	defer close(p.done)
 	defer p.watcher.Close()
 	revision := pluginCatalogRevision(plugins.Catalog(dir))
@@ -95,7 +102,7 @@ func (p *pluginWatcher) run(dir string, events *dashboardEvents, logError func(e
 			return
 		case err, ok := <-p.watcher.Errors:
 			if ok {
-				logError(err)
+				log.Warn("plugin watcher", "directory", dir, "error", err)
 			}
 		case _, ok := <-p.watcher.Events:
 			if !ok {
@@ -105,10 +112,17 @@ func (p *pluginWatcher) run(dir string, events *dashboardEvents, logError func(e
 		case <-timerC:
 			timerC = nil
 			// Refresh watches as directories may have been added or replaced.
-			_ = p.addDirectories(dir)
-			next := pluginCatalogRevision(plugins.Catalog(dir))
+			if err := p.addDirectories(dir); err != nil {
+				log.Warn("refreshing plugin watcher", "directory", dir, "error", err)
+			}
+			catalog := plugins.Catalog(dir)
+			next := pluginCatalogRevision(catalog)
 			if next != revision {
 				revision = next
+				log.Info("plugin catalog changed", "plugins", len(catalog.Plugins), "errors", len(catalog.Errors), "revision", next)
+				for _, diagnostic := range catalog.Errors {
+					log.Warn("invalid plugin", "plugin", diagnostic.PluginID, "error", diagnostic.Message)
+				}
 				events.publish(protocol.DashboardEvent{
 					Type: protocol.DashboardEventPluginsChanged, Revision: next,
 				})

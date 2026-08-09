@@ -84,6 +84,7 @@ func New(ctx context.Context, cfg Config) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening session store: %w", err)
 	}
+	log.Info("session store opened", "path", dbPath)
 
 	a := &Adapter{log: log, store: store, storePath: dbPath}
 	// The user's global permission configuration (~/.config/cagent/config.yaml)
@@ -182,6 +183,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 // cmd/root/run.go (createLocalRuntimeAndSession) so toolsets, models, hooks,
 // budgets and permissions behave identically.
 func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
+	a.log.Info("opening agent chat", "chat", req.ChatID, "session", req.ResumeSessionID, "resumed", req.ResumeSessionID != "", "mcp_servers", len(req.MCPServers))
 	runConfig := a.runtimeConfig(req.WorkingDir)
 	loadRes, err := dashboardagent.Build(ctx, runConfig, req.MCPServers...)
 	if err != nil {
@@ -328,6 +330,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		sink := daruntime.EventSinkFunc(func(ev daruntime.Event) { c.normalize(ev) })
 		c.rt.EmitStartupInfo(context.WithoutCancel(ctx), sess, sink)
 	}()
+	a.log.Info("agent chat ready", "chat", req.ChatID, "session", sess.ID, "agent", agentName, "resumed", !newSession)
 
 	return c, nil
 }

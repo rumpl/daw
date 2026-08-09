@@ -26,15 +26,5 @@ export function usePlugins(enabled: boolean, revision = 0) {
     });
   }, [enabled, refresh, revision]);
 
-  useEffect(() => {
-    if (!enabled) return;
-    const timer = window.setInterval(() => {
-      void refresh().catch((cause: unknown) => {
-        setLoadError(cause instanceof Error ? cause.message : 'plugins could not be loaded');
-      });
-    }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [enabled, refresh]);
-
   return { catalog, loadError, refresh };
 }

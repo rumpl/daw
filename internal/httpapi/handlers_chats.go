@@ -68,6 +68,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	// opened a second time. The second browser attaches to the live chat.
 	if resumeID != "" {
 		if existing := s.chats.session(resumeID); existing != nil {
+			s.log.Info("attached to live chat", "chat", existing.id, "session", resumeID, "workspace", workspaceID)
 			s.json(w, http.StatusOK, protocol.ChatRef{ChatID: existing.id, SessionID: resumeID})
 			return
 		}
@@ -89,7 +90,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 			s.fail(w, http.StatusFailedDependency, "no_model",
 				"no model could be resolved; run `docker agent setup` or `docker agent doctor` on this machine")
 		default:
-			s.log.Warn("open chat failed", "error", err)
+			s.log.Warn("open chat failed", "workspace", workspaceID, "session", resumeID, "error", err)
 			s.fail(w, http.StatusBadRequest, "open_failed", "this chat could not be started")
 		}
 		return
@@ -116,6 +117,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	lc.generation = 1
 	if other := s.chats.register(sessionID, lc); other != nil {
 		_ = c.Close(r.Context())
+		s.log.Info("attached to concurrently opened chat", "chat", other.id, "session", sessionID, "workspace", workspaceID)
 		s.json(w, http.StatusOK, protocol.ChatRef{ChatID: other.id, SessionID: sessionID})
 		return
 	}
@@ -128,6 +130,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	}
 	go lc.pump(1, c.Events())
 	s.publishSessionsChanged(ws.ID, sessionID, "opened")
+	s.log.Info("chat opened", "chat", chatID, "session", sessionID, "workspace", ws.ID, "resumed", resumeID != "")
 
 	s.json(w, http.StatusCreated, protocol.ChatRef{ChatID: chatID, SessionID: sessionID})
 }
@@ -193,12 +196,13 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, adapter.ErrClosed):
 			s.fail(w, http.StatusGone, "chat_closed", "this chat has been closed")
 		default:
-			s.log.Warn("send failed", "error", err)
+			s.log.Warn("send message failed", "chat", c.id, "session", c.chat.SessionID(), "mode", req.Mode, "error", err)
 			s.fail(w, http.StatusBadRequest, "send_failed", "the message could not be delivered")
 		}
 		return
 	}
 	res := protocol.Accepted{Accepted: true, Mode: mode, RunID: runID, Queued: queued}
+	s.log.Info("message accepted", "chat", c.id, "session", c.chat.SessionID(), "mode", mode, "run", runID, "queued", queued, "attachments", len(attachments))
 	s.json(w, http.StatusAccepted, res)
 }
 
@@ -208,6 +212,7 @@ func (s *Server) handleAbort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.chat.Abort()
+	s.log.Info("chat abort requested", "chat", c.id, "session", c.chat.SessionID())
 	s.json(w, http.StatusAccepted, protocol.Accepted{Accepted: true})
 }
 
@@ -267,6 +272,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	meta.ChatID = c.id
 	meta.WorkspaceID = c.workspaceID
 	c.publish(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
+	s.log.Info("chat configuration updated", "chat", c.id, "session", c.chat.SessionID(), "model_changed", req.Model != nil, "thinking_changed", req.ThinkingLevel != nil)
 	s.json(w, http.StatusOK, meta)
 }
 
@@ -368,9 +374,11 @@ func (s *Server) handleRetitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := c.chat.Retitle(r.Context(), title); err != nil {
+		s.log.Warn("retitle chat failed", "chat", c.id, "session", c.chat.SessionID(), "error", err)
 		s.fail(w, http.StatusBadRequest, "retitle_failed", "the title could not be updated")
 		return
 	}
+	s.log.Info("chat retitled", "chat", c.id, "session", c.chat.SessionID())
 	s.json(w, http.StatusOK, protocol.Accepted{Accepted: true})
 }
 
@@ -387,6 +395,7 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, "compact_failed", "compaction could not be started")
 		return
 	}
+	s.log.Info("chat compaction started", "chat", c.id, "session", c.chat.SessionID())
 	s.json(w, http.StatusAccepted, protocol.Accepted{Accepted: true})
 }
 

@@ -110,12 +110,8 @@ func New(opts Options) *Server {
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
 	s.chats = newChatRegistry()
 	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
-	s.plugins = startPluginWatcher(s.pluginDir, s.events, func(err error) {
-		s.log.Warn("plugin watcher", "error", err)
-	})
-	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, func(id string, err error) {
-		s.log.Warn("plugin backend", "plugin", id, "error", err)
-	})
+	s.plugins = startPluginWatcher(s.pluginDir, s.events, log)
+	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, log)
 	s.routes()
 	return s
 }
@@ -257,6 +253,7 @@ func newOpaqueID(prefix string) string {
 func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 	c := s.chats.remove(chatID)
 	if c != nil {
+		s.log.Info("closing chat", "chat", chatID, "session", c.chat.SessionID(), "workspace", c.workspaceID, "reason", reason)
 		c.close(ctx, reason)
 		s.publishSessionsChanged(c.workspaceID, c.chat.SessionID(), reason)
 	}
@@ -265,6 +262,7 @@ func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 // Shutdown disposes every live chat and closes the adapter (and with it the
 // single shared session store).
 func (s *Server) Shutdown(ctx context.Context) {
+	s.log.Info("server shutdown started", "live_chats", len(s.chats.all()))
 	s.plugins.close()
 	s.backends.close(ctx)
 	s.pluginEvents.close()
@@ -272,7 +270,10 @@ func (s *Server) Shutdown(ctx context.Context) {
 	for _, chat := range s.chats.all() {
 		s.disposeChat(ctx, chat.id, "server shutting down")
 	}
-	_ = s.adapter.Close()
+	if err := s.adapter.Close(); err != nil {
+		s.log.Warn("closing adapter", "error", err)
+	}
+	s.log.Info("server shutdown complete")
 }
 
 func (s *Server) publishSessionsChanged(workspaceID, sessionID, reason string) {
