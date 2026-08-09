@@ -181,7 +181,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
 
       let nextWorkspace = workspace;
       if (!nextWorkspace || nextWorkspace.path !== path) {
-        nextWorkspace = await applyWorkspace(path, true);
+        nextWorkspace = await applyWorkspace(path, false);
       }
       const ref = await api.resumeChat(nextWorkspace.workspaceId, sessionId);
       setChatId(ref.chatId);
@@ -206,7 +206,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
         if (adjacentSession) {
           let nextWorkspace = workspace;
           if (!nextWorkspace || nextWorkspace.path !== adjacentSession.workingDir) {
-            nextWorkspace = await applyWorkspace(adjacentSession.workingDir, true);
+            nextWorkspace = await applyWorkspace(adjacentSession.workingDir, false);
           }
           const ref = await api.resumeChat(nextWorkspace.workspaceId, adjacentSession.sessionId);
           route.openSession(ref.sessionId, nextWorkspace.path);
@@ -253,9 +253,9 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       }
       if (activeSessionId === targetSessionId && chatId && workspace?.path === targetWorkspacePath) return;
 
-      // Do not leave the previous conversation visible under a new session URL
-      // while its workspace and snapshot are being restored.
-      clearChat();
+      // Keep the current conversation mounted while the destination session
+      // is restored. activateChat swaps it atomically once the new chat is
+      // ready, avoiding a full-page-looking empty state between tabs.
       const nextWorkspace =
         workspace?.path === targetWorkspacePath
           ? workspace

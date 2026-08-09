@@ -16,6 +16,7 @@ interface ChatHeaderProps {
   onPatchConfig: (patch: Pick<UpdateConfigRequest, 'model' | 'thinkingLevel'>) => void;
   onCompact: () => void;
   onRename: (title: string) => void;
+  showMenu?: boolean;
 }
 
 export function ChatHeader({
@@ -29,6 +30,7 @@ export function ChatHeader({
   onPatchConfig,
   onCompact,
   onRename,
+  showMenu = true,
 }: ChatHeaderProps) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement | null>(null);
@@ -53,7 +55,7 @@ export function ChatHeader({
 
   return (
     <header className="topbar">
-      <button
+      {showMenu ? <button
         type="button"
         className="menu-button"
         ref={menuButton}
@@ -62,7 +64,7 @@ export function ChatHeader({
         onClick={onToggleDrawer}
       >
         Menu
-      </button>
+      </button> : null}
 
       <div className="topbar-title">
         <h1>{clip(state.meta?.title || 'docker-agent', 80)}</h1>

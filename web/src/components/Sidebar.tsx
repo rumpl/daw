@@ -188,7 +188,7 @@ export function Sidebar({
   ) : null;
 
   return (
-    <div className="sidebar-inner" ref={drawerRef}>
+    <div className="sidebar-inner" ref={drawerRef} aria-busy={busy || undefined}>
       <div className="brand">
         docker-agent<span className="brand-sub"> dashboard</span>
       </div>

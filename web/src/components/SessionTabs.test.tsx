@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { SessionSummary } from '../protocol.gen';
+import type { Plugin, SessionSummary } from '../protocol.gen';
 import { SessionTabs } from './SessionTabs';
 
 const session: SessionSummary = {
@@ -13,6 +13,17 @@ const session: SessionSummary = {
   live: true,
   chatId: 'chat-live',
   runState: 'running',
+};
+
+const plugin: Plugin = {
+  apiVersion: 1,
+  id: 'system-info',
+  name: 'System Info',
+  description: 'Inspect the system',
+  version: '1.0.0',
+  fingerprint: 'abc123',
+  entryUrl: '/api/plugins/system-info/assets/abc123/index.js',
+  pages: [],
 };
 
 describe('SessionTabs', () => {
@@ -77,6 +88,78 @@ describe('SessionTabs', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Create new chat' })).toBeDisabled();
+  });
+
+  it('offers vertical and horizontal splits for the active tab', async () => {
+    const onSplit = vi.fn();
+    render(
+      <SessionTabs
+        sessions={[session]}
+        activeSessionId="sess-live"
+        busy={false}
+        canCreateChat={true}
+        onNewChat={vi.fn()}
+        onOpen={vi.fn()}
+        onClose={vi.fn()}
+        onReorder={vi.fn()}
+        onSplit={onSplit}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Split active tab vertically' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Split active tab horizontally' }));
+
+    expect(onSplit).toHaveBeenNthCalledWith(1, 'sess-live', '/code/project', 'vertical');
+    expect(onSplit).toHaveBeenNthCalledWith(2, 'sess-live', '/code/project', 'horizontal');
+  });
+
+  it('selects and closes plugin tabs', async () => {
+    const onOpenPlugin = vi.fn();
+    const onClosePlugin = vi.fn();
+    render(
+      <SessionTabs
+        sessions={[session]}
+        activeSessionId="sess-live"
+        plugins={[{ plugin, path: 'overview' }]}
+        activePluginId={null}
+        busy={false}
+        canCreateChat={true}
+        onNewChat={vi.fn()}
+        onOpen={vi.fn()}
+        onClose={vi.fn()}
+        onReorder={vi.fn()}
+        onOpenPlugin={onOpenPlugin}
+        onClosePlugin={onClosePlugin}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'System Info plugin' }));
+    expect(onOpenPlugin).toHaveBeenCalledWith('system-info', 'overview');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close plugin System Info' }));
+    expect(onClosePlugin).toHaveBeenCalledWith('system-info');
+  });
+
+  it('does not reopen an already selected plugin tab', async () => {
+    const onOpenPlugin = vi.fn();
+    render(
+      <SessionTabs
+        sessions={[]}
+        activeSessionId={null}
+        plugins={[{ plugin, path: '' }]}
+        activePluginId="system-info"
+        busy={false}
+        canCreateChat={false}
+        onNewChat={vi.fn()}
+        onOpen={vi.fn()}
+        onClose={vi.fn()}
+        onReorder={vi.fn()}
+        onOpenPlugin={onOpenPlugin}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'System Info plugin' }));
+    expect(onOpenPlugin).not.toHaveBeenCalled();
   });
 
   it('reorders tabs with drag and drop', () => {

@@ -79,6 +79,8 @@ button {
 }
 button:hover:not([disabled]) { background: var(--bg-alt); }
 button[disabled] { opacity: .4; cursor: not-allowed; }
+/* Busy tab transitions should not visually dim and flash the persistent sidebar. */
+.sidebar-inner[aria-busy="true"] button[disabled] { opacity: 1; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 button.primary:hover:not([disabled]) { filter: brightness(1.08); }
 button.danger { color: var(--danger); border-color: var(--rule); }
@@ -260,6 +262,32 @@ select {
 /* --- header: one row ------------------------------------------------------- */
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+.main-panes { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.pane-split {
+  flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden;
+}
+.pane-split-horizontal { flex-direction: column; }
+.pane-split-child {
+  flex: 1 1 0; min-width: 0; min-height: 0; display: flex; overflow: hidden;
+}
+.pane-split-sized { flex-grow: 0; flex-shrink: 0; }
+.main-pane {
+  flex: 1 1 0; min-width: 0; min-height: 0; position: relative;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.main-pane-sized { flex-grow: 0; flex-shrink: 0; }
+.split-divider {
+  z-index: 5; flex: 0 0 5px; width: 5px; cursor: col-resize; touch-action: none;
+  border-left: 1px solid var(--rule); border-right: 1px solid transparent;
+  background: var(--bg-alt);
+}
+.pane-split-horizontal > .split-divider {
+  width: auto; height: 5px; flex-basis: 5px; cursor: row-resize;
+  border: 0; border-top: 1px solid var(--rule); border-bottom: 1px solid transparent;
+}
+.split-divider:hover { border-color: var(--accent); background: var(--accent); }
+.resizing-split { cursor: col-resize; user-select: none; }
+.resizing-split-horizontal { cursor: row-resize; user-select: none; }
 .session-tabs {
   display: flex; flex: none; min-width: 0; overflow-x: auto;
   padding: 5px var(--gutter) 0; border-bottom: 1px solid var(--rule); background: var(--bg-alt);
@@ -296,6 +324,14 @@ select {
   border: 0; border-radius: 4px; color: var(--fg-dim); font-size: 20px; line-height: 1;
 }
 .session-tab-new:hover:not([disabled]) { color: var(--fg); background: var(--bg); }
+.session-split-actions { display: flex; align-self: center; margin: 0 0 5px auto; padding-left: 8px; }
+.session-split-actions button {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 0; color: var(--fg-dim);
+}
+.split-icon { display: block; width: 14px; height: 14px; border: 1px solid currentColor; }
+.split-icon-vertical { background: linear-gradient(90deg, transparent 46%, currentColor 46%, currentColor 54%, transparent 54%); }
+.split-icon-horizontal { background: linear-gradient(transparent 46%, currentColor 46%, currentColor 54%, transparent 54%); }
 .main-dragging { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
 .chat-drop-hint {
   position: absolute; inset: 0; z-index: 70; display: grid; place-items: center;
