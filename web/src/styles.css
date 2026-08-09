@@ -255,6 +255,24 @@ select {
 /* --- header: one row ------------------------------------------------------- */
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+.session-tabs {
+  display: flex; flex: none; min-width: 0; overflow-x: auto;
+  padding: 5px var(--gutter) 0; border-bottom: 1px solid var(--rule); background: var(--bg-alt);
+}
+.session-tab {
+  display: flex; align-items: stretch; min-width: 110px; max-width: 230px;
+  border: 1px solid var(--rule); border-bottom: 0; border-radius: 5px 5px 0 0;
+  background: var(--bg); color: var(--fg-dim);
+}
+.session-tab + .session-tab { margin-left: 4px; }
+.session-tab[data-active] { border-color: var(--accent); color: var(--fg); }
+.session-tab-open {
+  display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1;
+  padding: 5px 4px 5px 8px; border: 0; color: inherit;
+}
+.session-tab-open span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-tab-close { padding: 3px 8px; border: 0; color: var(--fg-faint); font-size: 16px; }
+.session-tab-close:hover:not([disabled]) { color: var(--danger); background: transparent; }
 .main-dragging { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
 .chat-drop-hint {
   position: absolute; inset: 0; z-index: 70; display: grid; place-items: center;

@@ -7,6 +7,7 @@ import { NewChatPrompt } from './components/NewChatPrompt';
 import { PendingDialogs } from './components/PendingDialogs';
 import { PluginPage } from './components/PluginPage';
 import { Sidebar } from './components/Sidebar';
+import { SessionTabs } from './components/SessionTabs';
 import { pluginRoute, sessionRoute } from './routes';
 import { clip } from './safety';
 import { useDashboard } from './useDashboard';
@@ -134,7 +135,6 @@ export function Dashboard() {
           boot={dashboard.boot}
           workspace={dashboard.workspace}
           sessions={dashboard.sessions}
-          liveSessions={dashboard.liveSessions}
           recentWorkspaces={dashboard.recentWorkspaces}
           plugins={pluginCatalog.plugins ?? []}
           pluginErrors={pluginCatalog.errors ?? []}
@@ -147,7 +147,6 @@ export function Dashboard() {
           onOpenWorkspace={dashboard.openWorkspace}
           onNewChat={dashboard.newChat}
           onResumeChat={dashboard.resumeChat}
-          onCloseLiveSession={dashboard.closeLiveSession}
           onOpenPlugin={openPlugin}
         />
       </aside>
@@ -161,6 +160,15 @@ export function Dashboard() {
         onDrop={onChatDrop}
       >
         {draggingFiles ? <div className="chat-drop-hint">Drop files to attach</div> : null}
+        {!routePluginId ? (
+          <SessionTabs
+            sessions={dashboard.liveSessions}
+            activeSessionId={dashboard.activeSessionId}
+            busy={dashboard.busyAction}
+            onOpen={dashboard.resumeChat}
+            onClose={dashboard.closeLiveSession}
+          />
+        ) : null}
         {routePluginId ? (
           <PluginPage
             boot={dashboard.boot}
