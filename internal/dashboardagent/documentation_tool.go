@@ -12,10 +12,6 @@ var developerDocumentation string
 
 type developerDocumentationArgs struct{}
 
-// DeveloperDocumentation returns the exact reference exposed by the default
-// agent's documentation tool.
-func DeveloperDocumentation() string { return developerDocumentation }
-
 // DeveloperDocumentationTool gives the code-built default agent a stable,
 // read-only way to retrieve the complete plugin-facing backend and frontend
 // contract without searching this repository or relying on prompt memory.

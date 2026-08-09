@@ -23,7 +23,7 @@ func TestDeveloperDocumentationToolReturnsCompleteReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IsError || result.Output != DeveloperDocumentation() {
+	if result.IsError || result.Output != developerDocumentation {
 		t.Fatal("tool did not return the embedded documentation verbatim")
 	}
 	if len(result.Output) < 10_000 {
@@ -43,7 +43,7 @@ func TestDeveloperDocumentationCoversEveryBackendRoute(t *testing.T) {
 	}
 	for _, match := range matches {
 		route := match[1]
-		if !strings.Contains(DeveloperDocumentation(), route) {
+		if !strings.Contains(developerDocumentation, route) {
 			t.Errorf("developer documentation is missing backend route %q", route)
 		}
 	}
@@ -55,7 +55,7 @@ func TestDeveloperDocumentationCoversEveryExposedHostComponentAndHook(t *testing
 		"ElicitationDialog", "ToolConfirmDialog", "ModelPicker", "PendingDialogs", "ToolCard",
 		"useChat", "useDraft",
 	} {
-		if !strings.Contains(DeveloperDocumentation(), name) {
+		if !strings.Contains(developerDocumentation, name) {
 			t.Errorf("developer documentation is missing frontend API %q", name)
 		}
 	}
