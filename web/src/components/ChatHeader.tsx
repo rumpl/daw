@@ -1,3 +1,4 @@
+import { Edit } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { ModelOption, UpdateConfigRequest } from '../protocol.gen';
 import type { ChatState, ConnectionState } from '../reducer';
@@ -75,6 +76,21 @@ export function ChatHeader({
 
       <div className="topbar-title">
         <h1>{clip(state.meta?.title || 'docker-agent', 80)}</h1>
+        {hasChat && state.meta ? (
+          <button
+            type="button"
+            className="rename-session"
+            aria-label="Rename session"
+            title="Rename session"
+            onClick={() => {
+              const title = window.prompt('New title', state.meta?.title ?? '');
+              if (title) onRename(title);
+            }}
+            disabled={busyAction}
+          >
+            <Edit size={14} aria-hidden="true" />
+          </button>
+        ) : null}
         {hasChat ? (
           <span className={`conn conn-${connection}`} role="status" aria-label={connectionLabel}>
             <span className="conn-dot" aria-hidden="true" />
@@ -131,16 +147,6 @@ export function ChatHeader({
             <div className="control-row">
               <button type="button" onClick={onCompact} disabled={busy || busyAction}>
                 Compact
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const title = window.prompt('New title', state.meta?.title ?? '');
-                  if (title) onRename(title);
-                }}
-                disabled={busyAction}
-              >
-                Rename
               </button>
             </div>
 
