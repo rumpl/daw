@@ -35,7 +35,18 @@ the same lowercase kebab-case value.
   "version": "1.0.0",
   "entry": "index.js",
   "style": "style.css",
-  "backend": { "entry": "backend/index.js" },
+  "backend": {
+    "entry": "backend/index.js",
+    "webhooks": [{"id":"github"}],
+    "mcp": [
+      {"id":"local-tools","command":"node","args":["server.mjs"],"workingDir":"tools"},
+      {"id":"remote-tools","url":"https://mcp.example.test","transport":"streamable-http"}
+    ]
+  },
+  "configuration": {
+    "type": "object",
+    "properties": {"enabled":{"type":"boolean"}}
+  },
   "pages": [
     {
       "id": "overview",
@@ -53,8 +64,8 @@ the same lowercase kebab-case value.
 }
 ```
 
-`description`, `version`, `style`, and `backend` are optional. At least one page is
-required. Pages with `sidebar: true` appear in the global Plugins navigation.
+`entry`, `description`, `version`, `style`, `backend`, `configuration`, and
+`pages` are optional, but at least one of `entry` or `backend` is required.
 A plugin can navigate to any declared page with `context.navigate(path)`.
 
 Plugin assets are fingerprinted from their contents. Relative ES module imports
@@ -70,7 +81,8 @@ a `package.json`, lockfile, and `node_modules`; run `npm install` there yourself
 when dependencies are needed. The dashboard runs the entry with the `node`
 executable and restarts it after backend source changes.
 
-The entry exports `default` or `handler`, an async Fetch-style handler. Requests
+The entry exports `default` or `handler`, an async Fetch-style handler, and may
+also export lifecycle and webhook handlers. Requests
 to `/api/plugins/<id>/backend/...` are proxied to it with the prefix removed:
 
 ```js
@@ -103,14 +115,189 @@ const result = await context.api.request(
 );
 ```
 
-Backend processes bind only to an ephemeral loopback port, start lazily on the
-first request, and stop with the dashboard. They are trusted and run with the
-same user permissions as the dashboard.
+Backend processes bind only to an ephemeral loopback port, start eagerly so
+`activate(context)` can observe dashboard events, restart after source changes,
+and stop with the dashboard. They are trusted and run with the same user
+permissions as the dashboard.
+
+### Backend lifecycle, storage, configuration, and events
+
+A backend entry may export `activate(context)` in addition to its request
+handler. Activation completes before the backend begins serving and may return
+an async cleanup function:
+
+```js
+import { storage, configuration, events } from "@daw/plugin-backend";
+
+export async function activate() {
+  const count = (await storage.get("starts")) ?? 0;
+  await storage.set("starts", count + 1);
+  const stop = events.subscribeDashboard(event => {
+    if (event.type === "sessions_changed") {
+      void events.publish("sessions-refreshed", { reason: event.reason });
+    }
+  });
+  return stop;
+}
+```
+
+`storage.get/set/delete(key)` is backend-only namespaced JSON storage. Keys are
+simple names and each value is limited to 256 KiB. `configuration.get/set()`
+reads and replaces the plugin's host-managed public configuration. Frontends
+can use `api.pluginConfiguration(pluginId)` and
+`api.updatePluginConfiguration(pluginId, values)`.
+
+`events.subscribeDashboard(listener, {types?})` provides process-local,
+at-most-once observation with reconnect/replay. `events.publish(type, data)`
+publishes to the plugin's frontend stream. Frontends subscribe with
+`context.events.subscribePlugin(pluginId, {types?}, listener)`.
+
+The backend may implement command work behind its existing namespaced HTTP
+handler; frontend contribution callbacks invoke it through `context.api`.
+
+### Streaming
+
+Backend request bodies and `Response.body` are piped instead of buffered.
+Streaming downloads and SSE therefore work, and browser disconnects abort the
+backend `Request.signal`.
+
+### External webhooks
+
+Declare up to 20 authenticated webhook IDs under `backend.webhooks`, then export
+`webhook(request, {pluginId, webhookId})`. Retrieve its generated credentials
+only from backend code:
+
+```js
+import { webhooks } from "@daw/plugin-backend";
+const {url, token} = await webhooks.credentials("github");
+```
+
+External callers send `Authorization: Bearer <token>` to the returned URL.
+Webhook calls bypass browser CSRF/origin checks but require the constant-time
+Bearer-token check and are forwarded only to a declared webhook.
+
+## MCP tools
+
+Plugins contribute agent tools through native MCP servers declared under
+`backend.mcp`. Each server must choose exactly one transport:
+
+- `command` with optional `args`, `env`, and workspace-relative `workingDir`
+- `url` with optional `transport` and `headers`
+
+Server names are namespaced as `<plugin-id>-<server-id>`. A fresh MCP toolset is
+attached whenever a chat opens, so tools, prompts, elicitation, sampling, tool
+change notifications, restart supervision, and shutdown all use docker-agent's
+native MCP runtime. Editing a plugin affects newly opened chats; existing live
+chats retain the toolset graph they opened with.
+
+Environment and header values are trusted operator configuration and are never
+returned by the plugin catalog. Remote URLs must use HTTP(S), and local working
+directories cannot escape the active workspace.
+
+## Global activation and contributions
+
+A plugin may export `activate(context)`. It runs while the plugin is installed,
+independently of whether one of its pages is open, and may return a cleanup
+function. Activation restarts when the plugin fingerprint or active workspace
+changes.
+
+```js
+export function activate(context) {
+  const removeAction = context.contributions.registerAction({
+    id: "project-health",
+    label: "Check project health",
+    description: "Run the project health check",
+    locations: ["command-palette"],
+    run({ workspace }) {
+      context.contributions.notify({
+        id: "health-result",
+        level: "info",
+        title: workspace ? `${workspace.label} is healthy` : "No project open"
+      });
+    }
+  });
+
+  const removeFooter = context.contributions.registerSlot({
+    id: "health-footer",
+    slot: "sidebar.footer",
+    render() {
+      return context.ui.React.createElement("span", null, "Health checks enabled");
+    }
+  });
+
+  return () => {
+    removeAction();
+    removeFooter();
+  };
+}
+```
+
+Actions may be placed in `command-palette` and `composer`.
+The command palette opens with Cmd/Ctrl+K. Additive slots are
+`composer.actions`, `session-tab.badge`, and `sidebar.footer`. Slot render functions receive `{workspace, chatId, session,
+sessionId?}` and must return a host-React node.
+
+`setSessionBadge(sessionId, {id, value, tone?})` adds a tab badge. Supported
+tones are `info`, `warning`, `error`, and `success`.
+`notify({id, level, title, message?, timeoutMs?})` shows a host notification;
+`timeoutMs: 0` makes it persistent. All registrations and notifications are
+removed automatically when activation stops.
+
+Plugin styles are loaded for the full activation lifetime, so global
+contributions can use them even while no plugin page is open. Prefix all
+selectors with a plugin-specific class to avoid changing core UI.
+
+Activation context also exposes managed events:
+
+```js
+const unsubscribe = context.events.subscribeDashboard(
+  { types: ["sessions_changed"] },
+  event => console.debug(event.reason)
+);
+const unsubscribeChat = context.events.subscribeChat(
+  chatId,
+  { types: ["tool_end", "run_status"] },
+  event => console.debug(event.type)
+);
+```
+
+Managed streams reconnect with replay positions and close automatically on
+plugin deactivation.
+
+Plugins can also register richer chat integrations during frontend activation:
+
+```js
+context.contributions.registerCommand({
+  id: "review", name: "acme-review", description: "Review with Acme policy",
+  run(args) { return `Review ${args} using Acme policy`; }
+});
+context.contributions.registerToolRenderer({
+  id: "plan", match: tool => tool.name === "terraform_plan",
+  render: tool => context.ui.React.createElement("pre", null, tool.preview)
+});
+context.contributions.registerAttachmentRenderer({
+  id: "junit", match: attachment => attachment.mimeType === "application/junit+xml",
+  render: attachment => context.ui.React.createElement("strong", null, attachment.name)
+});
+```
+
+Plugin commands appear in slash completion. Their result becomes the outgoing
+prompt; returning `undefined` means the command handled the action itself. A
+matching custom renderer replaces the host's normal tool or attachment
+presentation, with host error isolation.
+
+### Future consideration: context providers
+
+Plugin-provided model context is intentionally not part of API v1 for now. It
+may be revisited later with explicit user opt-in, clear provenance, inspection,
+size limits, and per-send controls; plugins must not silently append context to
+messages in the current contract.
 
 ## Entry module
 
-The entry is a browser-native ES module. It must export `mount(context)` and may
-return a cleanup function.
+The entry is a browser-native ES module when `entry` is declared. It may export `activate(context)` for
+global contributions and/or `mount(context)` for declared pages. Page plugins
+must export `mount(context)`, which may return a cleanup function.
 
 ```js
 export async function mount(context) {

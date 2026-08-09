@@ -35,6 +35,19 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - `GET|POST|PUT|PATCH|DELETE /api/plugins/{pluginId}/backend[/{path...}]`
   - Proxies to the plugin's optional Node backend with the prefix removed.
   - Browser mutations use the normal CSRF rules through `context.api`.
+- `GET /api/plugins/{pluginId}/events` → plugin-owned SSE stream
+  - Reconnects with `lastEventId`; carries `{type,seq,data?}` events published
+    by that plugin's backend.
+- `GET /api/plugins/{pluginId}/config` → `PluginConfiguration`
+- `PUT /api/plugins/{pluginId}/config` → `PluginConfiguration`
+  - Reads or replaces the plugin's host-managed public JSON configuration.
+- `POST /api/plugins/{pluginId}/publish`
+  - Backend-authenticated event publication; not available to browser plugins.
+- `GET /api/plugins/{pluginId}/webhooks/{webhookId}/token`
+  - Backend-only retrieval of generated webhook URL and Bearer token.
+- `* /api/plugins/{pluginId}/webhooks/{webhookId}`
+  - External webhook route; bypasses browser CSRF but requires its generated
+    Bearer token and a manifest-declared webhook ID.
 - `GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}` → asset bytes
   - URL comes from `Plugin.entryUrl`/`styleUrl`. It is immutable and may be
     cached for one year. A stale fingerprint or invalid path returns 404.
@@ -277,7 +290,9 @@ Relative module imports work.
   "version": "1.0.0",
   "entry": "index.js",
   "style": "style.css",
-  "backend": {"entry": "backend/index.js"},
+  "backend": {"entry": "backend/index.js", "webhooks":[{"id":"github"}],
+    "mcp":[{"id":"tools","command":"node","args":["server.mjs"]}]},
+  "configuration": {"type":"object"},
   "pages": [
     {"id":"overview", "path":"", "label":"Example", "sidebar":true},
     {"id":"details", "path":"details", "label":"Details", "sidebar":false}
@@ -288,24 +303,42 @@ Relative module imports work.
 Manifest and directory IDs are identical lowercase kebab-case and at most 63
 characters. Page IDs follow the same form. Page paths are unique lowercase URL
 paths; leading and trailing slashes are normalized, but empty components and
-`//` are rejected. A plugin must declare 1–30 pages, with unique page IDs and
-paths. `sidebar:true` contributes a global sidebar item.
+`//` are rejected. A plugin may declare up to 30 pages, with unique page IDs
+and paths. Page-less plugins can provide global contributions from `activate`.
+`sidebar:true` contributes a global sidebar item.
 
 The manifest is a single JSON object no larger than 64 KiB and unknown fields
 are rejected. `name` is required and at most 80 characters; page labels are
 required and at most 60 characters; `description` is at most 300 characters;
 `version` is at most 40 characters. `entry` must be a relative `.js` or `.mjs`
-path and optional `style` must be a relative `.css` path. Both must name regular
-files within the plugin.
+path and optional `style` must be a relative `.css` path. When declared, both
+must name regular files within the plugin.
 
-`description`, `version`, `style`, and `backend` are optional. A backend entry
+`entry`, `description`, `version`, `style`, `backend`, `configuration`, and
+`pages` are optional, but at least one of `entry` or `backend` is required. A
+backend entry
 must be a relative `.js`, `.mjs`, or `.cjs` path inside a backend directory.
 The backend directory is a normal Node project and may use npm dependencies.
 It is excluded from browser assets and frontend size limits.
 
-Backend entries export a default function or `handler(request, context)` and
-return a Web `Response`. The dashboard starts them lazily with Node, binds them
-to loopback, and proxies `/api/plugins/{pluginId}/backend/{path...}` with the
+A backend may declare up to 20 MCP servers under `backend.mcp`. Each entry has a
+unique `id` and exactly one of:
+
+- local stdio: `command`, optional `args`, `env`, and workspace-relative
+  `workingDir`
+- remote: HTTP(S) `url`, optional `transport` (`sse`, `streamable`, or
+  `streamable-http`) and `headers`
+
+They are namespaced `<plugin-id>-<server-id>` and attached as docker-agent native
+MCP toolsets whenever a chat opens. MCP tools, prompts, elicitation, sampling,
+change notifications, lifecycle supervision, and shutdown therefore use the
+matched SDK directly. Existing live chats retain their opened graph after a
+plugin edit; new chats use the latest manifest.
+
+Backend entries may export `activate(context)`, `default`/`handler(request,
+context)`, and `webhook(request, context)`. Activation may return an async
+cleanup function. The dashboard starts backends eagerly, restarts them on source
+changes, and proxies `/api/plugins/{pluginId}/backend/{path...}` with the
 backend prefix removed. The plugin catalog exposes `backendUrl` when present.
 Backend code can import the injected `@daw/plugin-backend` package:
 
@@ -319,7 +352,20 @@ export default async function handler(request) {
 
 `dashboard.request(method, path, body?, options?)` parses JSON, authenticates
 mutations, and throws `DashboardApiError`; `dashboard.raw(...)` returns the raw
-fetch `Response`. Never expose the injected API credential to the browser.
+fetch `Response`. Request and response bodies stream with cancellation. The SDK
+also exports:
+
+- `storage.get/set/delete(key)` for backend-only namespaced JSON storage
+- `configuration.get/set()` for host-managed public configuration
+- `events.subscribeDashboard()` and `events.publish()`
+- `webhooks.credentials(id)` for a declared webhook's URL and Bearer token
+
+Backend logic can support frontend commands through the existing namespaced
+HTTP handler; the frontend registration callback calls that handler with
+`context.api`.
+
+Never expose the injected API credential or webhook tokens to ordinary browser
+responses.
 
 Plugin symlinks and special filesystem entries are not supported; nested
 regular directories and files are allowed. A plugin frontend may contain at most 200
@@ -331,15 +377,84 @@ interface PluginPage { id:string; path:string; label:string; sidebar:boolean }
 interface Plugin {
   apiVersion:number; id:string; name:string; description:string; version:string;
   fingerprint:string; entryUrl:string; styleUrl?:string; backendUrl?:string;
+  eventsUrl?:string; configUrl?:string; configuration?:unknown;
   pages:PluginPage[]|null;
 }
+interface PluginEvent {type:string;seq:number;data?:unknown}
+interface PluginConfiguration {values:Record<string,unknown>|null}
 interface PluginError { pluginId?:string; message:string }
 interface PluginCatalog { plugins:Plugin[]|null; errors:PluginError[]|null }
 ```
 
-The module exports `mount(context)`, synchronously or asynchronously, and may
-return a cleanup function. The host aborts `signal`, calls cleanup, removes CSS,
-and unmounts roots made by `ui.render` on navigation or hot reload.
+The module may export `activate(context)` for global contributions and/or
+`mount(context)` for declared pages. Both may be synchronous or asynchronous
+and may return a cleanup function. Activation is independent of page navigation
+and restarts after plugin or active-workspace changes. The host aborts `signal`,
+calls cleanup, removes contributions and CSS, and unmounts roots made by
+`ui.render` on deactivation or hot reload.
+
+```ts
+interface ContributionContext {
+  workspace: Workspace|null; chatId:string|null; session:SessionMeta|null;
+  sessionId?:string;
+}
+interface PluginAction {
+  id:string; label:string; description?:string;
+  locations:("command-palette"|"composer")[];
+  when?(context:ContributionContext):boolean;
+  run(context:ContributionContext):void|Promise<void>;
+}
+interface SlotContribution {
+  id:string;
+  slot:"composer.actions"|"session-tab.badge"|"sidebar.footer";
+  order?:number;
+  render(context:ContributionContext):ReactNode;
+}
+interface PluginContributions {
+  registerAction(action:PluginAction):()=>void;
+  registerSlot(contribution:SlotContribution):()=>void;
+  registerCommand(command:{id:string;name:string;description:string;
+    run(text:string,context:ContributionContext):string|void|Promise<string|void>}):()=>void;
+  registerToolRenderer(renderer:{id:string;match(tool:ToolActivity):boolean;
+    render(tool:ToolActivity):ReactNode}):()=>void;
+  registerAttachmentRenderer(renderer:{id:string;match(attachment:Attachment):boolean;
+    render(attachment:Attachment):ReactNode}):()=>void;
+  setSessionBadge(sessionId:string, badge:{id:string;value:string;
+    tone?:"info"|"warning"|"error"|"success"}):()=>void;
+  notify(notification:{id:string;level:"info"|"warning"|"error";
+    title:string;message?:string;timeoutMs?:number}):()=>void;
+}
+interface PluginEvents {
+  subscribeDashboard(options:{types?:DashboardEvent["type"][]},
+    listener:(event:DashboardEvent)=>void):()=>void;
+  subscribePlugin(pluginId:string, options:{types?:string[]},
+    listener:(event:PluginEvent)=>void):()=>void;
+  subscribeChat(chatId:string, options:{types?:Event["type"][]},
+    listener:(event:Event)=>void):()=>void;
+}
+interface PluginActivationContext {
+  workspace:Workspace|null; bootstrap:Bootstrap; plugin:Plugin;
+  signal:AbortSignal; api:DashboardAPI; ui:PluginUI;
+  contributions:PluginContributions; events:PluginEvents;
+}
+```
+
+Managed event subscriptions reconnect with replay positions and are closed on
+deactivation. Plugin commands participate in slash completion; returning text
+supplies the prompt and returning undefined handles the action without sending.
+Matching tool and attachment renderers replace the host fallback under a plugin
+error boundary. The command palette opens with Cmd/Ctrl+K. Notification
+`timeoutMs` defaults to 6000; zero keeps it visible. Global plugin CSS remains
+loaded for the activation lifetime.
+
+### Future consideration: context providers
+
+Plugin-provided model context is intentionally excluded from API v1 for now. It
+may be reconsidered with explicit user opt-in, provenance, inspection, size
+limits, and per-send controls. Current plugins must not silently append context
+to user messages.
+
+Page mounting uses this context:
 
 ```ts
 interface PluginContext {
@@ -366,6 +481,9 @@ interface DashboardAPI {
   csrfToken(): string;
   bootstrap(): Promise<Bootstrap>;
   plugins(): Promise<PluginCatalog>;
+  pluginConfiguration(pluginId:string):Promise<PluginConfiguration>;
+  updatePluginConfiguration(pluginId:string,
+    values:Record<string,unknown>):Promise<PluginConfiguration>;
   openWorkspace(path:string): Promise<Workspace>;
   liveSessions(): Promise<SessionSummary[]>;
   sessions(workspaceId:string): Promise<SessionSummary[]>;
@@ -577,6 +695,7 @@ browser-local draft for each stable session ID.
 
 ## Plugin implementation rules
 
+- Plugins without pages should export `activate`; page plugins export `mount`.
 - Prefer `components.Chat` and other host components over copying core UI.
 - Use `React.createElement`; there is no JSX transform.
 - Use relative ESM imports only. Fingerprinted URLs preserve relative imports.
@@ -584,6 +703,6 @@ browser-local draft for each stable session ID.
 - Pass `context.signal` into generic API requests and clean up timers, event
   listeners, observers, and direct `EventSource` instances.
 - Prefix CSS selectors with the plugin ID. Plugin CSS is document-global while
-  mounted.
+  the plugin is activated.
 - The plugin is trusted and same-origin: it can access the DOM, API, CSRF token,
   and all data exposed to the dashboard.

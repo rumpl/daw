@@ -4,7 +4,7 @@
   "title": "docker-agent dashboard plugin",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "id", "name", "entry", "pages"],
+  "required": ["apiVersion", "id", "name"],
   "properties": {
     "apiVersion": { "const": 1 },
     "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
@@ -18,12 +18,50 @@
       "additionalProperties": false,
       "required": ["entry"],
       "properties": {
-        "entry": { "type": "string", "pattern": "^[^.].+/(?:[^/]+)\\.(?:mjs|cjs|js)$" }
+        "entry": { "type": "string", "pattern": "^[^.].+/(?:[^/]+)\\.(?:mjs|cjs|js)$" },
+        "webhooks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" }
+            }
+          }
+        },
+        "mcp": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$" },
+              "command": { "type": "string", "minLength": 1 },
+              "args": { "type": "array", "items": { "type": "string" } },
+              "env": { "type": "object", "additionalProperties": { "type": "string" } },
+              "workingDir": { "type": "string" },
+              "url": { "type": "string", "format": "uri" },
+              "transport": { "enum": ["sse", "streamable", "streamable-http"] },
+              "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+            },
+            "oneOf": [
+              { "required": ["command"], "not": { "required": ["url"] } },
+              { "required": ["url"], "not": { "required": ["command"] } }
+            ]
+          }
+        }
       }
+    },
+    "configuration": {
+      "type": "object",
+      "description": "JSON Schema used by the plugin for its public configuration"
     },
     "pages": {
       "type": "array",
-      "minItems": 1,
       "maxItems": 30,
       "items": {
         "type": "object",
