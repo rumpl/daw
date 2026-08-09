@@ -6,7 +6,6 @@ interface SidebarProps {
   boot: Bootstrap;
   workspace: Workspace | null;
   sessions: SessionSummary[];
-  liveSessions: SessionSummary[];
   recentWorkspaces: string[];
   plugins: Plugin[];
   pluginErrors: PluginError[];
@@ -19,7 +18,6 @@ interface SidebarProps {
   onOpenWorkspace: (path: string) => void;
   onNewChat: () => void;
   onResumeChat: (sessionId: string, workspacePath?: string) => void;
-  onCloseLiveSession: (sessionId: string, chatId: string) => void;
   onOpenPlugin: (pluginId: string, path: string) => void;
 }
 
@@ -59,7 +57,6 @@ export function Sidebar({
   boot,
   workspace,
   sessions,
-  liveSessions,
   recentWorkspaces,
   plugins,
   pluginErrors,
@@ -72,10 +69,8 @@ export function Sidebar({
   onOpenWorkspace,
   onNewChat,
   onResumeChat,
-  onCloseLiveSession,
   onOpenPlugin,
 }: SidebarProps) {
-  const [activeTab, setActiveTab] = useState<'sessions' | 'live'>('sessions');
   const [sessionFilter, setSessionFilter] = useState('');
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [showPathInput, setShowPathInput] = useState(false);
@@ -254,31 +249,12 @@ export function Sidebar({
         </p>
       ) : null}
 
-      <div className="sidebar-tabs" role="tablist" aria-label="Chat navigation">
-        <button
-          type="button"
-          role="tab"
-          id="sessions-tab"
-          aria-selected={activeTab === 'sessions'}
-          aria-controls="sessions-panel"
-          onClick={() => setActiveTab('sessions')}
-        >
-          Sessions <span>{sessions.length}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="live-tab"
-          aria-selected={activeTab === 'live'}
-          aria-controls="live-panel"
-          onClick={() => setActiveTab('live')}
-        >
-          Live sessions <span>{liveSessions.length}</span>
-        </button>
+      <div className="sidebar-section-heading">
+        <span>Sessions</span>
+        <span>{sessions.length}</span>
       </div>
 
-      {activeTab === 'sessions' ? (
-        <section className="sidebar-panel" role="tabpanel" id="sessions-panel" aria-labelledby="sessions-tab">
+      <section className="sidebar-panel" aria-label="Sessions">
           <label className="sr-only" htmlFor="session-search">Search sessions</label>
           <input
             id="session-search"
@@ -300,75 +276,34 @@ export function Sidebar({
                 >
                   <h3 id={`session-day-${index}`}>{group.label}</h3>
                   <ul>
-                    {group.sessions.map((session) => (
+                    {group.sessions.map((session) => {
+                      const runStatus = session.runState === 'running'
+                        ? 'Running'
+                        : session.runState === 'stopping'
+                          ? 'Stopping'
+                          : 'Not running';
+                      return (
                       <li key={session.sessionId}>
                         <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
                           <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
                           <span className="session-meta">
-                            {session.live ? <span className="live-dot" aria-hidden="true" /> : null}
                             {session.messages} message{session.messages === 1 ? '' : 's'}
-                            {session.live
-                              ? ` · ${session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle'}`
-                              : ''}
+                            {' · '}
+                            <span className={`run-state run-${session.runState ?? 'idle'}`}>
+                              <span className="run-dot" aria-hidden="true" />
+                              {runStatus}
+                            </span>
                           </span>
                         </button>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </section>
               ))}
             </div>
           )}
-        </section>
-      ) : (
-        <section className="sidebar-panel" role="tabpanel" id="live-panel" aria-labelledby="live-tab">
-          {liveSessions.length === 0 ? (
-            <p className="hint">No live sessions across your projects.</p>
-          ) : (
-            <ul className="session-list live-session-list">
-              {liveSessions.map((session) => {
-                const project = projectLabel(session.workingDir);
-                const status = session.runState === 'running' ? 'Running' : session.runState === 'stopping' ? 'Stopping' : 'Idle';
-                return (
-                  <li key={session.sessionId} className="live-session-row">
-                    <button
-                      type="button"
-                      className="live-session-open"
-                      aria-label={`Open live session ${session.title || 'Untitled'} in ${session.workingDir}`}
-                      onClick={() => onResumeChat(session.sessionId, session.workingDir)}
-                      disabled={busy}
-                    >
-                      <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
-                      <span className="session-project" title={session.workingDir}>
-                        {clip(project, 48)} ·{' '}
-                        <span className={`run-state run-${session.runState ?? 'idle'}`}>
-                          <span className="run-dot" aria-hidden="true" />
-                          {status}
-                        </span>
-                      </span>
-                    </button>
-                    <details className="live-session-menu">
-                      <summary aria-label={`Actions for live session ${session.title || 'Untitled'}`}>•••</summary>
-                      <button
-                        type="button"
-                        className="close-session-button"
-                        aria-label={`Close live session ${session.title || 'Untitled'}`}
-                        onClick={(event) => {
-                          onCloseLiveSession(session.sessionId, session.chatId ?? '');
-                          event.currentTarget.closest('details')?.removeAttribute('open');
-                        }}
-                        disabled={busy || !session.chatId}
-                      >
-                        Close session
-                      </button>
-                    </details>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      )}
+      </section>
 
       <p className="sidebar-version">docker-agent {clip(boot.agentVersion, 40)}</p>
     </div>

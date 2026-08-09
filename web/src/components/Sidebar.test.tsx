@@ -49,7 +49,6 @@ describe('Sidebar', () => {
         boot={boot}
         workspace={workspace}
         sessions={[]}
-        liveSessions={[]}
         recentWorkspaces={['/code/other']}
         plugins={[]}
         pluginErrors={[]}
@@ -62,7 +61,6 @@ describe('Sidebar', () => {
         onOpenWorkspace={onOpenWorkspace}
         onNewChat={vi.fn()}
         onResumeChat={vi.fn()}
-        onCloseLiveSession={vi.fn()}
         onOpenPlugin={vi.fn()}
       />,
     );
@@ -86,7 +84,6 @@ describe('Sidebar', () => {
         boot={boot}
         workspace={workspace}
         sessions={[]}
-        liveSessions={[]}
         recentWorkspaces={[]}
         plugins={[]}
         pluginErrors={[]}
@@ -99,7 +96,6 @@ describe('Sidebar', () => {
         onOpenWorkspace={vi.fn()}
         onNewChat={onNewChat}
         onResumeChat={vi.fn()}
-        onCloseLiveSession={vi.fn()}
         onOpenPlugin={vi.fn()}
       />,
     );
@@ -115,7 +111,6 @@ describe('Sidebar', () => {
         boot={boot}
         workspace={workspace}
         sessions={[]}
-        liveSessions={[]}
         recentWorkspaces={[]}
         plugins={[plugin]}
         pluginErrors={[]}
@@ -128,7 +123,6 @@ describe('Sidebar', () => {
         onOpenWorkspace={vi.fn()}
         onNewChat={vi.fn()}
         onResumeChat={vi.fn()}
-        onCloseLiveSession={vi.fn()}
         onOpenPlugin={onOpenPlugin}
       />,
     );
@@ -147,7 +141,6 @@ describe('Sidebar', () => {
         boot={boot}
         workspace={workspace}
         sessions={sessions}
-        liveSessions={[]}
         recentWorkspaces={[]}
         plugins={[]}
         pluginErrors={[]}
@@ -160,7 +153,6 @@ describe('Sidebar', () => {
         onOpenWorkspace={vi.fn()}
         onNewChat={vi.fn()}
         onResumeChat={vi.fn()}
-        onCloseLiveSession={vi.fn()}
         onOpenPlugin={vi.fn()}
       />,
     );
@@ -169,15 +161,12 @@ describe('Sidebar', () => {
     expect(screen.getByRole('heading', { name: /Wednesday, Jan 1/ })).toBeVisible();
   });
 
-  it('opens a live session from another project directly', async () => {
-    const onResumeChat = vi.fn();
-    const onCloseLiveSession = vi.fn();
+  it('shows live state in the sessions list without a separate live-sessions menu', () => {
     render(
       <Sidebar
         boot={boot}
         workspace={workspace}
-        sessions={[]}
-        liveSessions={[liveSession]}
+        sessions={[liveSession]}
         recentWorkspaces={[]}
         plugins={[]}
         pluginErrors={[]}
@@ -189,24 +178,14 @@ describe('Sidebar', () => {
         onWorkspacePathChange={vi.fn()}
         onOpenWorkspace={vi.fn()}
         onNewChat={vi.fn()}
-        onResumeChat={onResumeChat}
-        onCloseLiveSession={onCloseLiveSession}
+        onResumeChat={vi.fn()}
         onOpenPlugin={vi.fn()}
       />,
     );
 
-    const liveTab = screen.getByRole('tab', { name: /Live sessions 1/i });
-    expect(liveTab).toHaveAttribute('aria-selected', 'false');
-    await userEvent.click(liveTab);
+    expect(screen.getByText('Fix the worker')).toBeVisible();
+    expect(screen.getByText(/4 messages/)).toBeVisible();
     expect(screen.getByText('Running')).toBeVisible();
-
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Open live session Fix the worker in /code/other-project' }),
-    );
-    expect(onResumeChat).toHaveBeenCalledWith('sess-live', '/code/other-project');
-
-    await userEvent.click(screen.getByText('•••'));
-    await userEvent.click(screen.getByRole('button', { name: 'Close live session Fix the worker' }));
-    expect(onCloseLiveSession).toHaveBeenCalledWith('sess-live', 'chat-live');
+    expect(screen.queryByText(/Live sessions/)).not.toBeInTheDocument();
   });
 });
