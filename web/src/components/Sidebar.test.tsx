@@ -166,7 +166,12 @@ describe('Sidebar', () => {
       <Sidebar
         boot={boot}
         workspace={workspace}
-        sessions={[liveSession]}
+        sessions={[liveSession, {
+          ...liveSession,
+          sessionId: 'sess-idle',
+          title: 'Idle session',
+          runState: 'idle',
+        }]}
         recentWorkspaces={[]}
         plugins={[]}
         pluginErrors={[]}
@@ -184,8 +189,13 @@ describe('Sidebar', () => {
     );
 
     expect(screen.getByText('Fix the worker')).toBeVisible();
-    expect(screen.getByText(/4 messages/)).toBeVisible();
-    expect(screen.getByText('Running')).toBeVisible();
+    expect(screen.getByText('Idle session')).toBeVisible();
+    expect(screen.getAllByLabelText('Running')).toHaveLength(1);
+    expect(document.querySelectorAll('.session-title .run-dot')).toHaveLength(1);
+    expect(document.querySelector('.session-title .run-dot')).toHaveClass('run-running');
+    expect(screen.queryByText(/messages/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Running')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not running/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Live sessions/)).not.toBeInTheDocument();
   });
 });

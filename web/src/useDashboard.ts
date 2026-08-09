@@ -72,7 +72,15 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   }, []);
 
   const refreshLiveSessions = useCallback(async () => {
-    setLiveSessions(await api.liveSessions());
+    const refreshed = await api.liveSessions();
+    setLiveSessions((current) => {
+      const byId = new Map(refreshed.map((session) => [session.sessionId, session]));
+      const retained = current
+        .filter((session) => byId.has(session.sessionId))
+        .map((session) => byId.get(session.sessionId)!);
+      const retainedIds = new Set(retained.map((session) => session.sessionId));
+      return [...retained, ...refreshed.filter((session) => !retainedIds.has(session.sessionId))];
+    });
   }, []);
 
   // Dashboard-wide SSE invalidations keep sessions opened in other tabs and
@@ -144,6 +152,19 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       const ref = await api.createChat(workspace.workspaceId);
       setChatId(ref.chatId);
       setActiveSessionId(ref.sessionId);
+      setLiveSessions((current) => [
+        ...current.filter((session) => session.sessionId !== ref.sessionId),
+        {
+          sessionId: ref.sessionId,
+          title: 'New chat',
+          workingDir: workspace.path,
+          createdAt: new Date().toISOString(),
+          messages: 0,
+          live: true,
+          chatId: ref.chatId,
+          runState: 'idle',
+        },
+      ]);
       setDrawerOpen(false);
       route.openSession(ref.sessionId, workspace.path);
       await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
@@ -171,19 +192,36 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       void refreshLiveSessions().catch(() => undefined);
     });
 
-  const closeLiveSession = (sessionId: string, liveChatId: string) =>
+  const closeLiveSession = (sessionId: string, liveChatId: string) => {
+    const closingIndex = liveSessions.findIndex((session) => session.sessionId === sessionId);
+    const remaining = liveSessions.filter((session) => session.sessionId !== sessionId);
+    const adjacentSession = closingIndex < 0
+      ? undefined
+      : remaining[Math.min(closingIndex, remaining.length - 1)];
+
     void guard(async () => {
       if (!liveChatId) return;
       await api.dispose(liveChatId);
       if (activeSessionId === sessionId) {
-        clearChat();
-        route.leaveSession();
+        if (adjacentSession) {
+          let nextWorkspace = workspace;
+          if (!nextWorkspace || nextWorkspace.path !== adjacentSession.workingDir) {
+            nextWorkspace = await applyWorkspace(adjacentSession.workingDir, true);
+          }
+          const ref = await api.resumeChat(nextWorkspace.workspaceId, adjacentSession.sessionId);
+          route.openSession(ref.sessionId, nextWorkspace.path);
+          await activateChat(ref.chatId, ref.sessionId, nextWorkspace);
+        } else {
+          clearChat();
+          route.leaveSession();
+        }
       }
       await Promise.all([
         refreshLiveSessions(),
         workspace ? refreshSessions(workspace) : Promise.resolve(),
       ]);
     });
+  };
 
   // The URL is the source of truth for browser navigation and hard refreshes.
   // The workspace path in the query is stable across server restarts, unlike a
@@ -282,6 +320,39 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       if (chatId) await action(chatId);
     });
 
+  const reorderLiveSessions = (draggedSessionId: string, targetSessionId: string) => {
+    setLiveSessions((current) => {
+      const from = current.findIndex((session) => session.sessionId === draggedSessionId);
+      const to = current.findIndex((session) => session.sessionId === targetSessionId);
+      if (from < 0 || to < 0 || from === to) return current;
+      const reordered = [...current];
+      const [dragged] = reordered.splice(from, 1);
+      if (!dragged) return current;
+      reordered.splice(to, 0, dragged);
+      return reordered;
+    });
+  };
+
+  const tabSessions = (() => {
+    if (!activeSessionId || !chatId || !workspace) return liveSessions;
+    if (liveSessions.some((session) => session.sessionId === activeSessionId)) return liveSessions;
+
+    const stored = sessions.find((session) => session.sessionId === activeSessionId);
+    return [
+      ...liveSessions,
+      {
+        sessionId: activeSessionId,
+        title: stored?.title || 'New chat',
+        workingDir: workspace.path,
+        createdAt: stored?.createdAt || '',
+        messages: stored?.messages ?? 0,
+        live: true,
+        chatId,
+        runState: state.run.state,
+      },
+    ];
+  })();
+
   return {
     boot,
     bootError,
@@ -289,7 +360,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     workspacePath,
     setWorkspacePath,
     sessions,
-    liveSessions,
+    liveSessions: tabSessions,
     recentWorkspaces,
     chatId,
     activeSessionId,
@@ -310,6 +381,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     newChat,
     resumeChat,
     closeLiveSession,
+    reorderLiveSessions,
     send,
     addAttachments,
     removeAttachment,

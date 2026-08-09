@@ -125,7 +125,7 @@ export function Sidebar({
   };
 
   const projectPicker = projectPickerOpen ? (
-    <div className="project-picker" ref={pickerRef}>
+    <div className="project-picker" ref={pickerRef} role="dialog" aria-label="Choose a project">
       {projectWorkspaces.length > 0 ? (
         <ul className="project-picker-list" role="menu" aria-label="Projects">
           {projectWorkspaces.map((path) => {
@@ -276,28 +276,18 @@ export function Sidebar({
                 >
                   <h3 id={`session-day-${index}`}>{group.label}</h3>
                   <ul>
-                    {group.sessions.map((session) => {
-                      const runStatus = session.runState === 'running'
-                        ? 'Running'
-                        : session.runState === 'stopping'
-                          ? 'Stopping'
-                          : 'Not running';
-                      return (
+                    {group.sessions.map((session) => (
                       <li key={session.sessionId}>
                         <button type="button" onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
-                          <span className="session-title">{clip(session.title || 'Untitled', 80)}</span>
-                          <span className="session-meta">
-                            {session.messages} message{session.messages === 1 ? '' : 's'}
-                            {' · '}
-                            <span className={`run-state run-${session.runState ?? 'idle'}`}>
-                              <span className="run-dot" aria-hidden="true" />
-                              {runStatus}
-                            </span>
+                          <span className="session-title">
+                            <span>{clip(session.title || 'Untitled', 80)}</span>
+                            {session.runState === 'running' ? (
+                              <span className="run-dot run-running" aria-label="Running" />
+                            ) : null}
                           </span>
                         </button>
                       </li>
-                      );
-                    })}
+                    ))}
                   </ul>
                 </section>
               ))}

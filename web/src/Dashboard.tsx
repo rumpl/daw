@@ -145,7 +145,7 @@ export function Dashboard() {
           drawerRef={drawerRef}
           onWorkspacePathChange={dashboard.setWorkspacePath}
           onOpenWorkspace={dashboard.openWorkspace}
-          onNewChat={dashboard.newChat}
+          onNewChat={() => dashboard.newChat()}
           onResumeChat={dashboard.resumeChat}
           onOpenPlugin={openPlugin}
         />
@@ -160,15 +160,16 @@ export function Dashboard() {
         onDrop={onChatDrop}
       >
         {draggingFiles ? <div className="chat-drop-hint">Drop files to attach</div> : null}
-        {!routePluginId ? (
-          <SessionTabs
-            sessions={dashboard.liveSessions}
-            activeSessionId={dashboard.activeSessionId}
-            busy={dashboard.busyAction}
-            onOpen={dashboard.resumeChat}
-            onClose={dashboard.closeLiveSession}
-          />
-        ) : null}
+        <SessionTabs
+          sessions={dashboard.liveSessions}
+          activeSessionId={dashboard.activeSessionId}
+          busy={dashboard.busyAction}
+          canCreateChat={Boolean(dashboard.workspace)}
+          onNewChat={() => dashboard.newChat()}
+          onOpen={dashboard.resumeChat}
+          onClose={dashboard.closeLiveSession}
+          onReorder={dashboard.reorderLiveSessions}
+        />
         {routePluginId ? (
           <PluginPage
             boot={dashboard.boot}
@@ -225,14 +226,18 @@ export function Dashboard() {
                 <h2>Pick a working directory</h2>
                 <p>Open a folder in the sidebar and start a chat.</p>
               </>
-            ) : !dashboard.chatId ? (
+            ) : dashboard.state.items.length === 0 ? (
               <NewChatPrompt
                 workspaceLabel={dashboard.workspace.label}
                 workspacePath={dashboard.workspace.path}
                 message={newChatMessage}
                 busy={dashboard.busyAction}
                 onMessageChange={setNewChatMessage}
-                onSubmit={dashboard.newChat}
+                onSubmit={(message) => {
+                  setNewChatMessage('');
+                  if (dashboard.chatId) dashboard.send(message, 'normal');
+                  else dashboard.newChat(message);
+                }}
               />
             ) : (
               <>
@@ -246,7 +251,7 @@ export function Dashboard() {
           }
         />
 
-        {dashboard.chatId ? (
+        {dashboard.chatId && dashboard.state.items.length > 0 ? (
           <Composer
             draft={dashboard.draft}
             onDraftChange={dashboard.setDraft}

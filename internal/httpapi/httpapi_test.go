@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -164,10 +165,17 @@ func TestMessageAttachmentRoundTrip(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("send attachment: %d", resp.StatusCode)
 	}
-	time.Sleep(20 * time.Millisecond)
-	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	if len(snap.Items) == 0 || snap.Items[0].Message == nil || len(snap.Items[0].Message.Attachments) != 1 {
-		t.Fatalf("attachment missing from snapshot: %+v", snap.Items)
+	deadline := time.Now().Add(time.Second)
+	var snap protocol.Snapshot
+	for {
+		snap = decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
+		if len(snap.Items) > 0 && snap.Items[0].Message != nil && len(snap.Items[0].Message.Attachments) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("attachment missing from snapshot: %+v", snap.Items)
+		}
+		runtime.Gosched()
 	}
 	if snap.Items[0].Message.Attachments[0].Name != "notes.txt" {
 		t.Fatalf("wrong attachment metadata: %+v", snap.Items[0].Message.Attachments)

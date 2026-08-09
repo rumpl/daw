@@ -56,6 +56,20 @@ async function openControls(page: Page) {
 
 const composer = (page: Page) => page.getByRole('textbox', { name: 'Message' });
 
+const newChatButton = (page: Page) => page.locator('#sidebar .new-chat-button');
+
+async function createChat(page: Page) {
+  await newChatButton(page).click();
+  await connected(page);
+}
+
+async function startChat(page: Page, message: string) {
+  await createChat(page);
+  await page.getByRole('textbox', { name: 'What would you like to work on?' }).fill(message);
+  await page.getByRole('button', { name: 'Start chat' }).click();
+  await expect(composer(page)).toBeVisible();
+}
+
 const connected = (page: Page) => expect(page.getByRole('status')).toHaveAccessibleName('Connected');
 
 test.describe('dashboard', () => {
@@ -78,10 +92,9 @@ test.describe('dashboard', () => {
     await openWorkspaceAndAgent(page);
 
     // No agent was chosen; New chat is immediately available.
-    const newChat = page.getByRole('button', { name: 'New chat', exact: true });
+    const newChat = newChatButton(page);
     await expect(newChat).toBeEnabled();
-    await newChat.click();
-    await connected(page);
+    await createChat(page);
 
     // Model and thinking budget are still selectable.
     await openControls(page);
@@ -94,8 +107,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await connected(page);
+    await createChat(page);
     await openControls(page);
 
     // The trigger names the current model rather than listing everything.
@@ -126,8 +138,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await connected(page);
+    await createChat(page);
     await openControls(page);
 
     const trigger = page.getByRole('button', { name: /^Model:/ });
@@ -142,11 +153,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await connected(page);
-
-    await page.getByLabel('Message').fill('list the files');
-    await page.getByRole('button', { name: 'Send' }).click();
+    await startChat(page, 'list the files');
 
     await expect(page.getByLabel('tool shell')).toBeVisible();
     await expect(page.getByRole('alertdialog')).toBeHidden();
@@ -157,11 +164,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await connected(page);
-
-    await page.getByLabel('Message').fill('/confirm list the files');
-    await page.getByRole('button', { name: 'Send' }).click();
+    await startChat(page, '/confirm list the files');
 
     // Streaming assistant text appears.
     await expect(page.getByLabel('assistant message')).toBeVisible();
@@ -184,10 +187,8 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
+    await startChat(page, '/notool take your time');
 
-    await page.getByLabel('Message').fill('/notool take your time');
-    await page.getByRole('button', { name: 'Send' }).click();
     const stop = page.getByRole('button', { name: /Stop|Stopping/ });
     await expect(stop).toBeVisible();
     await stop.click();
@@ -198,9 +199,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await page.getByLabel('Message').fill('/notool remember this');
-    await page.getByRole('button', { name: 'Send' }).click();
+    await startChat(page, '/notool remember this');
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 20_000 });
 
     // Reload, reopen and resume from the session list.
@@ -235,9 +234,7 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await page.getByLabel('Message').fill('/notool hello there');
-    await page.getByRole('button', { name: 'Send' }).click();
+    await startChat(page, '/notool hello there');
     // Wait for the turn to actually finish before counting, otherwise the
     // count races the stream rather than testing reconnect.
     await expect(page.getByLabel('assistant message')).toBeVisible();
@@ -271,7 +268,7 @@ test.describe('dashboard', () => {
     await page.reload();
     await openDrawerIfMobile(page);
     await expect(page.locator('.project-switcher')).toContainText(workspace);
-    await expect(page.getByRole('button', { name: 'New chat', exact: true })).toBeEnabled();
+    await expect(newChatButton(page)).toBeEnabled();
   });
 
   test('server projects are available without this browser local storage', async ({ page }) => {
@@ -320,9 +317,7 @@ test.describe('dashboard', () => {
     test.skip((viewport?.width ?? 1280) <= 820, 'hover is a pointer affordance');
     await page.goto('/');
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await composer(page).fill('/notool hello');
-    await page.getByRole('button', { name: 'Send' }).click();
+    await startChat(page, '/notool hello');
     // Wait for the turn to settle: Send is briefly still on screen right after
     // the click, before the run status turns it into Stop.
     await expect(page.getByLabel('assistant message')).toBeVisible();
@@ -380,11 +375,9 @@ test.describe('dashboard', () => {
     await page.goto('/');
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
-    await page.getByLabel('Message').focus();
-    await expect(page.getByLabel('Message')).toBeFocused();
-    await page.keyboard.type('typed with the keyboard');
-    await expect(page.getByLabel('Message')).toHaveValue('typed with the keyboard');
+    await startChat(page, 'typed with the keyboard');
+    await composer(page).focus();
+    await expect(composer(page)).toBeFocused();
   });
 });
 
@@ -399,7 +392,7 @@ test.describe('mobile', () => {
     await expect(menu).toHaveAttribute('aria-expanded', 'true');
 
     await openWorkspaceAndAgent(page);
-    await page.getByRole('button', { name: 'New chat', exact: true }).click();
+    await startChat(page, '/notool from my phone');
     // The drawer closes when a chat opens.
     await expect(menu).toHaveAttribute('aria-expanded', 'false');
 
@@ -407,8 +400,6 @@ test.describe('mobile', () => {
     await page.keyboard.press('Escape');
     await expect(menu).toHaveAttribute('aria-expanded', 'false');
 
-    await page.getByLabel('Message').fill('/notool from my phone');
-    await page.getByRole('button', { name: 'Send' }).click();
     await expect(page.getByLabel('assistant message')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 20_000 });
   });

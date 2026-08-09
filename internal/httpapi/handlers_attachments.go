@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"mime"
@@ -23,7 +24,9 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxAttachmentBytes+(1<<20))
-	if err := r.ParseMultipartForm(maxAttachmentBytes); err != nil {
+	// The request body is already capped by MaxBytesReader above; ParseMultipartForm
+	// cannot consume an unbounded payload here.
+	if err := r.ParseMultipartForm(maxAttachmentBytes); err != nil { //nolint:gosec // bounded by MaxBytesReader
 		s.fail(w, http.StatusRequestEntityTooLarge, "attachment_too_large", "the attachment exceeds 10 MB")
 		return
 	}
@@ -96,7 +99,7 @@ func attachmentMime(name string, data []byte) string {
 	case "image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf":
 		return detected
 	}
-	if !utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0 {
+	if !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0 {
 		return ""
 	}
 	if extType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name))); strings.HasPrefix(extType, "text/") {

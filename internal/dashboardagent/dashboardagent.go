@@ -17,8 +17,6 @@ import (
 	"github.com/docker/docker-agent/pkg/model/provider/providers"
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/teamloader"
-	"github.com/docker/docker-agent/pkg/tools/builtin/backgroundjobs"
-	"github.com/docker/docker-agent/pkg/tools/builtin/fetch"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tools/builtin/shell"
 )
@@ -75,8 +73,6 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 		agent.WithToolSets(
 			filesystem.New(runConfig.WorkingDir),
 			shell.New(os.Environ(), runConfig),
-			backgroundjobs.New(os.Environ(), runConfig),
-			fetch.New(),
 		),
 	)
 
