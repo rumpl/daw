@@ -9,9 +9,11 @@ import type {
   ChatRef,
   CommandInfo,
   ElicitationReply,
+  ManagedPlugin,
   ModelOption,
   PluginCatalog,
   PluginConfiguration,
+  PluginManagementCatalog,
   SessionSummary,
   Snapshot,
   SessionMeta,
@@ -69,6 +71,8 @@ export async function request<T>(method: string, path: string, body?: unknown, o
   return parsed as T;
 }
 
+export type PluginManagement = ManagedPlugin;
+
 export const api = {
   request,
   setCsrfToken(token: string): void {
@@ -84,6 +88,15 @@ export const api = {
   },
   plugins(): Promise<PluginCatalog> {
     return request<PluginCatalog>('GET', '/api/plugins');
+  },
+  pluginManagement(): Promise<PluginManagementCatalog> {
+    return request<PluginManagementCatalog>('GET', '/api/plugin-management');
+  },
+  managePlugin(pluginId: string, action: 'start' | 'stop' | 'enable' | 'disable'): Promise<PluginManagement> {
+    return request<PluginManagement>('POST', `/api/plugins/${encodeURIComponent(pluginId)}/${action}`);
+  },
+  deletePlugin(pluginId: string): Promise<void> {
+    return request<void>('DELETE', `/api/plugins/${encodeURIComponent(pluginId)}`);
   },
   pluginConfiguration(pluginId: string): Promise<PluginConfiguration> {
     return request<PluginConfiguration>('GET', `/api/plugins/${encodeURIComponent(pluginId)}/config`);

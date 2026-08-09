@@ -41,6 +41,9 @@ func TestCatalogAndAssetFingerprint(t *testing.T) {
 	if plugin.EntryURL == "" || plugin.Fingerprint == "" || len(plugin.Pages) != 1 {
 		t.Fatalf("incomplete plugin: %#v", plugin)
 	}
+	if plugin.Features == nil || !plugin.Features.Frontend || plugin.Features.Backend || plugin.Features.Styles || plugin.Features.Configuration {
+		t.Fatalf("unexpected plugin features: %#v", plugin.Features)
+	}
 	path, _, err := Asset(base, "hello", plugin.Fingerprint, "index.js")
 	if err != nil || filepath.Base(path) != "index.js" {
 		t.Fatalf("resolve asset: %q %v", path, err)

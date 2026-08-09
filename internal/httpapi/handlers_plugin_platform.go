@@ -16,7 +16,7 @@ import (
 )
 
 func (s *Server) validPlugin(pluginID string) bool {
-	for _, plugin := range plugins.Catalog(s.pluginDir).Plugins {
+	for _, plugin := range s.pluginCatalog().Plugins {
 		if plugin.ID == pluginID {
 			return true
 		}
@@ -25,7 +25,7 @@ func (s *Server) validPlugin(pluginID string) bool {
 }
 
 func (s *Server) validPluginBackend(pluginID string) bool {
-	for _, plugin := range plugins.Catalog(s.pluginDir).Plugins {
+	for _, plugin := range s.pluginCatalog().Plugins {
 		if plugin.ID == pluginID && plugin.BackendURL != "" {
 			return true
 		}

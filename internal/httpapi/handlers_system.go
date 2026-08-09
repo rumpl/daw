@@ -51,7 +51,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlugins(w http.ResponseWriter, _ *http.Request) {
-	catalog := plugins.Catalog(s.pluginDir)
+	catalog := s.pluginCatalog()
 	s.log.Info("listing plugins", "plugins", len(catalog.Plugins), "errors", len(catalog.Errors))
 	s.json(w, http.StatusOK, catalog)
 }

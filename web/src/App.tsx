@@ -6,6 +6,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/sessions/:sessionId" element={<Dashboard />} />
+      <Route path="/settings/plugins" element={<Dashboard />} />
       <Route path="/plugins/:pluginId/*" element={<Dashboard />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

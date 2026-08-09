@@ -404,6 +404,37 @@ select {
   min-height: 34px; padding: 4px var(--gutter); border-top: 1px solid var(--rule); justify-content: flex-end;
 }
 .plugin-slot-sidebar-footer { margin-top: 8px; }
+.sidebar-settings-button { margin-top: 8px; width: 100%; text-align: left; }
+.sidebar-settings-button[aria-current='page'] { background: var(--bg); color: var(--accent); font-weight: 600; }
+.plugin-settings { flex: 1; min-height: 0; overflow: auto; padding: 28px max(var(--gutter), calc((100% - 900px) / 2)); }
+.plugin-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); }
+.plugin-settings-heading h2 { margin: 0; font-size: 20px; }
+.plugin-settings-heading p { margin: 3px 0 0; color: var(--fg-dim); }
+.plugin-settings-heading code, .plugin-management-status code { font: 11px/1.4 var(--mono); }
+.plugin-management-errors { padding: 14px 0; color: var(--warn); border-bottom: 1px solid var(--rule); }
+.plugin-management-errors h3 { margin: 0 0 5px; font-size: 13px; }
+.plugin-management-errors ul { margin: 0; padding-left: 20px; }
+.plugin-management-list { list-style: none; margin: 0; padding: 0; }
+.plugin-management-list > li { display: flex; justify-content: space-between; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--rule); }
+.plugin-management-info { min-width: 0; }
+.plugin-management-title { display: flex; align-items: baseline; gap: 8px; }
+.plugin-management-title h3 { margin: 0; font-size: 15px; }
+.plugin-management-title span { color: var(--fg-faint); font: 10.5px/1 var(--mono); }
+.plugin-management-info > p { margin: 3px 0 8px; color: var(--fg-dim); }
+.plugin-management-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--fg-faint); font-size: 11.5px; }
+.plugin-management-status .status-ok { color: var(--ok); }
+.plugin-feature-summary { margin-top: 12px; color: var(--fg-dim); font-size: 11.5px; }
+.plugin-feature-summary > strong { display: block; margin-bottom: 5px; color: var(--fg-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+.plugin-feature-summary > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.plugin-feature-summary > div span { padding: 2px 7px; border: 1px solid var(--rule); background: var(--bg-alt); }
+.plugin-feature-summary p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.plugin-feature-summary b { color: var(--fg); font-weight: 600; }
+.plugin-management-actions { display: flex; align-items: flex-start; gap: 6px; flex: none; }
+.plugin-settings > .banner { margin: 0; padding-left: 0; padding-right: 0; }
+@media (max-width: 700px) {
+  .plugin-management-list > li { flex-direction: column; gap: 12px; }
+  .plugin-management-actions { flex-wrap: wrap; }
+}
 .plugin-slot-session-tab-badge { margin-left: 4px; overflow: hidden; }
 .plugin-session-badge {
   flex: none; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

@@ -270,6 +270,20 @@ export interface PluginConfiguration {
   values: Record<string, unknown> | null;
 }
 
+export interface PluginMCPServer {
+  id: string;
+  transport: string;
+}
+
+export interface PluginFeatures {
+  frontend: boolean;
+  styles: boolean;
+  backend: boolean;
+  configuration: boolean;
+  webhooks: Array<string> | null;
+  mcpServers: Array<PluginMCPServer> | null;
+}
+
 export interface Plugin {
   apiVersion: number;
   id: string;
@@ -283,7 +297,14 @@ export interface Plugin {
   eventsUrl?: string;
   configUrl?: string;
   configuration?: unknown;
+  features?: PluginFeatures;
   pages: Array<PluginPage> | null;
+}
+
+export interface ManagedPlugin {
+  plugin: Plugin;
+  enabled: boolean;
+  running: boolean;
 }
 
 export interface PluginError {
@@ -293,6 +314,11 @@ export interface PluginError {
 
 export interface PluginCatalog {
   plugins: Array<Plugin> | null;
+  errors: Array<PluginError> | null;
+}
+
+export interface PluginManagementCatalog {
+  plugins: Array<ManagedPlugin> | null;
   errors: Array<PluginError> | null;
 }
 

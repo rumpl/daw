@@ -31,7 +31,17 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
   - Initializes the API client CSRF token and returns paths, defaults, notices,
     workspace hints, and model availability.
 - `GET /api/plugins` → `200 PluginCatalog`
-  - Lists all valid global plugins plus validation diagnostics.
+  - Lists plugins that are currently running plus validation diagnostics.
+- `GET /api/plugin-management` → `200 PluginManagementCatalog`
+  - Lists every installed valid plugin, including stopped and disabled plugins.
+- `POST /api/plugins/{pluginId}/start` → `200 ManagedPlugin`
+- `POST /api/plugins/{pluginId}/stop` → `200 ManagedPlugin`
+- `POST /api/plugins/{pluginId}/enable` → `200 ManagedPlugin`
+- `POST /api/plugins/{pluginId}/disable` → `200 ManagedPlugin`
+  - Start and stop change the current process state. Disable persists across
+    dashboard restarts and also stops the plugin; enable does not start it.
+- `DELETE /api/plugins/{pluginId}` → `200 Accepted`
+  - Stops the plugin and permanently removes its directory from disk.
 - `GET|POST|PUT|PATCH|DELETE /api/plugins/{pluginId}/backend[/{path...}]`
   - Proxies to the plugin's optional Node backend with the prefix removed.
   - Browser mutations use the normal CSRF rules through `context.api`.
@@ -385,15 +395,22 @@ shapes are:
 
 ```ts
 interface PluginPage { id:string; path:string; label:string; sidebar:boolean }
+interface PluginMCPServer {id:string; transport:string}
+interface PluginFeatures {
+  frontend:boolean; styles:boolean; backend:boolean; configuration:boolean;
+  webhooks:string[]|null; mcpServers:PluginMCPServer[]|null;
+}
 interface Plugin {
   apiVersion:number; id:string; name:string; description:string; version:string;
   fingerprint:string; entryUrl:string; styleUrl?:string; backendUrl?:string;
   eventsUrl?:string; configUrl?:string; configuration?:unknown;
-  pages:PluginPage[]|null;
+  features?:PluginFeatures; pages:PluginPage[]|null;
 }
 interface PluginEvent {type:string;seq:number;data?:unknown}
 interface PluginConfiguration {values:Record<string,unknown>|null}
 interface PluginError { pluginId?:string; message:string }
+interface ManagedPlugin { plugin:Plugin; enabled:boolean; running:boolean }
+interface PluginManagementCatalog { plugins:ManagedPlugin[]|null; errors:PluginError[]|null }
 interface PluginCatalog { plugins:Plugin[]|null; errors:PluginError[]|null }
 ```
 

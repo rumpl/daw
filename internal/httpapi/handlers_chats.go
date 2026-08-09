@@ -119,7 +119,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		PersistImmediately: persistImmediately,
 		Model:              preference.Model,
 		ThinkingLevel:      preference.ThinkingLevel,
-		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID),
+		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID, s.pluginManagement.running),
 	})
 	if err != nil {
 		switch {

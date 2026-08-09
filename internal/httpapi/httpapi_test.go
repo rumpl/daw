@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -254,6 +255,62 @@ func TestGlobalPluginCatalogAndAssets(t *testing.T) {
 	}
 	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/javascript") {
 		t.Fatalf("plugin module content type: %q", got)
+	}
+}
+
+func TestPluginManagementLifecycleAndDelete(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.pluginDir, "managed")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"apiVersion":1,"id":"managed","name":"Managed","entry":"index.js"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.js"), []byte(`export function activate() {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	management := decodeJSON[protocol.PluginManagementCatalog](t, h.do(http.MethodGet, "/api/plugin-management", nil))
+	if len(management.Plugins) != 1 || !management.Plugins[0].Enabled || !management.Plugins[0].Running {
+		t.Fatalf("unexpected initial management state: %#v", management)
+	}
+
+	stopped := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/stop", nil))
+	if stopped.Running || !stopped.Enabled {
+		t.Fatalf("unexpected stopped state: %#v", stopped)
+	}
+	catalog := decodeJSON[protocol.PluginCatalog](t, h.do(http.MethodGet, "/api/plugins", nil))
+	if len(catalog.Plugins) != 0 {
+		t.Fatalf("stopped plugin remained active: %#v", catalog.Plugins)
+	}
+
+	disabled := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/disable", nil))
+	if disabled.Enabled || disabled.Running {
+		t.Fatalf("unexpected disabled state: %#v", disabled)
+	}
+	start := h.do(http.MethodPost, "/api/plugins/managed/start", nil)
+	defer start.Body.Close()
+	if start.StatusCode != http.StatusConflict {
+		t.Fatalf("starting disabled plugin: %d", start.StatusCode)
+	}
+
+	enabled := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/enable", nil))
+	if !enabled.Enabled || enabled.Running {
+		t.Fatalf("enabling should not start plugin: %#v", enabled)
+	}
+	running := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/start", nil))
+	if !running.Enabled || !running.Running {
+		t.Fatalf("unexpected running state: %#v", running)
+	}
+
+	deleted := h.do(http.MethodDelete, "/api/plugins/managed", nil)
+	defer deleted.Body.Close()
+	if deleted.StatusCode != http.StatusOK {
+		t.Fatalf("delete plugin: %d", deleted.StatusCode)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("plugin directory still exists: %v", err)
 	}
 }
 

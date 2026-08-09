@@ -465,22 +465,52 @@ type PluginPage struct {
 	Sidebar bool   `json:"sidebar"`
 }
 
+// PluginMCPServer describes one MCP tool provider declared by a plugin.
+type PluginMCPServer struct {
+	ID        string `json:"id"`
+	Transport string `json:"transport"`
+}
+
+// PluginFeatures summarizes which host capabilities a plugin declares.
+type PluginFeatures struct {
+	Frontend      bool              `json:"frontend"`
+	Styles        bool              `json:"styles"`
+	Backend       bool              `json:"backend"`
+	Configuration bool              `json:"configuration"`
+	Webhooks      []string          `json:"webhooks"`
+	MCPServers    []PluginMCPServer `json:"mcpServers"`
+}
+
 // Plugin describes one valid global plugin. EntryURL and StyleURL are
 // fingerprinted, same-origin assets that can be loaded directly by the browser.
 type Plugin struct {
-	APIVersion    int          `json:"apiVersion"`
-	ID            string       `json:"id"`
-	Name          string       `json:"name"`
-	Description   string       `json:"description"`
-	Version       string       `json:"version"`
-	Fingerprint   string       `json:"fingerprint"`
-	EntryURL      string       `json:"entryUrl,omitempty"`
-	StyleURL      string       `json:"styleUrl,omitempty"`
-	BackendURL    string       `json:"backendUrl,omitempty"`
-	EventsURL     string       `json:"eventsUrl,omitempty"`
-	ConfigURL     string       `json:"configUrl,omitempty"`
-	Configuration any          `json:"configuration,omitempty"`
-	Pages         []PluginPage `json:"pages"`
+	APIVersion    int             `json:"apiVersion"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Version       string          `json:"version"`
+	Fingerprint   string          `json:"fingerprint"`
+	EntryURL      string          `json:"entryUrl,omitempty"`
+	StyleURL      string          `json:"styleUrl,omitempty"`
+	BackendURL    string          `json:"backendUrl,omitempty"`
+	EventsURL     string          `json:"eventsUrl,omitempty"`
+	ConfigURL     string          `json:"configUrl,omitempty"`
+	Configuration any             `json:"configuration,omitempty"`
+	Features      *PluginFeatures `json:"features,omitempty"`
+	Pages         []PluginPage    `json:"pages"`
+}
+
+// ManagedPlugin is the operator-visible state for an installed plugin.
+type ManagedPlugin struct {
+	Plugin  Plugin `json:"plugin"`
+	Enabled bool   `json:"enabled"`
+	Running bool   `json:"running"`
+}
+
+// PluginManagementCatalog includes stopped and disabled plugins.
+type PluginManagementCatalog struct {
+	Plugins []ManagedPlugin `json:"plugins"`
+	Errors  []PluginError   `json:"errors"`
 }
 
 // PluginError is a bounded discovery diagnostic for one invalid plugin.

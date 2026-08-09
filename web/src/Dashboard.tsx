@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChatPane } from './components/ChatPane';
 import { PluginPage } from './components/PluginPage';
+import { PluginSettingsPage } from './components/PluginSettingsPage';
 import { PluginCommandPalette, PluginNotifications } from './components/PluginSurfaces';
 import { PluginRuntime } from './PluginRuntime';
 import { Sidebar } from './components/Sidebar';
@@ -57,6 +58,7 @@ export function Dashboard() {
   const routePluginId = params.pluginId ?? null;
   const routePluginPath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '');
   const location = useLocation();
+  const pluginSettingsActive = location.pathname === '/settings/plugins';
   const navigate = useNavigate();
   const routeWorkspacePath = useMemo(
     () => new URLSearchParams(location.search).get('workspace'),
@@ -253,6 +255,11 @@ export function Dashboard() {
 
     return (
       <section className="main-pane" key={PRIMARY_PANE_ID}>
+        {pluginSettingsActive ? (
+          <PluginSettingsPage boot={dashboard.boot!} revision={dashboardEvents.pluginsRevision}
+            menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
+            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} />
+        ) : <>
         <SessionTabs
           sessions={mainSessions} activeSessionId={routePluginId ? null : dashboard.activeSessionId}
           plugins={openPluginTabs} activePluginId={routePluginId} busy={dashboard.busyAction}
@@ -268,6 +275,7 @@ export function Dashboard() {
             onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} />
         ) : <ChatPane dashboard={dashboard} menuButton={menuButton} />}
         {pluginLoadError ? <p className="banner banner-error" role="alert">{clip(pluginLoadError, 300)}</p> : null}
+        </>}
       </section>
     );
   };
@@ -288,6 +296,8 @@ export function Dashboard() {
           busy={dashboard.busyAction} drawerRef={drawerRef}
           onWorkspacePathChange={dashboard.setWorkspacePath} onOpenWorkspace={dashboard.openWorkspace}
           onNewChat={() => dashboard.newChat()} onResumeChat={dashboard.resumeChat} onOpenPlugin={openPlugin}
+          pluginSettingsActive={pluginSettingsActive}
+          onOpenPluginSettings={() => { dashboard.setDrawerOpen(false); navigate('/settings/plugins'); }}
         />
       </aside>
 

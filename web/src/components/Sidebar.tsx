@@ -20,6 +20,8 @@ interface SidebarProps {
   onNewChat: () => void;
   onResumeChat: (sessionId: string, workspacePath?: string) => void;
   onOpenPlugin: (pluginId: string, path: string) => void;
+  onOpenPluginSettings?: () => void;
+  pluginSettingsActive?: boolean;
 }
 
 function projectLabel(path: string) {
@@ -71,6 +73,8 @@ export function Sidebar({
   onNewChat,
   onResumeChat,
   onOpenPlugin,
+  onOpenPluginSettings,
+  pluginSettingsActive,
 }: SidebarProps) {
   const contributionContext = { workspace, chatId: null, session: null };
   const [sessionFilter, setSessionFilter] = useState('');
@@ -298,6 +302,8 @@ export function Sidebar({
       </section>
 
       <PluginSlotView slot="sidebar.footer" context={contributionContext} />
+      <button type="button" className="sidebar-settings-button" aria-current={pluginSettingsActive ? 'page' : undefined}
+        onClick={() => onOpenPluginSettings?.()}>Settings</button>
       <p className="sidebar-version">docker-agent {clip(boot.agentVersion, 40)}</p>
     </div>
   );

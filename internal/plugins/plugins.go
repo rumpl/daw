@@ -254,10 +254,29 @@ func load(base, directory string) (protocol.Plugin, error) {
 		return protocol.Plugin{}, errors.New("style file is missing or is not a regular file")
 	}
 	prefix := "/api/plugins/" + m.ID + "/assets/" + fingerprint + "/"
+	features := protocol.PluginFeatures{
+		Frontend: m.Entry != "", Styles: m.Style != "", Backend: m.Backend != nil,
+		Configuration: m.Config != nil, Webhooks: []string{}, MCPServers: []protocol.PluginMCPServer{},
+	}
+	if m.Backend != nil {
+		for _, webhook := range m.Backend.Webhooks {
+			features.Webhooks = append(features.Webhooks, webhook.ID)
+		}
+		for _, server := range m.Backend.MCP {
+			transport := "stdio"
+			if server.URL != "" {
+				transport = server.Transport
+				if transport == "" {
+					transport = "remote"
+				}
+			}
+			features.MCPServers = append(features.MCPServers, protocol.PluginMCPServer{ID: server.ID, Transport: transport})
+		}
+	}
 	plugin := protocol.Plugin{
 		APIVersion: m.APIVersion, ID: m.ID, Name: m.Name,
 		Description: m.Description, Version: m.Version, Fingerprint: fingerprint,
-		Pages: m.Pages, Configuration: m.Config,
+		Pages: m.Pages, Configuration: m.Config, Features: &features,
 	}
 	if m.Entry != "" {
 		plugin.EntryURL = prefix + escapeAssetPath(m.Entry)
@@ -488,9 +507,12 @@ func backendRevision(root string) (string, error) {
 }
 
 // MCPServers resolves every manifest-declared MCP server for a workspace.
-func MCPServers(dir, workingDir, chatID string) []adapter.MCPServer {
+func MCPServers(dir, workingDir, chatID string, active ...func(string) bool) []adapter.MCPServer {
 	var out []adapter.MCPServer
 	for _, plugin := range Catalog(dir).Plugins {
+		if len(active) > 0 && !active[0](plugin.ID) {
+			continue
+		}
 		root := filepath.Join(dir, plugin.ID)
 		data, err := os.ReadFile(filepath.Join(root, manifestName))
 		if err != nil {

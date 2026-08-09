@@ -30,6 +30,7 @@ type pluginBackendManager struct {
 	apiOrigin     string
 	csrf          string
 	internalToken string
+	active        func(string) bool
 	log           *slog.Logger
 	processes     map[string]*pluginBackendProcess
 	stop          chan struct{}
@@ -43,8 +44,8 @@ type pluginBackendProcess struct {
 	done     chan struct{}
 }
 
-func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, log *slog.Logger) *pluginBackendManager {
-	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), log: log, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
+func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, active func(string) bool, log *slog.Logger) *pluginBackendManager {
+	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), active: active, log: log, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
 	go manager.run()
 	return manager
 }
@@ -73,7 +74,7 @@ func (m *pluginBackendManager) activateAll() {
 	}
 	active := map[string]bool{}
 	for _, plugin := range plugins.Catalog(m.dir).Plugins {
-		if plugin.BackendURL == "" {
+		if plugin.BackendURL == "" || (m.active != nil && !m.active(plugin.ID)) {
 			continue
 		}
 		active[plugin.ID] = true
@@ -99,7 +100,23 @@ func (m *pluginBackendManager) activateAll() {
 	}
 }
 
+func (m *pluginBackendManager) stopPlugin(pluginID, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	process := m.processes[pluginID]
+	if process == nil {
+		return
+	}
+	m.log.Info("stopping plugin backend", "plugin", pluginID, "reason", reason)
+	_ = process.cmd.Process.Kill()
+	<-process.done
+	delete(m.processes, pluginID)
+}
+
 func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, pluginID string) error {
+	if m.active != nil && !m.active(pluginID) {
+		return os.ErrNotExist
+	}
 	m.mu.Lock()
 	if m.apiOrigin == "" {
 		m.apiOrigin = "http://" + r.Host
@@ -123,6 +140,9 @@ func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, plu
 }
 
 func (m *pluginBackendManager) proxyWebhook(w http.ResponseWriter, r *http.Request, pluginID, webhookID string) error {
+	if m.active != nil && !m.active(pluginID) {
+		return os.ErrNotExist
+	}
 	backend, err := plugins.ResolveBackend(m.dir, pluginID)
 	if err != nil {
 		return os.ErrNotExist

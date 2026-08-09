@@ -80,6 +80,7 @@ type Server struct {
 	backends           *pluginBackendManager
 	pluginEvents       *pluginEventHub
 	pluginConfig       *pluginConfigStore
+	pluginManagement   *pluginManagement
 }
 
 // New builds the server and registers every route.
@@ -115,8 +116,9 @@ func New(opts Options) *Server {
 	s.executionLocations = executionlocations.New()
 	s.chats = newChatRegistry()
 	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
+	s.pluginManagement = newPluginManagement(strings.TrimSpace(opts.PluginDataDir))
 	s.plugins = startPluginWatcher(s.pluginDir, s.events, log)
-	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, log)
+	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, s.pluginManagement.running, log)
 	s.routes()
 	return s
 }
@@ -130,6 +132,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
+	m.HandleFunc("GET /api/plugin-management", s.handlePluginManagement)
+	m.HandleFunc("POST /api/plugins/{pluginId}/start", s.handlePluginLifecycle)
+	m.HandleFunc("POST /api/plugins/{pluginId}/stop", s.handlePluginLifecycle)
+	m.HandleFunc("POST /api/plugins/{pluginId}/enable", s.handlePluginLifecycle)
+	m.HandleFunc("POST /api/plugins/{pluginId}/disable", s.handlePluginLifecycle)
+	m.HandleFunc("DELETE /api/plugins/{pluginId}", s.handleDeletePlugin)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
 	m.HandleFunc("POST /api/plugins/{pluginId}/execution-locations", s.handleRegisterExecutionLocation)
 	m.HandleFunc("GET /api/plugins/{pluginId}/events", s.handlePluginEvents)
