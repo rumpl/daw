@@ -79,15 +79,7 @@ func (p *pluginWatcher) run(dir string, events *dashboardEvents, log *slog.Logge
 	var timer *time.Timer
 	var timerC <-chan time.Time
 	schedule := func() {
-		if timer == nil {
-			timer = time.NewTimer(pluginWatchDebounce)
-		} else if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-			timer.Reset(pluginWatchDebounce)
-		}
+		timer = resetPluginWatchTimer(timer, pluginWatchDebounce)
 		timerC = timer.C
 	}
 	defer func() {
@@ -129,6 +121,20 @@ func (p *pluginWatcher) run(dir string, events *dashboardEvents, log *slog.Logge
 			}
 		}
 	}
+}
+
+func resetPluginWatchTimer(timer *time.Timer, delay time.Duration) *time.Timer {
+	if timer == nil {
+		return time.NewTimer(delay)
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(delay)
+	return timer
 }
 
 func (p *pluginWatcher) close() {
