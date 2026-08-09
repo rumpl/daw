@@ -183,7 +183,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 // budgets and permissions behave identically.
 func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	runConfig := a.runtimeConfig(req.WorkingDir)
-	loadRes, err := dashboardagent.Build(ctx, runConfig)
+	loadRes, err := dashboardagent.Build(ctx, runConfig, req.MCPServers...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", adapter.ErrInvalidAgent, err)
 	}

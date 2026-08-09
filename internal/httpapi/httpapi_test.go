@@ -45,6 +45,7 @@ func newHarness(t *testing.T) *harness {
 		Adapter: f, Guard: guard, AppVersion: "test",
 		TailscaleHosts: []string{"dash.tailnet.ts.net"},
 		PluginDir:      pluginDir,
+		PluginDataDir:  t.TempDir(),
 	})
 	ts := httptest.NewServer(s)
 	t.Cleanup(func() {
@@ -264,17 +265,28 @@ func TestPluginBackendProxyAndDashboardSDK(t *testing.T) {
 	}
 	manifest := `{
 		"apiVersion":1,"id":"full-stack","name":"Full stack","entry":"index.js",
-		"backend":{"entry":"backend/index.mjs"},
+		"backend":{"entry":"backend/index.mjs","webhooks":[{"id":"github"}]},
 		"pages":[{"id":"main","path":"","label":"Full stack","sidebar":true}]
 	}`
 	files := map[string]string{
 		"plugin.json": manifest,
 		"index.js":    `export function mount() {}`,
 		"backend/index.mjs": `
-			import { dashboard, pluginId } from "@daw/plugin-backend";
+			import { dashboard, pluginId, storage, configuration, events, webhooks } from "@daw/plugin-backend";
+			export async function activate() {
+				await storage.set("started", { ok: true });
+				await configuration.set({ enabled: true });
+				await events.publish("ready", { pluginId });
+			}
+			export async function webhook(request, context) {
+				return Response.json({ webhookId: context.webhookId });
+			}
 			export default async function(request) {
 				const health = await dashboard.request("GET", "/api/health");
-				return Response.json({ path: new URL(request.url).pathname, pluginId, status: health.status });
+				const started = await storage.get("started");
+				const config = await configuration.get();
+				const credentials = await webhooks.credentials("github");
+				return Response.json({ path: new URL(request.url).pathname, pluginId, status: health.status, started, config, credentials });
 			}`,
 	}
 	for name, content := range files {
@@ -290,15 +302,51 @@ func TestPluginBackendProxyAndDashboardSDK(t *testing.T) {
 		t.Fatalf("plugin backend: %d %s", resp.StatusCode, body)
 	}
 	var result struct {
-		Path     string `json:"path"`
-		PluginID string `json:"pluginId"`
-		Status   string `json:"status"`
+		Path        string            `json:"path"`
+		PluginID    string            `json:"pluginId"`
+		Status      string            `json:"status"`
+		Started     map[string]bool   `json:"started"`
+		Config      map[string]bool   `json:"config"`
+		Credentials map[string]string `json:"credentials"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Path != "/check" || result.PluginID != "full-stack" || result.Status != "ok" {
+	if result.Path != "/check" || result.PluginID != "full-stack" || result.Status != "ok" ||
+		!result.Started["ok"] || !result.Config["enabled"] || result.Credentials["token"] == "" {
 		t.Fatalf("unexpected plugin backend response: %+v", result)
+	}
+
+	webhook := h.do(http.MethodPost, result.Credentials["url"], map[string]bool{"ok": true}, func(request *http.Request) {
+		request.Header.Del(httpapi.CSRFHeader)
+		request.Header.Del("Sec-Fetch-Site")
+		request.Header.Set("Authorization", "Bearer "+result.Credentials["token"])
+	})
+	if webhook.StatusCode != http.StatusOK {
+		t.Fatalf("plugin webhook: %d", webhook.StatusCode)
+	}
+	var webhookResult map[string]string
+	if err := json.NewDecoder(webhook.Body).Decode(&webhookResult); err != nil || webhookResult["webhookId"] != "github" {
+		t.Fatalf("unexpected webhook result: %+v %v", webhookResult, err)
+	}
+}
+
+func TestCreateChatIncludesPluginMCPServers(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.pluginDir, "mcp-tools")
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"apiVersion":1,"id":"mcp-tools","name":"MCP tools","backend":{"entry":"backend/index.js","mcp":[{"id":"remote","url":"https://example.test/mcp","transport":"streamable-http"}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "backend", "index.js"), []byte(`export async function activate() {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = h.newChat()
+	if len(h.fake.LastOpenRequest.MCPServers) != 1 || h.fake.LastOpenRequest.MCPServers[0].Name != "mcp-tools-remote" {
+		t.Fatalf("plugin MCP servers were not passed to the adapter: %#v", h.fake.LastOpenRequest.MCPServers)
 	}
 }
 

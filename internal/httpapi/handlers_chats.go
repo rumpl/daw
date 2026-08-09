@@ -8,6 +8,7 @@ import (
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/chatprefs"
+	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -78,6 +79,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		ChatID: chatID, WorkingDir: ws.Path, ResumeSessionID: resumeID,
 		Model:         preference.Model,
 		ThinkingLevel: preference.ThinkingLevel,
+		MCPServers:    plugins.MCPServers(s.pluginDir, ws.Path, chatID),
 	})
 	if err != nil {
 		switch {

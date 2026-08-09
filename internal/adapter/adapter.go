@@ -37,6 +37,17 @@ type Info struct {
 	Notices         []protocol.Notice
 }
 
+type MCPServer struct {
+	Name       string
+	Command    string
+	Args       []string
+	Env        []string
+	WorkingDir string
+	URL        string
+	Transport  string
+	Headers    map[string]string
+}
+
 // OpenRequest opens (or resumes) exactly one live chat.
 type OpenRequest struct {
 	ChatID          string
@@ -48,6 +59,7 @@ type OpenRequest struct {
 	// place. A stale or unsupported preference is ignored by the adapter.
 	Model         string
 	ThinkingLevel string
+	MCPServers    []MCPServer
 }
 
 // Adapter is the process-wide docker-agent facade. It owns the single shared

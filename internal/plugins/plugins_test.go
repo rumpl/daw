@@ -3,6 +3,7 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -57,6 +58,39 @@ func TestCatalogAndAssetFingerprint(t *testing.T) {
 	}
 }
 
+func TestCatalogAllowsPluginWithoutPages(t *testing.T) {
+	base := t.TempDir()
+	writePlugin(t, base, "background", `{
+		"apiVersion":1,"id":"background","name":"Background","entry":"index.js"
+	}`, `export function activate() {}`)
+
+	catalog := Catalog(base)
+	if len(catalog.Errors) != 0 || len(catalog.Plugins) != 1 || len(catalog.Plugins[0].Pages) != 0 {
+		t.Fatalf("unexpected page-less plugin catalog: %#v", catalog)
+	}
+}
+
+func TestCatalogAllowsBackendOnlyPlugin(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "backend-only")
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{
+		"apiVersion":1,"id":"backend-only","name":"Backend only",
+		"backend":{"entry":"backend/index.js"}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "backend", "index.js"), []byte(`export async function activate() {}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog(base)
+	if len(catalog.Errors) != 0 || len(catalog.Plugins) != 1 || catalog.Plugins[0].EntryURL != "" || catalog.Plugins[0].BackendURL == "" {
+		t.Fatalf("unexpected backend-only catalog: %#v", catalog)
+	}
+}
+
 func TestCatalogWithBackend(t *testing.T) {
 	base := t.TempDir()
 	writePlugin(t, base, "full-stack", `{
@@ -85,6 +119,30 @@ func TestCatalogWithBackend(t *testing.T) {
 	}
 	if _, _, err := Asset(base, "full-stack", catalog.Plugins[0].Fingerprint, "backend/index.js"); err == nil {
 		t.Fatal("backend files must not be browser assets")
+	}
+}
+
+func TestMCPServersAreNamespacedAndWorkspaceResolved(t *testing.T) {
+	base := t.TempDir()
+	writePlugin(t, base, "mcp-plugin", `{
+		"apiVersion":1,"id":"mcp-plugin","name":"MCP","entry":"index.js",
+		"backend":{"entry":"backend/index.js","mcp":[
+			{"id":"local","command":"node","args":["server.js"],"workingDir":"tools","env":{"TOKEN":"x"}},
+			{"id":"remote","url":"https://example.test/mcp","transport":"streamable-http"}
+		]}
+	}`, `export function activate() {}`)
+	if err := os.MkdirAll(filepath.Join(base, "mcp-plugin", "backend"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "mcp-plugin", "backend", "index.js"), []byte(`export default () => new Response()`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	servers := MCPServers(base, workspace, "chat_test")
+	if len(servers) != 2 || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != filepath.Join(workspace, "tools") ||
+		len(servers[0].Env) != 2 || !slices.Contains(servers[0].Env, "TOKEN=x") ||
+		!slices.Contains(servers[0].Env, "DAW_CHAT_ID=chat_test") || servers[1].Name != "mcp-plugin-remote" {
+		t.Fatalf("unexpected MCP servers: %#v", servers)
 	}
 }
 

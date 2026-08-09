@@ -42,6 +42,8 @@ var exported = []any{
 	WorkspaceHint{},
 	Bootstrap{},
 	PluginPage{},
+	PluginEvent{},
+	PluginConfiguration{},
 	Plugin{},
 	PluginError{},
 	PluginCatalog{},

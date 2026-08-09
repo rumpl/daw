@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,6 +51,8 @@ type Options struct {
 	// PluginAPIOrigin is the loopback origin plugin backends use to call the
 	// dashboard API. It must not be a public or forwarded origin.
 	PluginAPIOrigin string
+	// PluginDataDir stores host-managed plugin configuration and backend data.
+	PluginDataDir string
 }
 
 // Server is the HTTP transport and application composition root. Stateful
@@ -66,12 +69,14 @@ type Server struct {
 	started        time.Time
 	pluginDir      string
 
-	workspaces  *workspaces.Service
-	chats       *chatRegistry
-	preferences *chatprefs.Service
-	events      *dashboardEvents
-	plugins     *pluginWatcher
-	backends    *pluginBackendManager
+	workspaces   *workspaces.Service
+	chats        *chatRegistry
+	preferences  *chatprefs.Service
+	events       *dashboardEvents
+	plugins      *pluginWatcher
+	backends     *pluginBackendManager
+	pluginEvents *pluginEventHub
+	pluginConfig *pluginConfigStore
 }
 
 // New builds the server and registers every route.
@@ -99,14 +104,16 @@ func New(opts Options) *Server {
 		log:            log,
 		started:        time.Now(),
 		events:         newDashboardEvents(),
+		pluginEvents:   newPluginEventHub(),
 	}
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
 	s.chats = newChatRegistry()
+	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
 	s.plugins = startPluginWatcher(s.pluginDir, s.events, func(err error) {
 		s.log.Warn("plugin watcher", "error", err)
 	})
-	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, func(id string, err error) {
+	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, func(id string, err error) {
 		s.log.Warn("plugin backend", "plugin", id, "error", err)
 	})
 	s.routes()
@@ -123,6 +130,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugins/{pluginId}/assets/{fingerprint}/{path...}", s.handlePluginAsset)
+	m.HandleFunc("GET /api/plugins/{pluginId}/events", s.handlePluginEvents)
+	m.HandleFunc("GET /api/plugins/{pluginId}/config", s.handleGetPluginConfig)
+	m.HandleFunc("PUT /api/plugins/{pluginId}/config", s.handlePutPluginConfig)
+	m.HandleFunc("POST /api/plugins/{pluginId}/publish", s.handlePluginPublish)
+	m.HandleFunc("/api/plugins/{pluginId}/webhooks/{webhookId}", s.handlePluginWebhook)
+	m.HandleFunc("GET /api/plugins/{pluginId}/webhooks/{webhookId}/token", s.handlePluginWebhookToken)
 	m.HandleFunc("/api/plugins/{pluginId}/backend", s.handlePluginBackend)
 	m.HandleFunc("/api/plugins/{pluginId}/backend/{path...}", s.handlePluginBackend)
 	m.HandleFunc("POST /api/workspaces/open", s.handleOpenWorkspace)
@@ -168,7 +181,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusForbidden, "forbidden_user", "this tailnet user is not allowed")
 		return
 	}
-	if isMutation(r.Method) {
+	if isMutation(r.Method) && !s.isAuthenticatedWebhook(r) {
 		if !s.checkOrigin(r) {
 			s.fail(w, http.StatusForbidden, "forbidden_origin", "cross-site request rejected")
 			return
@@ -254,6 +267,7 @@ func (s *Server) disposeChat(ctx context.Context, chatID, reason string) {
 func (s *Server) Shutdown(ctx context.Context) {
 	s.plugins.close()
 	s.backends.close(ctx)
+	s.pluginEvents.close()
 	s.events.close()
 	for _, chat := range s.chats.all() {
 		s.disposeChat(ctx, chat.id, "server shutting down")

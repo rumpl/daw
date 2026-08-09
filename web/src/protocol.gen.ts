@@ -260,6 +260,16 @@ export interface PluginPage {
   sidebar: boolean;
 }
 
+export interface PluginEvent {
+  type: string;
+  seq: number;
+  data?: unknown;
+}
+
+export interface PluginConfiguration {
+  values: Record<string, unknown> | null;
+}
+
 export interface Plugin {
   apiVersion: number;
   id: string;
@@ -267,9 +277,12 @@ export interface Plugin {
   description: string;
   version: string;
   fingerprint: string;
-  entryUrl: string;
+  entryUrl?: string;
   styleUrl?: string;
   backendUrl?: string;
+  eventsUrl?: string;
+  configUrl?: string;
+  configuration?: unknown;
   pages: Array<PluginPage> | null;
 }
 

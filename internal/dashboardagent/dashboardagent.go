@@ -18,9 +18,12 @@ import (
 	"github.com/docker/docker-agent/pkg/skills"
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/teamloader"
+	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tools/builtin/shell"
 	skillstool "github.com/docker/docker-agent/pkg/tools/builtin/skills"
+	mcptools "github.com/docker/docker-agent/pkg/tools/mcp"
+	"github.com/rumpl/daw/internal/adapter"
 )
 
 // Name is the source name exposed by the dashboard API.
@@ -32,7 +35,7 @@ var instruction string
 // Build creates a fresh SDK team and model/toolset graph for one working
 // directory. The returned LoadResult is the same shape the runtime consumes
 // for file-based agents, but every agent option is assembled in Go.
-func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.LoadResult, error) {
+func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...adapter.MCPServer) (*teamloader.LoadResult, error) {
 	if runConfig == nil {
 		runConfig = &dacfg.RuntimeConfig{}
 	}
@@ -54,6 +57,24 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 		return nil, fmt.Errorf("create dashboard coding model: %w", err)
 	}
 
+	toolsets := []tools.ToolSet{
+		filesystem.New(runConfig.WorkingDir),
+		shell.New(os.Environ(), runConfig),
+		skillstool.New(skills.Load(ctx, []string{"local"}), runConfig.WorkingDir),
+	}
+	for _, server := range mcpServers {
+		switch {
+		case server.Command != "":
+			cwd := server.WorkingDir
+			if cwd == "" {
+				cwd = runConfig.WorkingDir
+			}
+			toolsets = append(toolsets, mcptools.NewToolsetCommand(server.Name, server.Command, server.Args, append(os.Environ(), server.Env...), cwd))
+		case server.URL != "":
+			toolsets = append(toolsets, mcptools.NewRemoteToolset(server.Name, server.URL, server.Transport, server.Headers, nil))
+		}
+	}
+
 	root := agent.New(
 		"root",
 		instruction,
@@ -68,11 +89,7 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.Loa
 		agent.WithAddDate(true),
 		agent.WithAddEnvironmentInfo(true),
 		agent.WithTools(DeveloperDocumentationTool()),
-		agent.WithToolSets(
-			filesystem.New(runConfig.WorkingDir),
-			shell.New(os.Environ(), runConfig),
-			skillstool.New(skills.Load(ctx, []string{"local"}), runConfig.WorkingDir),
-		),
+		agent.WithToolSets(toolsets...),
 	)
 
 	models := map[string]latest.ModelConfig{"auto": modelConfig}

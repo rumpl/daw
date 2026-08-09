@@ -411,6 +411,18 @@ type DashboardEvent struct {
 	Revision     string             `json:"revision,omitempty"`
 }
 
+// PluginEvent is one namespaced event published by a plugin backend.
+type PluginEvent struct {
+	Type string `json:"type"`
+	Seq  uint64 `json:"seq"`
+	Data any    `json:"data,omitempty"`
+}
+
+// PluginConfiguration is the persisted public configuration for one plugin.
+type PluginConfiguration struct {
+	Values map[string]any `json:"values"`
+}
+
 // ---------------------------------------------------------------------------
 // REST payloads
 // ---------------------------------------------------------------------------
@@ -456,16 +468,19 @@ type PluginPage struct {
 // Plugin describes one valid global plugin. EntryURL and StyleURL are
 // fingerprinted, same-origin assets that can be loaded directly by the browser.
 type Plugin struct {
-	APIVersion  int          `json:"apiVersion"`
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Version     string       `json:"version"`
-	Fingerprint string       `json:"fingerprint"`
-	EntryURL    string       `json:"entryUrl"`
-	StyleURL    string       `json:"styleUrl,omitempty"`
-	BackendURL  string       `json:"backendUrl,omitempty"`
-	Pages       []PluginPage `json:"pages"`
+	APIVersion    int          `json:"apiVersion"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	Description   string       `json:"description"`
+	Version       string       `json:"version"`
+	Fingerprint   string       `json:"fingerprint"`
+	EntryURL      string       `json:"entryUrl,omitempty"`
+	StyleURL      string       `json:"styleUrl,omitempty"`
+	BackendURL    string       `json:"backendUrl,omitempty"`
+	EventsURL     string       `json:"eventsUrl,omitempty"`
+	ConfigURL     string       `json:"configUrl,omitempty"`
+	Configuration any          `json:"configuration,omitempty"`
+	Pages         []PluginPage `json:"pages"`
 }
 
 // PluginError is a bounded discovery diagnostic for one invalid plugin.

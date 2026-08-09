@@ -135,6 +135,18 @@ func run() error {
 		return fmt.Errorf("exporting plugin directory: %w", err)
 	}
 
+	pluginDataDir := strings.TrimSpace(os.Getenv("DAWUI_PLUGIN_DATA_DIR"))
+	if pluginDataDir == "" {
+		pluginDataDir = filepath.Join(filepath.Dir(pluginDir), "plugin-data")
+	}
+	pluginDataDir, err = absoluteUserPath(pluginDataDir)
+	if err != nil {
+		return fmt.Errorf("invalid DAWUI_PLUGIN_DATA_DIR: %w", err)
+	}
+	if err := os.MkdirAll(pluginDataDir, 0o700); err != nil {
+		return fmt.Errorf("creating plugin data directory: %w", err)
+	}
+
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,
 		Guard:                guard,
@@ -147,6 +159,7 @@ func run() error {
 		ChatPreferencesFile:  chatPreferencesFile,
 		PluginDir:            pluginDir,
 		PluginAPIOrigin:      "http://" + net.JoinHostPort(bindHost, strconv.Itoa(port)),
+		PluginDataDir:        pluginDataDir,
 	})
 
 	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))

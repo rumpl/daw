@@ -23,12 +23,16 @@ import (
 const backendStartupTimeout = 10 * time.Second
 
 type pluginBackendManager struct {
-	mu        sync.Mutex
-	dir       string
-	apiOrigin string
-	csrf      string
-	logError  func(string, error)
-	processes map[string]*pluginBackendProcess
+	mu            sync.Mutex
+	dir           string
+	dataDir       string
+	apiOrigin     string
+	csrf          string
+	internalToken string
+	logError      func(string, error)
+	processes     map[string]*pluginBackendProcess
+	stop          chan struct{}
+	done          chan struct{}
 }
 
 type pluginBackendProcess struct {
@@ -38,8 +42,55 @@ type pluginBackendProcess struct {
 	done     chan struct{}
 }
 
-func newPluginBackendManager(dir, apiOrigin, csrf string, logError func(string, error)) *pluginBackendManager {
-	return &pluginBackendManager{dir: dir, apiOrigin: apiOrigin, csrf: csrf, logError: logError, processes: map[string]*pluginBackendProcess{}}
+func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, logError func(string, error)) *pluginBackendManager {
+	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), logError: logError, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
+	go manager.run()
+	return manager
+}
+
+func (m *pluginBackendManager) run() {
+	defer close(m.done)
+	m.activateAll()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+			m.activateAll()
+		}
+	}
+}
+
+func (m *pluginBackendManager) activateAll() {
+	if m.apiOrigin == "" {
+		return
+	}
+	active := map[string]bool{}
+	for _, plugin := range plugins.Catalog(m.dir).Plugins {
+		if plugin.BackendURL == "" {
+			continue
+		}
+		active[plugin.ID] = true
+		backend, err := plugins.ResolveBackend(m.dir, plugin.ID)
+		if err != nil {
+			continue
+		}
+		if _, err := m.process(backend); err != nil {
+			m.logError(plugin.ID, err)
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for pluginID, process := range m.processes {
+		if active[pluginID] {
+			continue
+		}
+		_ = process.cmd.Process.Kill()
+		<-process.done
+		delete(m.processes, pluginID)
+	}
 }
 
 func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, pluginID string) error {
@@ -63,6 +114,20 @@ func (m *pluginBackendManager) proxy(w http.ResponseWriter, r *http.Request, plu
 	if r.URL.Path == "" {
 		r.URL.Path = "/"
 	}
+	process.proxy.ServeHTTP(w, r)
+	return nil
+}
+
+func (m *pluginBackendManager) proxyWebhook(w http.ResponseWriter, r *http.Request, pluginID, webhookID string) error {
+	backend, err := plugins.ResolveBackend(m.dir, pluginID)
+	if err != nil {
+		return os.ErrNotExist
+	}
+	process, err := m.process(backend)
+	if err != nil {
+		return err
+	}
+	r.URL.Path = "/__daw/webhooks/" + webhookID
 	process.proxy.ServeHTTP(w, r)
 	return nil
 }
@@ -104,7 +169,9 @@ func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendPro
 	cmd.Env = append(os.Environ(),
 		"DAW_API_ORIGIN="+m.apiOrigin,
 		"DAW_API_TOKEN="+m.csrf,
+		"DAW_PLUGIN_TOKEN="+m.internalToken,
 		"DAW_PLUGIN_ID="+backend.PluginID,
+		"DAW_PLUGIN_DATA_DIR="+filepath.Join(m.dataDir, backend.PluginID),
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -168,6 +235,8 @@ func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendPro
 }
 
 func (m *pluginBackendManager) close(ctx context.Context) {
+	close(m.stop)
+	<-m.done
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, process := range m.processes {
@@ -206,6 +275,8 @@ func installBackendSDK(dir string) error {
 }
 
 const backendSDKSource = `
+import fs from "node:fs/promises";
+import path from "node:path";
 export class DashboardApiError extends Error {
   constructor(message, code, status, details) { super(message); this.name = "DashboardApiError"; this.code = code; this.status = status; this.details = details; }
 }
@@ -214,18 +285,20 @@ export function createDashboardClient() {
   const token = process.env.DAW_API_TOKEN;
   if (!origin || !token) throw new Error("dashboard backend environment is unavailable");
   return {
-    async raw(method, path, body, options = {}) {
-      if (typeof path !== "string" || !path.startsWith("/api/")) throw new TypeError("dashboard API paths must start with /api/");
+    async raw(method, requestPath, body, options = {}) {
+      if (typeof requestPath !== "string" || !requestPath.startsWith("/api/")) throw new TypeError("dashboard API paths must start with /api/");
       const headers = new Headers(options.headers);
       if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) headers.set("X-DAW-CSRF", token);
+      headers.set("X-DAW-Plugin-ID", pluginId);
+      headers.set("X-DAW-Plugin-Token", process.env.DAW_PLUGIN_TOKEN);
       let payload = body;
       if (body !== undefined && !(body instanceof FormData) && typeof body !== "string" && !ArrayBuffer.isView(body)) {
         headers.set("Content-Type", "application/json"); payload = JSON.stringify(body);
       }
-      return fetch(new URL(path, origin), { ...options, method, headers, body: payload, redirect: "error" });
+      return fetch(new URL(requestPath, origin), { ...options, method, headers, body: payload, redirect: "error" });
     },
-    async request(method, path, body, options) {
-      const response = await this.raw(method, path, body, options);
+    async request(method, requestPath, body, options) {
+      const response = await this.raw(method, requestPath, body, options);
       const value = response.status === 204 ? undefined : await response.json();
       if (!response.ok) throw new DashboardApiError(value?.error || "dashboard API request failed", value?.code || "api_error", response.status, value?.details);
       return value;
@@ -234,29 +307,78 @@ export function createDashboardClient() {
 }
 export const dashboard = createDashboardClient();
 export const pluginId = process.env.DAW_PLUGIN_ID;
+const dataDir = process.env.DAW_PLUGIN_DATA_DIR;
+function storagePath(key) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(key)) throw new TypeError("storage keys must be simple names");
+  return path.join(dataDir, "storage", key + ".json");
+}
+export const storage = Object.freeze({
+  async get(key) { try { return JSON.parse(await fs.readFile(storagePath(key), "utf8")); } catch (error) { if (error?.code === "ENOENT") return undefined; throw error; } },
+  async set(key, value) { const file = storagePath(key); await fs.mkdir(path.dirname(file), {recursive:true, mode:0o700}); const data = JSON.stringify(value); if (Buffer.byteLength(data) > 262144) throw new RangeError("storage value exceeds 256 KiB"); await fs.writeFile(file + ".tmp", data, {mode:0o600}); await fs.rename(file + ".tmp", file); },
+  async delete(key) { try { await fs.unlink(storagePath(key)); } catch (error) { if (error?.code !== "ENOENT") throw error; } }
+});
+export const configuration = Object.freeze({
+  async get() { return (await dashboard.request("GET", "/api/plugins/" + pluginId + "/config")).values; },
+  async set(values) { return (await dashboard.request("PUT", "/api/plugins/" + pluginId + "/config", {values})).values; }
+});
+export const webhooks = Object.freeze({
+  async credentials(id) { return dashboard.request("GET", "/api/plugins/" + pluginId + "/webhooks/" + encodeURIComponent(id) + "/token"); }
+});
+export const events = Object.freeze({
+  async publish(type, data) { return dashboard.request("POST", "/api/plugins/" + pluginId + "/publish", {type, data}); },
+  subscribeDashboard(listener, options = {}) {
+    const controller = new AbortController();
+    let last = 0;
+    (async () => {
+      while (!controller.signal.aborted) {
+        try {
+          const suffix = last ? "?lastEventId=" + last : "";
+          const response = await dashboard.raw("GET", "/api/events" + suffix, undefined, {signal:controller.signal});
+          const reader = response.body.pipeThrough(new TextDecoderStream()).getReader(); let buffer = "";
+          while (true) { const {done,value} = await reader.read(); if (done) break; buffer += value; let cut; while ((cut = buffer.indexOf("\n\n")) >= 0) { const frame = buffer.slice(0, cut); buffer = buffer.slice(cut + 2); const line = frame.split("\n").find(v => v.startsWith("data: ")); if (!line) continue; const event = JSON.parse(line.slice(6)); if (event.seq) last = event.seq; if (!options.types || options.types.includes(event.type)) await listener(event); } }
+        } catch (error) { if (controller.signal.aborted) break; await new Promise(resolve => setTimeout(resolve, 1000)); }
+      }
+    })();
+    return () => controller.abort();
+  }
+});
 `
 
 const backendRunnerSource = `
 import http from "node:http";
+import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 const module = await import(pathToFileURL(process.argv[2]));
 const handler = module.default || module.handler;
-if (typeof handler !== "function") throw new Error("backend entry must export default or handler");
+const webhook = module.webhook;
+const activate = module.activate;
+if (handler !== undefined && typeof handler !== "function") throw new Error("backend handler must be a function");
+if (webhook !== undefined && typeof webhook !== "function") throw new Error("backend webhook must be a function");
+let deactivate;
+if (typeof activate === "function") deactivate = await activate({pluginId:process.env.DAW_PLUGIN_ID});
 const server = http.createServer(async (incoming, outgoing) => {
   try {
-    const chunks = []; for await (const chunk of incoming) chunks.push(chunk);
-    const body = ["GET", "HEAD"].includes(incoming.method) ? undefined : Buffer.concat(chunks);
-    const request = new Request("http://plugin.local" + incoming.url, { method: incoming.method, headers: incoming.headers, body, ...(body ? { duplex: "half" } : {}) });
-    const response = await handler(request, { pluginId: process.env.DAW_PLUGIN_ID });
+    const controller = new AbortController();
+    incoming.on("aborted", () => controller.abort());
+    outgoing.on("close", () => { if (!outgoing.writableEnded) controller.abort(); });
+    const requestBody = ["GET", "HEAD"].includes(incoming.method) ? undefined : Readable.toWeb(incoming);
+    const request = new Request("http://plugin.local" + incoming.url, {method:incoming.method, headers:incoming.headers, body:requestBody, signal:controller.signal, ...(requestBody ? {duplex:"half"} : {})});
+    const webhookPrefix = "/__daw/webhooks/";
+    const selected = incoming.url.startsWith(webhookPrefix) ? webhook : handler;
+    if (typeof selected !== "function") { outgoing.writeHead(404, {"content-type":"application/json"}); outgoing.end(JSON.stringify({error:"not found",code:"not_found"})); return; }
+    const response = await selected(request, {pluginId:process.env.DAW_PLUGIN_ID, webhookId:incoming.url.startsWith(webhookPrefix) ? incoming.url.slice(webhookPrefix.length).split("?")[0] : undefined});
     if (!(response instanceof Response)) throw new Error("backend handler must return a Response");
     outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-    outgoing.end(Buffer.from(await response.arrayBuffer()));
+    if (!response.body) { outgoing.end(); return; }
+    Readable.fromWeb(response.body).on("error", error => outgoing.destroy(error)).pipe(outgoing);
   } catch (error) {
+    if (outgoing.headersSent) { outgoing.destroy(error); return; }
     console.error(error?.stack || error);
-    outgoing.writeHead(500, { "content-type": "application/json" });
-    outgoing.end(JSON.stringify({ error: "plugin backend failed", code: "plugin_backend_error" }));
+    outgoing.writeHead(500, {"content-type":"application/json"});
+    outgoing.end(JSON.stringify({error:"plugin backend failed",code:"plugin_backend_error"}));
   }
 });
-server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ port: server.address().port })));
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));
+server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({port:server.address().port})));
+async function shutdown() { try { if (typeof deactivate === "function") await deactivate(); } finally { server.close(() => process.exit(0)); } }
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, shutdown);
 `

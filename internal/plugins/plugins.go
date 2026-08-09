@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -44,11 +45,29 @@ type manifest struct {
 	Entry       string                `json:"entry"`
 	Style       string                `json:"style"`
 	Backend     *backendManifest      `json:"backend"`
+	Config      map[string]any        `json:"configuration"`
 	Pages       []protocol.PluginPage `json:"pages"`
 }
 
 type backendManifest struct {
-	Entry string `json:"entry"`
+	Entry    string            `json:"entry"`
+	Webhooks []webhookManifest `json:"webhooks"`
+	MCP      []mcpManifest     `json:"mcp"`
+}
+
+type mcpManifest struct {
+	ID         string            `json:"id"`
+	Command    string            `json:"command"`
+	Args       []string          `json:"args"`
+	Env        map[string]string `json:"env"`
+	WorkingDir string            `json:"workingDir"`
+	URL        string            `json:"url"`
+	Transport  string            `json:"transport"`
+	Headers    map[string]string `json:"headers"`
+}
+
+type webhookManifest struct {
+	ID string `json:"id"`
 }
 
 type Backend struct {
@@ -75,10 +94,7 @@ func Catalog(dir string) protocol.PluginCatalog {
 		}
 		plugin, err := load(dir, entry.Name())
 		if err != nil {
-			out.Errors = append(out.Errors, protocol.PluginError{
-				PluginID: entry.Name(),
-				Message:  err.Error(),
-			})
+			out.Errors = append(out.Errors, protocol.PluginError{PluginID: entry.Name(), Message: err.Error()})
 			continue
 		}
 		out.Plugins = append(out.Plugins, plugin)
@@ -127,8 +143,16 @@ func load(base, directory string) (protocol.Plugin, error) {
 	if len(m.Description) > 300 || len(m.Version) > 40 {
 		return protocol.Plugin{}, errors.New("description or version is too long")
 	}
-	if err := validAssetPath(m.Entry, ".js", ".mjs"); err != nil {
-		return protocol.Plugin{}, fmt.Errorf("entry %w", err)
+	if strings.TrimSpace(m.Entry) == "" && m.Backend == nil {
+		return protocol.Plugin{}, errors.New("entry or backend is required")
+	}
+	if m.Entry == "" && len(m.Pages) > 0 {
+		return protocol.Plugin{}, errors.New("pages require a frontend entry")
+	}
+	if m.Entry != "" {
+		if err := validAssetPath(m.Entry, ".js", ".mjs"); err != nil {
+			return protocol.Plugin{}, fmt.Errorf("entry %w", err)
+		}
 	}
 	if m.Style != "" {
 		if err := validAssetPath(m.Style, ".css"); err != nil {
@@ -142,9 +166,64 @@ func load(base, directory string) (protocol.Plugin, error) {
 		if !regularFile(filepath.Join(root, filepath.FromSlash(m.Backend.Entry))) {
 			return protocol.Plugin{}, errors.New("backend entry file is missing or is not a regular file")
 		}
+		if len(m.Backend.Webhooks) > 20 {
+			return protocol.Plugin{}, errors.New("backend may declare at most 20 webhooks")
+		}
+		seenWebhooks := map[string]bool{}
+		for _, webhook := range m.Backend.Webhooks {
+			if !idPattern.MatchString(webhook.ID) || seenWebhooks[webhook.ID] {
+				return protocol.Plugin{}, errors.New("webhook ids must be unique lowercase kebab-case values")
+			}
+			seenWebhooks[webhook.ID] = true
+		}
+		if len(m.Backend.MCP) > 20 {
+			return protocol.Plugin{}, errors.New("backend may declare at most 20 MCP servers")
+		}
+		seenMCP := map[string]bool{}
+		for _, server := range m.Backend.MCP {
+			if !idPattern.MatchString(server.ID) || seenMCP[server.ID] || (server.Command == "") == (server.URL == "") {
+				return protocol.Plugin{}, errors.New("MCP servers require a unique id and exactly one command or url")
+			}
+			if server.URL != "" {
+				parsed, err := url.Parse(server.URL)
+				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+					return protocol.Plugin{}, errors.New("remote MCP server urls must use http or https")
+				}
+				if server.Transport != "" && server.Transport != "sse" && server.Transport != "streamable" && server.Transport != "streamable-http" {
+					return protocol.Plugin{}, errors.New("remote MCP transport is invalid")
+				}
+			}
+			if server.Command != "" && strings.Contains(server.Command, "/") &&
+				(!fs.ValidPath(server.Command) || strings.HasPrefix(server.Command, ".")) {
+				return protocol.Plugin{}, errors.New("MCP command paths must be relative paths inside the backend")
+			}
+			if len(server.Args) > 100 || len(server.Env) > 100 || len(server.Headers) > 100 {
+				return protocol.Plugin{}, errors.New("MCP args, env, or headers contain too many entries")
+			}
+			for key, value := range server.Env {
+				if key == "" || strings.ContainsAny(key, "=\x00") || len(key) > 128 || len(value) > 4096 {
+					return protocol.Plugin{}, errors.New("MCP environment contains an invalid entry")
+				}
+			}
+			for key, value := range server.Headers {
+				if strings.TrimSpace(key) == "" || strings.ContainsAny(key+value, "\r\n") || len(key) > 128 || len(value) > 4096 {
+					return protocol.Plugin{}, errors.New("MCP headers contain an invalid entry")
+				}
+			}
+			if strings.Contains(server.WorkingDir, "..") || filepath.IsAbs(server.WorkingDir) {
+				return protocol.Plugin{}, errors.New("MCP workingDir must be relative to the workspace")
+			}
+			seenMCP[server.ID] = true
+		}
 	}
-	if len(m.Pages) == 0 || len(m.Pages) > 30 {
-		return protocol.Plugin{}, errors.New("pages must contain between 1 and 30 entries")
+	if m.Config != nil {
+		data, err := json.Marshal(m.Config)
+		if err != nil || len(data) > maxManifest {
+			return protocol.Plugin{}, errors.New("configuration schema is too large or invalid")
+		}
+	}
+	if len(m.Pages) > 30 {
+		return protocol.Plugin{}, errors.New("pages may contain at most 30 entries")
 	}
 	pageIDs, pagePaths := map[string]bool{}, map[string]bool{}
 	for i := range m.Pages {
@@ -168,7 +247,7 @@ func load(base, directory string) (protocol.Plugin, error) {
 	if err != nil {
 		return protocol.Plugin{}, err
 	}
-	if !regularFile(filepath.Join(root, filepath.FromSlash(m.Entry))) {
+	if m.Entry != "" && !regularFile(filepath.Join(root, filepath.FromSlash(m.Entry))) {
 		return protocol.Plugin{}, errors.New("entry file is missing or is not a regular file")
 	}
 	if m.Style != "" && !regularFile(filepath.Join(root, filepath.FromSlash(m.Style))) {
@@ -178,10 +257,15 @@ func load(base, directory string) (protocol.Plugin, error) {
 	plugin := protocol.Plugin{
 		APIVersion: m.APIVersion, ID: m.ID, Name: m.Name,
 		Description: m.Description, Version: m.Version, Fingerprint: fingerprint,
-		EntryURL: prefix + escapeAssetPath(m.Entry), Pages: m.Pages,
+		Pages: m.Pages, Configuration: m.Config,
+	}
+	if m.Entry != "" {
+		plugin.EntryURL = prefix + escapeAssetPath(m.Entry)
 	}
 	if m.Backend != nil {
 		plugin.BackendURL = "/api/plugins/" + m.ID + "/backend"
+		plugin.EventsURL = "/api/plugins/" + m.ID + "/events"
+		plugin.ConfigURL = "/api/plugins/" + m.ID + "/config"
 	}
 	if m.Style != "" {
 		plugin.StyleURL = prefix + escapeAssetPath(m.Style)
@@ -401,6 +485,71 @@ func backendRevision(root string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil))[:16], nil
+}
+
+// MCPServers resolves every manifest-declared MCP server for a workspace.
+func MCPServers(dir, workingDir, chatID string) []adapter.MCPServer {
+	var out []adapter.MCPServer
+	for _, plugin := range Catalog(dir).Plugins {
+		root := filepath.Join(dir, plugin.ID)
+		data, err := os.ReadFile(filepath.Join(root, manifestName))
+		if err != nil {
+			continue
+		}
+		var m manifest
+		if json.Unmarshal(data, &m) != nil || m.Backend == nil {
+			continue
+		}
+		for _, server := range m.Backend.MCP {
+			env := make([]string, 0, len(server.Env)+1)
+			for key, value := range server.Env {
+				env = append(env, key+"="+value)
+			}
+			// A local MCP process is scoped to one live chat, so trusted plugin
+			// tools can identify their caller without relying on model-supplied IDs.
+			if chatID != "" {
+				env = append(env, "DAW_CHAT_ID="+chatID)
+			}
+			sort.Strings(env)
+			cwd := workingDir
+			if server.WorkingDir != "" {
+				cwd = filepath.Join(workingDir, filepath.FromSlash(server.WorkingDir))
+			}
+			command := server.Command
+			args := append([]string(nil), server.Args...)
+			if command != "" && !filepath.IsAbs(command) && strings.Contains(command, "/") {
+				command = filepath.Join(filepath.Dir(filepath.Join(root, filepath.FromSlash(m.Backend.Entry))), filepath.FromSlash(command))
+			}
+			name := plugin.ID + "-" + server.ID
+			out = append(out, adapter.MCPServer{
+				Name: name, Command: command, Args: args, Env: env,
+				WorkingDir: cwd, URL: server.URL, Transport: server.Transport, Headers: server.Headers,
+			})
+		}
+	}
+	return out
+}
+
+// HasWebhook reports whether a valid plugin declares a webhook endpoint.
+func HasWebhook(dir, pluginID, webhookID string) bool {
+	if !idPattern.MatchString(webhookID) {
+		return false
+	}
+	root := filepath.Join(dir, pluginID)
+	data, err := os.ReadFile(filepath.Join(root, manifestName))
+	if err != nil || len(data) > maxManifest {
+		return false
+	}
+	var m manifest
+	if json.Unmarshal(data, &m) != nil || m.ID != pluginID || m.Backend == nil {
+		return false
+	}
+	for _, webhook := range m.Backend.Webhooks {
+		if webhook.ID == webhookID {
+			return true
+		}
+	}
+	return false
 }
 
 // ContentType returns explicit module and stylesheet MIME types; other assets

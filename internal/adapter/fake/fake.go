@@ -29,7 +29,8 @@ type Adapter struct {
 	Now func() time.Time
 	// Delay, when set, slows the scripted turn (used by e2e to exercise the
 	// Stop button). Default 0 keeps unit tests instant.
-	Delay time.Duration
+	Delay           time.Duration
+	LastOpenRequest adapter.OpenRequest
 }
 
 type storedSession struct {
@@ -116,6 +117,7 @@ func (a *Adapter) Seed(id, title, workingDir string, items []protocol.Item) {
 func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.LastOpenRequest = req
 
 	var st *storedSession
 	if req.ResumeSessionID != "" {
