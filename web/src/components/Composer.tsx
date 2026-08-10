@@ -43,6 +43,11 @@ export function Composer({
   useEffect(() => {
     const el = textarea.current;
     if (!el) return;
+    if (!draft) {
+      // Do not let a wrapping placeholder make the empty composer taller.
+      el.style.height = '';
+      return;
+    }
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [draft]);

@@ -891,7 +891,7 @@ select {
   .usage { text-align: center; padding-top: 4px; }
   .controls-scrim { display: block; position: fixed; inset: 0; z-index: 54; background: rgba(10, 12, 15, .5); }
 
-  .composer-actions button { min-height: 40px; }
+  .composer textarea, .attach-btn, .composer-actions button { min-height: 40px; }
 
   .empty { width: 100%; padding: 22px 16px; }
   .new-chat-prompt { width: 100%; }
