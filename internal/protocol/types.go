@@ -545,6 +545,41 @@ type Workspace struct {
 	AgentsIgnore bool     `json:"agentsIgnore"`
 }
 
+// StoredSessionMeta is stable metadata for a persisted session. Unlike
+// SessionMeta it has no process-local chat ID, runtime configuration, or
+// interactive state.
+type StoredSessionMeta struct {
+	SessionID       string `json:"sessionId"`
+	Title           string `json:"title"`
+	WorkspaceID     string `json:"workspaceId"`
+	WorkingDir      string `json:"workingDir"`
+	AgentName       string `json:"agentName"`
+	Model           string `json:"model"`
+	CreatedAt       string `json:"createdAt"`
+	ParentSessionID string `json:"parentSessionId,omitempty"`
+	RootSessionID   string `json:"rootSessionId,omitempty"`
+	OriginKind      string `json:"originKind,omitempty"`
+	OriginPluginID  string `json:"originPluginId,omitempty"`
+}
+
+// StoredSession is the read-only persisted-session resource. It deliberately
+// excludes live run state, queues, confirmations, and SSE sequence numbers.
+type StoredSession struct {
+	Meta  StoredSessionMeta `json:"meta"`
+	Usage Usage             `json:"usage"`
+	Stats Stats             `json:"stats"`
+	Live  bool              `json:"live"`
+}
+
+// StoredSessionItems is a bounded page of the normalized persisted timeline.
+type StoredSessionItems struct {
+	Items      []Item `json:"items"`
+	Offset     int    `json:"offset"`
+	Limit      int    `json:"limit"`
+	Total      int    `json:"total"`
+	NextOffset *int   `json:"nextOffset,omitempty"`
+}
+
 // SessionSummary is one row of the session list.
 type SessionSummary struct {
 	SessionID       string            `json:"sessionId"`
@@ -553,6 +588,7 @@ type SessionSummary struct {
 	Attributes      map[string]string `json:"-"`
 	CreatedAt       string            `json:"createdAt"`
 	Messages        int               `json:"messages"`
+	Cost            float64           `json:"cost,omitempty"`
 	Live            bool              `json:"live"`
 	ChatID          string            `json:"chatId,omitempty"`
 	RunState        *RunState         `json:"runState,omitempty"`
@@ -610,8 +646,8 @@ type Accepted struct {
 	Queued   bool         `json:"queued"`
 }
 
-// ModelOption is one selectable model, sourced from the runtime only. The
-// fields mirror runtime.ModelChoice; costs are USD per 1M tokens.
+// ModelOption is one selectable model from docker-agent's global model
+// resolver. The fields mirror runtime.ModelChoice; costs are USD per 1M tokens.
 type ModelOption struct {
 	Name         string  `json:"name"`
 	Ref          string  `json:"ref"`
@@ -629,10 +665,34 @@ type ModelOption struct {
 	IsCatalog bool `json:"isCatalog"`
 }
 
-// UpdateConfigRequest is PATCH /api/chats/:id/config. Nil fields are unchanged.
+// ToolOption is one tool currently exposed by the agent. Enabled reflects the
+// per-session docker-agent exclusion filter, not permission approval state.
+type ToolOption struct {
+	Name        string `json:"name"`
+	Category    string `json:"category,omitempty"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// UpdateToolRequest changes whether one tool is offered to the model.
+type UpdateToolRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// UpdateConfigRequest changes model preferences. Nil fields are unchanged;
+// an explicit empty string clears that preference.
 type UpdateConfigRequest struct {
 	Model         *string `json:"model,omitempty"`
 	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
+}
+
+// ChatOptions is the process-wide model catalog and the defaults inherited by
+// new chats. Existing sessions retain their own overrides when resumed.
+type ChatOptions struct {
+	Model          string        `json:"model"`
+	ThinkingLevel  string        `json:"thinkingLevel"`
+	ThinkingLevels []string      `json:"thinkingLevels"`
+	Models         []ModelOption `json:"models"`
 }
 
 // ToolConfirmationReply is POST /api/chats/:id/tool-confirmation.

@@ -33,11 +33,10 @@ writeFileSync(join(pluginDir, 'index.js'), pluginEntry('Plugin API'));
 // its SDK-built coding agent, so no agent config is ever chosen here.
 async function openWorkspaceAndAgent(page: Page) {
   await page.locator('.project-switcher').click();
-  const picker = page.getByRole('dialog', { name: 'Choose a project' });
-  const openAnother = picker.getByRole('button', { name: 'Open another directory…' });
-  if (await openAnother.isVisible()) await openAnother.click();
+  await page.getByRole('menuitem', { name: 'Open another directory…' }).click();
+  const picker = page.getByRole('dialog', { name: 'Open a project' });
   await picker.getByLabel('Working directory path').fill(workspace);
-  await picker.getByRole('button', { name: 'Open', exact: true }).click();
+  await picker.getByRole('button', { name: 'Open project', exact: true }).click();
   await expect(picker).toBeHidden();
   await openDrawerIfMobile(page);
   await expect(page.locator('.project-switcher')).toContainText(workspace);
@@ -48,13 +47,8 @@ async function openDrawerIfMobile(page: Page) {
   if (await menu.isVisible()) await menu.click();
 }
 
-/** On mobile the chat controls live in a bottom sheet behind Settings. */
 async function openControls(page: Page) {
-  const controls = page.locator('#chat-controls');
-  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 820) {
-    await page.getByRole('button', { name: 'Settings' }).click();
-  }
-  await expect(controls).toBeVisible();
+  await expect(page.locator('.composer-config')).toBeVisible();
 }
 
 const composer = (page: Page) => page.getByRole('textbox', { name: 'Message' });
@@ -63,14 +57,14 @@ const newChatButton = (page: Page) => page.locator('#sidebar .new-chat-button');
 
 async function createChat(page: Page) {
   await newChatButton(page).click();
-  await expect(page.getByRole('textbox', { name: 'What would you like to work on?' })).toBeVisible();
+  await expect(page).toHaveURL(/\/sessions\//);
+  await expect(composer(page)).toBeVisible();
 }
 
 async function startChat(page: Page, message: string) {
   await createChat(page);
-  await page.getByRole('textbox', { name: 'What would you like to work on?' }).fill(message);
-  await page.getByRole('button', { name: 'Start chat' }).click();
-  await expect(composer(page)).toBeVisible();
+  await composer(page).fill(message);
+  await page.getByRole('button', { name: 'Send' }).click();
 }
 
 test.describe('dashboard', () => {
@@ -92,16 +86,28 @@ test.describe('dashboard', () => {
     await openDrawerIfMobile(page);
     await openWorkspaceAndAgent(page);
 
-    // No agent was chosen; New chat is immediately available.
-    const newChat = newChatButton(page);
-    await expect(newChat).toBeEnabled();
-    await createChat(page);
-
-    // Model and thinking budget are still selectable.
+    // Model and thinking defaults are available without creating a chat.
+    await expect(page).toHaveURL('/');
+    await expect(newChatButton(page)).toBeEnabled();
+    if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 820) {
+      await page.keyboard.press('Escape');
+    }
+    await expect(composer(page)).toBeVisible();
     await openControls(page);
-    await expect(page.getByLabel('Thinking budget')).toBeEnabled();
-    await page.getByLabel('Thinking budget').selectOption('high');
-    await expect(page.getByLabel('Thinking budget')).toHaveValue('high');
+    await expect(page.getByRole('button', { name: /^Model:/ })).toBeEnabled();
+    const thinking = page.getByLabel('Thinking budget');
+    await expect(thinking).toBeEnabled();
+    await thinking.click();
+    await page.getByRole('option', { name: 'high' }).click();
+    await expect(thinking).toContainText('high');
+    await expect(page).toHaveURL('/');
+    await expect(page.locator('.session-tab[data-active="true"]')).toHaveCount(0);
+
+    // The first submission creates the session and clears the shared draft.
+    await composer(page).fill('Start from the empty workspace');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page).toHaveURL(/\/sessions\//);
+    await expect(composer(page)).toHaveValue('');
   });
 
   test('model picker: search, keyboard select, and it applies', async ({ page }) => {
@@ -223,7 +229,7 @@ test.describe('dashboard', () => {
     // Browser history is routing history, not just an in-memory chat switch.
     await page.goBack();
     await expect(page).toHaveURL('/');
-    await expect(page.getByLabel('Message')).toHaveCount(0);
+    await expect(page.getByLabel('Message')).toBeVisible();
     await page.goForward();
     await expect(page.getByLabel('user message').first()).toContainText('remember this');
   });
@@ -279,20 +285,15 @@ test.describe('dashboard', () => {
     await page.reload();
     await openDrawerIfMobile(page);
     await page.locator('.project-switcher').click();
-    const picker = page.getByRole('dialog', { name: 'Choose a project' });
-    const project = picker.getByTitle(workspace);
+    const project = page.getByRole('menuitem').filter({ hasText: workspace });
     await expect(project).toBeVisible();
     await project.click();
-    await expect(picker).toBeHidden();
     await openDrawerIfMobile(page);
     await expect(page.locator('.project-switcher')).toContainText(workspace);
 
     // The selected project remains in the picker and is marked as current.
     await page.locator('.project-switcher').click();
-    await expect(page.getByRole('dialog', { name: 'Choose a project' }).getByTitle(workspace)).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
+    await expect(page.getByRole('menuitem').filter({ hasText: workspace })).toHaveAttribute('aria-current', 'page');
   });
 
   test('a workspace that no longer resolves is dropped without an error', async ({ page }) => {
@@ -320,12 +321,21 @@ test.describe('dashboard', () => {
     await expect(page.getByLabel('assistant message')).toBeVisible();
     await expect(page.getByRole('button', { name: /Stop/ })).toHaveCount(0, { timeout: 20_000 });
     await expect(page.locator('.send-btn')).toBeVisible();
+    await composer(page).fill('hover contrast');
 
     const contrast = (sel: string) => {
       const el = document.querySelector(sel);
       if (!el) return 0;
       const cs = getComputedStyle(el);
-      const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const parse = (color: string) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d');
+        if (!context) return [0, 0, 0];
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
+      };
       const lum = (rgb: number[]) => {
         const [r, g, b] = rgb.map((v) => {
           const n = v / 255;

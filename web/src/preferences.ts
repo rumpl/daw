@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Bootstrap } from './protocol.gen';
-import type { SendMode } from './components/Composer';
+import type { SendMode } from '@/components/chat/Composer';
 
 const LS_PREFS = 'dawui.prefs.v1';
 

@@ -167,6 +167,35 @@ export interface SessionMeta {
   originPluginId?: string;
 }
 
+export interface StoredSessionMeta {
+  sessionId: string;
+  title: string;
+  workspaceId: string;
+  workingDir: string;
+  agentName: string;
+  model: string;
+  createdAt: string;
+  parentSessionId?: string;
+  rootSessionId?: string;
+  originKind?: string;
+  originPluginId?: string;
+}
+
+export interface StoredSession {
+  meta: StoredSessionMeta;
+  usage: Usage;
+  stats: Stats;
+  live: boolean;
+}
+
+export interface StoredSessionItems {
+  items: Array<Item> | null;
+  offset: number;
+  limit: number;
+  total: number;
+  nextOffset?: number;
+}
+
 export interface Snapshot {
   seq: number;
   meta: SessionMeta;
@@ -345,6 +374,7 @@ export interface SessionSummary {
   workingDir: string;
   createdAt: string;
   messages: number;
+  cost?: number;
   live: boolean;
   chatId?: string;
   runState?: RunState;
@@ -408,9 +438,27 @@ export interface ModelOption {
   isCatalog: boolean;
 }
 
+export interface ToolOption {
+  name: string;
+  category?: string;
+  description?: string;
+  enabled: boolean;
+}
+
+export interface UpdateToolRequest {
+  enabled: boolean;
+}
+
 export interface UpdateConfigRequest {
   model?: string;
   thinkingLevel?: string;
+}
+
+export interface ChatOptions {
+  model: string;
+  thinkingLevel: string;
+  thinkingLevels: Array<string> | null;
+  models: Array<ModelOption> | null;
 }
 
 export interface ToolConfirmationReply {

@@ -51,9 +51,34 @@ func (s *Service) Get(sessionID string) Preference {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sessionID == "" {
-		return s.state.Default
+		return clonePreference(s.state.Default)
 	}
-	return s.state.Sessions[sessionID]
+	return clonePreference(s.state.Sessions[sessionID])
+}
+
+// UpdateDefault changes the process-wide choices inherited by new chats.
+// Nil fields are unchanged and an explicit empty string clears a choice.
+func (s *Service) UpdateDefault(model, thinkingLevel *string) (Preference, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current := s.state.Default
+	if model != nil {
+		current.Model = strings.TrimSpace(*model)
+	}
+	if thinkingLevel != nil {
+		current.ThinkingLevel = strings.TrimSpace(*thinkingLevel)
+	}
+	current = sanitizeChatPreference(current)
+	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.state.Default = current
+	if s.file == "" {
+		return current, nil
+	}
+	if err := write(s.file, s.state); err != nil {
+		return Preference{}, err
+	}
+	return current, nil
 }
 
 func (s *Service) Remember(sessionID string, patch Preference) error {
@@ -84,6 +109,26 @@ func (s *Service) Remember(sessionID string, patch Preference) error {
 	return write(s.file, s.state)
 }
 
+func clonePreference(preference Preference) Preference {
+	preference.DisabledTools = append([]string(nil), preference.DisabledTools...)
+	return preference
+}
+
+// RememberTools persists the complete disabled-tool set for one session.
+func (s *Service) RememberTools(sessionID string, disabled []string) error {
+	if s.file == "" || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.state.Sessions[sessionID]
+	current.DisabledTools = sanitizeToolNames(disabled)
+	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.state.Sessions[sessionID] = current
+	pruneChatPreferences(s.state.Sessions)
+	return write(s.file, s.state)
+}
+
 const (
 	preferencesVersion     = 1
 	maxChatPreferencesSize = 1 << 20 // 1 MiB
@@ -94,9 +139,10 @@ const (
 // preserves the controls when that session is resumed; Default makes the most
 // recently selected values the starting point for a brand-new chat.
 type Preference struct {
-	Model         string `json:"model,omitempty"`
-	ThinkingLevel string `json:"thinkingLevel,omitempty"`
-	UpdatedAt     string `json:"updatedAt,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	ThinkingLevel string   `json:"thinkingLevel,omitempty"`
+	DisabledTools []string `json:"disabledTools,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
 }
 
 type preferences struct {
@@ -151,7 +197,23 @@ func sanitizeChatPreference(preference Preference) Preference {
 	if len(preference.ThinkingLevel) > 64 {
 		preference.ThinkingLevel = ""
 	}
+	preference.DisabledTools = sanitizeToolNames(preference.DisabledTools)
 	return preference
+}
+
+func sanitizeToolNames(names []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || len(name) > 256 || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func pruneChatPreferences(sessions map[string]Preference) {

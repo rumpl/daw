@@ -86,6 +86,12 @@ selection or agent-resolution API.
   - Every session currently owned by this server across all workspaces.
 - `GET /api/workspaces/{workspaceId}/sessions` → `200 SessionSummary[]`
   - Stored sessions for one opened workspace, including live status.
+- `GET /api/workspaces/{workspaceId}/sessions/{sessionId}` → `200 StoredSession`
+  - Read-only persisted metadata, usage, and aggregate stats. It never opens a
+    live chat or starts agent resources.
+- `GET /api/workspaces/{workspaceId}/sessions/{sessionId}/items[?offset=N&limit=N]` → `200 StoredSessionItems`
+  - A normalized persisted timeline page. `offset` defaults to 0; `limit`
+    defaults to 200 and is capped at 1000.
 - `POST /api/chats`
   - Body: `{workspaceId: string, executionLocationId?: string}`. A trusted
     plugin backend can issue the opaque location ID to run the session in a
@@ -96,6 +102,12 @@ selection or agent-resolution API.
   - Returns `201 ChatRef` when opening a stored session, or `200 ChatRef` when
     attaching to its already-live runtime. A session can have only one live
     runtime in this server.
+- `GET /api/chat-options` → `200 ChatOptions`
+  - Returns the process-wide model catalog, supported thinking levels, and the
+    defaults inherited by new chats. It does not create a chat or session.
+- `PATCH /api/chat-options` → `200 ChatOptions`
+  - Body: `{model?: string, thinkingLevel?: string}`. Updates global defaults;
+    an explicit empty string clears a preference. No chat is required.
 - `GET /api/chats/{id}` → `200 Snapshot`
   - Complete authoritative chat state for resnapshot/reconciliation.
 - `GET /api/chats/{id}/events[?lastEventId=N]` → SSE stream
@@ -122,6 +134,8 @@ selection or agent-resolution API.
   - Only valid while idle. Returns `200 SessionMeta`.
 - `GET /api/chats/{id}/models` → `200 ModelOption[]`
 - `GET /api/chats/{id}/commands` → `200 CommandInfo[]`
+- `GET /api/chats/{id}/tools` → `200 ToolOption[]`
+- `PATCH /api/chats/{id}/tools/{tool}` with `UpdateToolRequest` → `200 ToolOption` (idle chats only)
 - `POST /api/chats/{id}/tool-confirmation`
   - Body: `{toolCallId, decision, reason}`. Decisions: `approve`,
     `approveAlways`, `reject`. Returns `202 Accepted`.
@@ -173,9 +187,20 @@ interface PermissionsView {
 }
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
-  messages: number; live: boolean; chatId?: string; runState?: RunState;
+  messages: number; cost?: number; live: boolean; chatId?: string; runState?: RunState;
   parentSessionId?: string; rootSessionId?: string; originKind?: string;
   originPluginId?: string;
+}
+interface StoredSessionMeta {
+  sessionId:string; title:string; workspaceId:string; workingDir:string;
+  agentName:string; model:string; createdAt:string; parentSessionId?:string;
+  rootSessionId?:string; originKind?:string; originPluginId?:string;
+}
+interface StoredSession {
+  meta:StoredSessionMeta; usage:Usage; stats:Stats; live:boolean;
+}
+interface StoredSessionItems {
+  items:Item[]|null; offset:number; limit:number; total:number; nextOffset?:number;
 }
 interface ChatRef { chatId: string; sessionId: string }
 interface QueuedMessage { id: string; text: string }
@@ -239,6 +264,10 @@ interface ModelOption {
   name: string; ref: string; provider: string; model: string; family: string;
   contextLimit: number; inputCost: number; outputCost: number;
   isCurrent: boolean; isDefault: boolean; isCustom: boolean; isCatalog: boolean;
+}
+interface ChatOptions {
+  model: string; thinkingLevel: string;
+  thinkingLevels: string[] | null; models: ModelOption[] | null;
 }
 interface CommandInfo { name: string; description: string; kind: string }
 interface Stats {
@@ -430,7 +459,7 @@ calls cleanup, removes contributions and CSS, and unmounts roots made by
 ```ts
 interface ContributionContext {
   workspace: Workspace|null; chatId:string|null; session:SessionMeta|null;
-  sessionId?:string;
+  sessionId?:string; message?:MessageItem;
 }
 interface PluginAction {
   id:string; label:string; description?:string;
@@ -440,7 +469,7 @@ interface PluginAction {
 }
 interface SlotContribution {
   id:string;
-  slot:"composer.actions"|"session-tab.badge"|"sidebar.footer";
+  slot:"assistant-message.actions"|"composer.actions"|"session-tab.badge"|"sidebar.footer";
   order?:number;
   render(context:ContributionContext):ReactNode;
 }
@@ -477,7 +506,10 @@ Managed event subscriptions reconnect with replay positions and are closed on
 deactivation. Plugin commands participate in slash completion; returning text
 supplies the prompt and returning undefined handles the action without sending.
 Matching tool and attachment renderers replace the host fallback under a plugin
-error boundary. The command palette opens with Cmd/Ctrl+K. Notification
+error boundary. The `assistant-message.actions` slot is rendered beside the
+“Download as Markdown” button on each completed assistant message and receives
+that message as `context.message`; other slot contexts omit `message`. The
+command palette opens with Cmd/Ctrl+K. Notification
 `timeoutMs` defaults to 6000; zero keeps it visible. Global plugin CSS remains
 loaded for the activation lifetime.
 
@@ -521,6 +553,12 @@ interface DashboardAPI {
   openWorkspace(path:string): Promise<Workspace>;
   liveSessions(): Promise<SessionSummary[]>;
   sessions(workspaceId:string): Promise<SessionSummary[]>;
+  session(workspaceId:string, sessionId:string,
+    options?:{signal?:AbortSignal}):Promise<StoredSession>;
+  sessionItems(workspaceId:string, sessionId:string,
+    options?:{offset?:number;limit?:number;signal?:AbortSignal}):Promise<StoredSessionItems>;
+  chatOptions(): Promise<ChatOptions>;
+  updateChatOptions(patch:{model?:string;thinkingLevel?:string}):Promise<ChatOptions>;
   createChat(workspaceId:string, executionLocationId?:string): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
@@ -604,12 +642,14 @@ Renders sanitized Mermaid SVG and handles loading/errors.
 ### `components.Conversation`
 
 ```ts
-Conversation({items: Item[], queue?: QueueStatus, empty: ReactNode})
+Conversation({items: Item[], queue?: QueueStatus, empty: ReactNode,
+  contributionContext?: ContributionContext})
 ```
 
 Renders messages, reasoning, tool cards, transfers, notices, summaries, live
 streaming state, optional queued steer/follow-up messages, automatic scroll
-pinning, and “Jump to latest”.
+pinning, and “Jump to latest”. Pass `contributionContext` to expose registered
+assistant-message actions; the complete message is added as `context.message`.
 
 ### `components.Composer`
 

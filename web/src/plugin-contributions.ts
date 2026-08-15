@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { useSyncExternalStore } from 'react';
-import type { SessionMeta, Workspace } from './protocol.gen';
+import type { MessageItem, SessionMeta, Workspace } from './protocol.gen';
 
-export type PluginSlot = 'composer.actions' | 'session-tab.badge' | 'sidebar.footer';
+export type PluginSlot = 'assistant-message.actions' | 'composer.actions' | 'session-tab.badge' | 'sidebar.footer';
 export type PluginActionLocation = 'command-palette' | 'composer';
 export type PluginNotificationLevel = 'info' | 'warning' | 'error';
 
@@ -11,6 +11,7 @@ export interface ContributionContext {
   chatId: string | null;
   session: SessionMeta | null;
   sessionId?: string;
+  message?: MessageItem;
 }
 
 export interface PluginAction {

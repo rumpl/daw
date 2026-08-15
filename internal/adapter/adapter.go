@@ -65,6 +65,9 @@ type OpenRequest struct {
 	// place. A stale or unsupported preference is ignored by the adapter.
 	Model         string
 	ThinkingLevel string
+	// DisabledTools are restored into docker-agent's per-session exclusion
+	// filter before the chat is exposed to the browser.
+	DisabledTools []string
 	MCPServers    []MCPServer
 }
 
@@ -75,8 +78,21 @@ type Adapter interface {
 	// ListSessions returns sessions from docker-agent's own store. When
 	// workingDir is non-empty the list is filtered to that directory.
 	ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error)
+	// ReadSession reads persisted session history without constructing a live
+	// runtime, loading toolsets, or claiming the session in the chat registry.
+	ReadSession(ctx context.Context, sessionID string) (StoredSession, error)
+	// ChatOptions resolves the process-wide model catalog and the thinking
+	// levels supported by model without creating a workspace chat or session.
+	ChatOptions(ctx context.Context, model string) (models []protocol.ModelOption, thinkingLevels []string, err error)
 	OpenChat(ctx context.Context, req OpenRequest) (Chat, error)
 	Close() error
+}
+
+type StoredSession struct {
+	Meta  protocol.StoredSessionMeta
+	Items []protocol.Item
+	Usage protocol.Usage
+	Stats protocol.Stats
 }
 
 type Attachment struct {
@@ -106,9 +122,11 @@ type Chat interface {
 
 	Models(ctx context.Context) []protocol.ModelOption
 	Commands(ctx context.Context) []protocol.CommandInfo
+	Tools(ctx context.Context) ([]protocol.ToolOption, error)
 
 	SetModel(ctx context.Context, ref string) error
 	SetThinking(ctx context.Context, level string) error
+	SetToolEnabled(ctx context.Context, name string, enabled bool) error
 
 	Retitle(ctx context.Context, title string) error
 	Compact(ctx context.Context) error

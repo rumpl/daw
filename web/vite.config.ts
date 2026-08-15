@@ -1,10 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 // The dev server proxies /api to the Go server so `make dev` behaves exactly
 // like production (same origin, same CSRF flow).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: { '@': new URL('./src', import.meta.url).pathname },
+  },
   build: {
     // Built straight into the Go embed directory: `make build` produces a
     // single binary with no loose-file dependency.

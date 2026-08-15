@@ -234,8 +234,11 @@ export function activate(context) {
 
 Actions may be placed in `command-palette` and `composer`.
 The command palette opens with Cmd/Ctrl+K. Additive slots are
-`composer.actions`, `session-tab.badge`, and `sidebar.footer`. Slot render functions receive `{workspace, chatId, session,
-sessionId?}` and must return a host-React node.
+`assistant-message.actions`, `composer.actions`, `session-tab.badge`, and
+`sidebar.footer`. Slot render functions receive
+`{workspace, chatId, session, sessionId?, message?}` and must return a host-React
+node. The `assistant-message.actions` slot appears beside “Download as Markdown”
+on each completed assistant message; its context includes that `message`.
 
 `setSessionBadge(sessionId, {id, value, tone?})` adds a tab badge. Supported
 tones are `info`, `warning`, `error`, and `success`.
@@ -335,8 +338,9 @@ The context contains:
 `api.request(method, path, body?, options?)` is the generic escape hatch for all
 backend endpoints. It serializes JSON, adds the dashboard CSRF header to
 mutations, and throws the same `ApiError` used by core UI. Named methods such as
-`api.sessions`, `api.createChat`, `api.snapshot`, and `api.send` are also
-available. Same-origin GET event streams can be opened with `EventSource`.
+`api.sessions`, `api.chatOptions`, `api.updateChatOptions`, `api.createChat`,
+`api.snapshot`, and `api.send` are also available. Same-origin GET event streams
+can be opened with `EventSource`.
 
 ## Host components
 

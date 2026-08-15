@@ -6,6 +6,7 @@ import type {
   APIError,
   Attachment,
   Bootstrap,
+  ChatOptions,
   ChatRef,
   CommandInfo,
   ElicitationReply,
@@ -15,9 +16,12 @@ import type {
   PluginConfiguration,
   PluginManagementCatalog,
   SessionSummary,
+  StoredSession,
+  StoredSessionItems,
   Snapshot,
   SessionMeta,
   Stats,
+  ToolOption,
   ToolConfirmationReply,
   UpdateConfigRequest,
   Workspace,
@@ -113,6 +117,22 @@ export const api = {
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
   },
+  session(workspaceId: string, sessionId: string, options: RequestOptions = {}): Promise<StoredSession> {
+    return request<StoredSession>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`, undefined, options);
+  },
+  sessionItems(workspaceId: string, sessionId: string, options: { offset?: number; limit?: number; signal?: AbortSignal } = {}): Promise<StoredSessionItems> {
+    const query = new URLSearchParams();
+    if (options.offset !== undefined) query.set('offset', String(options.offset));
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    const suffix = query.size ? `?${query}` : '';
+    return request<StoredSessionItems>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/items${suffix}`, undefined, { signal: options.signal });
+  },
+  chatOptions(): Promise<ChatOptions> {
+    return request<ChatOptions>('GET', '/api/chat-options');
+  },
+  updateChatOptions(patch: UpdateConfigRequest): Promise<ChatOptions> {
+    return request<ChatOptions>('PATCH', '/api/chat-options', patch);
+  },
   createChat(workspaceId: string, executionLocationId?: string): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats', { workspaceId, ...(executionLocationId ? { executionLocationId } : {}) });
   },
@@ -159,6 +179,12 @@ export const api = {
   },
   commands(chatId: string): Promise<CommandInfo[]> {
     return request<CommandInfo[]>('GET', `/api/chats/${encodeURIComponent(chatId)}/commands`);
+  },
+  tools(chatId: string): Promise<ToolOption[]> {
+    return request<ToolOption[]>('GET', `/api/chats/${encodeURIComponent(chatId)}/tools`);
+  },
+  updateTool(chatId: string, name: string, enabled: boolean): Promise<ToolOption> {
+    return request<ToolOption>('PATCH', `/api/chats/${encodeURIComponent(chatId)}/tools/${encodeURIComponent(name)}`, { enabled });
   },
   confirmTool(chatId: string, reply: ToolConfirmationReply): Promise<Accepted> {
     return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/tool-confirmation`, reply);

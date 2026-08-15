@@ -23,6 +23,7 @@ import (
 	"time"
 
 	dacfg "github.com/docker/docker-agent/pkg/config"
+	"github.com/docker/docker-agent/pkg/effort"
 	"github.com/docker/docker-agent/pkg/paths"
 	"github.com/docker/docker-agent/pkg/permissions"
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
@@ -35,6 +36,7 @@ import (
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/dashboardagent"
 	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessionlineage"
 )
 
 // registerOnce enforces the matched module's documented call-order
@@ -130,6 +132,84 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 // runtimeConfig builds the per-load runtime configuration. Credentials are
 // never touched here: docker-agent's own environment provider and credential
 // helpers resolve them inside the SDK.
+// ChatOptions resolves the global model catalog without creating a workspace
+// chat or allocating a session. docker-agent currently owns catalog discovery
+// on LocalRuntime, so this constructs a short-lived, model-only runtime from
+// global user configuration; the working directory is deliberately not part
+// of model selection.
+func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.ModelOption, []string, error) {
+	workingDir, err := os.UserHomeDir()
+	if err != nil {
+		workingDir = os.TempDir()
+	}
+	runConfig := a.runtimeConfig(workingDir)
+	loadRes, err := dashboardagent.BuildModelResolver(ctx, runConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	t := loadRes.Team
+	defer t.StopToolSets(context.WithoutCancel(ctx))
+	ag, err := t.AgentOrDefault("")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	switcher := &daruntime.ModelSwitcherConfig{
+		Models: loadRes.Models, Providers: loadRes.Providers,
+		ModelsGateway: runConfig.ModelsGateway, EnvProvider: runConfig.EnvProvider(),
+		ProviderRegistry: loadRes.ProviderRegistry, AgentDefaultModels: loadRes.AgentDefaultModels,
+	}
+	if store, storeErr := runConfig.ModelsDevStore(); storeErr == nil {
+		switcher.ModelsStore = store
+	}
+	rt, err := daruntime.New(ctx, t,
+		daruntime.WithCurrentAgent(ag.Name()),
+		daruntime.WithWorkingDir(workingDir),
+		daruntime.WithModelSwitcherConfig(switcher),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rt.Close()
+
+	if model != "" {
+		if err := rt.SetAgentModel(ctx, ag.Name(), model); err != nil {
+			return nil, nil, err
+		}
+	}
+	models := modelOptions(rt.AvailableModels(ctx))
+	return models, runtimeThinkingLevels(ctx, rt), nil
+}
+
+func modelOptions(choices []daruntime.ModelChoice) []protocol.ModelOption {
+	out := make([]protocol.ModelOption, 0, len(choices))
+	for _, model := range choices {
+		out = append(out, protocol.ModelOption{
+			Name: model.Name, Ref: model.Ref, Provider: model.Provider, Model: model.Model,
+			Family: model.Family, ContextLimit: model.ContextLimit,
+			InputCost: model.InputCost, OutputCost: model.OutputCost,
+			IsCurrent: model.IsCurrent, IsDefault: model.IsDefault,
+			IsCustom: model.IsCustom, IsCatalog: model.IsCatalog,
+		})
+	}
+	return out
+}
+
+func runtimeThinkingLevels(ctx context.Context, rt daruntime.Runtime) []string {
+	resolver, ok := rt.(interface {
+		CurrentAgentThinkingLevels(context.Context) []effort.Level
+	})
+	if !ok {
+		return nil
+	}
+	levels := resolver.CurrentAgentThinkingLevels(ctx)
+	out := make([]string, 0, len(levels))
+	for _, level := range levels {
+		out = append(out, level.String())
+	}
+	return out
+}
+
 func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {
 	rc := &dacfg.RuntimeConfig{}
 	rc.WorkingDir = workingDir
@@ -175,9 +255,56 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 			Attributes: summary.Attributes,
 			CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339),
 			Messages:   summary.NumMessages,
+			Cost:       summary.Cost,
 		})
 	}
 	return out, nil
+}
+
+func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
+	sess, err := a.store.GetSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			return adapter.StoredSession{}, adapter.ErrNotFound
+		}
+		return adapter.StoredSession{}, err
+	}
+
+	agentName, model := storedIdentity(sess)
+	reader := &chat{sess: sess, agentName: agentName, model: model}
+	items, usage, err := reader.Snapshot(ctx)
+	if err != nil {
+		return adapter.StoredSession{}, err
+	}
+	origin := sessionlineage.FromAttributes(sess.AttributesSnapshot())
+	return adapter.StoredSession{
+		Meta: protocol.StoredSessionMeta{
+			SessionID: sess.ID, Title: sess.TitleSnapshot(), WorkingDir: sess.WorkingDir,
+			AgentName: agentName, Model: model, CreatedAt: sess.CreatedAt.UTC().Format(time.RFC3339),
+			ParentSessionID: origin.ParentSessionID, RootSessionID: origin.RootSessionID,
+			OriginKind: origin.Kind, OriginPluginID: origin.PluginID,
+		},
+		Items: items, Usage: usage, Stats: reader.Stats(ctx),
+	}, nil
+}
+
+func storedIdentity(sess *session.Session) (agentName, model string) {
+	items := sess.MessagesSnapshot()
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Message == nil {
+			continue
+		}
+		if agentName == "" {
+			agentName = items[i].Message.AgentName
+		}
+		if model == "" {
+			model = items[i].Message.Message.Model
+		}
+		if agentName != "" && model != "" {
+			break
+		}
+	}
+	return agentName, model
 }
 
 // OpenChat builds one runtime + session pair. It mirrors the CLI's wiring in
@@ -283,6 +410,11 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 			newSession = false
 		}
 	}
+
+	// Tool visibility is a dashboard preference backed by docker-agent's
+	// session exclusion filter. The field is intentionally non-persistent in
+	// docker-agent itself, so restore it on every open/resume.
+	sess.ExcludedTools = append([]string(nil), req.DisabledTools...)
 
 	// The dashboard has one safety policy: tools are always auto-approved.
 	// Reapply it on resume too, so an older session cannot restore a different

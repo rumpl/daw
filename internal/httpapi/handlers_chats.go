@@ -144,6 +144,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		PersistImmediately: persistImmediately,
 		Model:              preference.Model,
 		ThinkingLevel:      preference.ThinkingLevel,
+		DisabledTools:      preference.DisabledTools,
 		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID, creationContext, s.pluginManagement.running),
 	})
 	if err != nil {
@@ -369,6 +370,72 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name < cmds[j].Name })
 	s.json(w, http.StatusOK, cmds)
+}
+
+func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.mustChat(w, r)
+	if !ok {
+		return
+	}
+	options, err := c.chat.Tools(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusFailedDependency, "tools_unavailable", "the agent tools could not be loaded")
+		return
+	}
+	if options == nil {
+		options = []protocol.ToolOption{}
+	}
+	sort.Slice(options, func(i, j int) bool { return options[i].Name < options[j].Name })
+	s.json(w, http.StatusOK, options)
+}
+
+func (s *Server) handleTool(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.mustChat(w, r)
+	if !ok {
+		return
+	}
+	req, ok := decode[protocol.UpdateToolRequest](w, r, s)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("tool"))
+	if name == "" || len(name) > 256 {
+		s.fail(w, http.StatusBadRequest, "invalid_tool", "a valid tool name is required")
+		return
+	}
+	if err := c.chat.SetToolEnabled(r.Context(), name, req.Enabled); err != nil {
+		switch {
+		case errors.Is(err, adapter.ErrBusy):
+			s.fail(w, http.StatusConflict, "busy", "tools can only change while the agent is idle")
+		case errors.Is(err, adapter.ErrNotFound):
+			s.fail(w, http.StatusNotFound, "unknown_tool", "unknown tool")
+		default:
+			s.fail(w, http.StatusBadRequest, "tool_update_failed", "that tool could not be updated")
+		}
+		return
+	}
+	options, err := c.chat.Tools(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusFailedDependency, "tools_unavailable", "the agent tools could not be loaded")
+		return
+	}
+	disabled := make([]string, 0)
+	for _, option := range options {
+		if !option.Enabled {
+			disabled = append(disabled, option.Name)
+		}
+	}
+	if err := s.preferences.RememberTools(c.chat.SessionID(), disabled); err != nil {
+		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the tool was updated but could not be saved")
+		return
+	}
+	for _, option := range options {
+		if option.Name == name {
+			s.json(w, http.StatusOK, option)
+			return
+		}
+	}
+	s.fail(w, http.StatusNotFound, "unknown_tool", "unknown tool")
 }
 
 func (s *Server) handleToolConfirmation(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,7 @@ import (
 	dacfg "github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/config/types"
+	"github.com/docker/docker-agent/pkg/model/provider"
 	"github.com/docker/docker-agent/pkg/model/provider/dmr"
 	"github.com/docker/docker-agent/pkg/model/provider/options"
 	"github.com/docker/docker-agent/pkg/model/provider/providers"
@@ -32,6 +33,53 @@ const Name = "dashboard-coder"
 //go:embed system_prompt.md
 var instruction string
 
+func buildModel(ctx context.Context, runConfig *dacfg.RuntimeConfig) (latest.ModelConfig, *provider.Registry, provider.Provider, error) {
+	env := runConfig.EnvProvider()
+	modelConfig := dacfg.AutoModelConfig(ctx, runConfig.ModelsGateway, env, runConfig.DefaultModel, dmr.ListModels)
+	modelConfig.Name = "auto"
+	registry := providers.NewDefaultRegistry()
+	modelOpts := []options.Opt{
+		options.WithGateway(runConfig.ModelsGateway),
+		options.WithProviders(runConfig.Providers),
+	}
+	if store, err := runConfig.ModelsDevStore(); err == nil {
+		modelOpts = append(modelOpts, options.WithModelsDevStore(store))
+	}
+	model, err := registry.New(ctx, &modelConfig, env, modelOpts...)
+	if err != nil {
+		return latest.ModelConfig{}, nil, nil, fmt.Errorf("create dashboard coding model: %w", err)
+	}
+	return modelConfig, registry, model, nil
+}
+
+func modelLoadResult(runConfig *dacfg.RuntimeConfig, modelConfig latest.ModelConfig, registry *provider.Registry, root *agent.Agent) *teamloader.LoadResult {
+	models := map[string]latest.ModelConfig{"auto": modelConfig}
+	runConfig.Models = models
+	runConfig.ProviderRegistry = registry
+	return &teamloader.LoadResult{
+		Team:               team.New(team.WithAgents(root)),
+		Models:             models,
+		Providers:          runConfig.Providers,
+		ProviderRegistry:   registry,
+		AgentDefaultModels: map[string]string{"root": "auto"},
+	}
+}
+
+// BuildModelResolver creates only the globally configured model and a minimal
+// agent graph. It deliberately avoids workspace files, skills, shell tools,
+// filesystem tools, and MCP servers so model discovery has no workspace
+// lifecycle.
+func BuildModelResolver(ctx context.Context, runConfig *dacfg.RuntimeConfig) (*teamloader.LoadResult, error) {
+	if runConfig == nil {
+		runConfig = &dacfg.RuntimeConfig{}
+	}
+	modelConfig, registry, model, err := buildModel(ctx, runConfig)
+	if err != nil {
+		return nil, err
+	}
+	return modelLoadResult(runConfig, modelConfig, registry, agent.New("root", "", agent.WithModel(model))), nil
+}
+
 // Build creates a fresh SDK team and model/toolset graph for one working
 // directory. The returned LoadResult is the same shape the runtime consumes
 // for file-based agents, but every agent option is assembled in Go.
@@ -39,22 +87,9 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...ad
 	if runConfig == nil {
 		runConfig = &dacfg.RuntimeConfig{}
 	}
-	env := runConfig.EnvProvider()
-	modelConfig := dacfg.AutoModelConfig(ctx, runConfig.ModelsGateway, env, runConfig.DefaultModel, dmr.ListModels)
-	modelConfig.Name = "auto"
-
-	registry := providers.NewDefaultRegistry()
-	modelOpts := []options.Opt{
-		options.WithGateway(runConfig.ModelsGateway),
-		options.WithProviders(runConfig.Providers),
-	}
-
-	if store, err := runConfig.ModelsDevStore(); err == nil {
-		modelOpts = append(modelOpts, options.WithModelsDevStore(store))
-	}
-	model, err := registry.New(ctx, &modelConfig, env, modelOpts...)
+	modelConfig, registry, model, err := buildModel(ctx, runConfig)
 	if err != nil {
-		return nil, fmt.Errorf("create dashboard coding model: %w", err)
+		return nil, err
 	}
 
 	toolsets := []tools.ToolSet{
@@ -92,14 +127,5 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...ad
 		agent.WithToolSets(toolsets...),
 	)
 
-	models := map[string]latest.ModelConfig{"auto": modelConfig}
-	runConfig.Models = models
-	runConfig.ProviderRegistry = registry
-	return &teamloader.LoadResult{
-		Team:               team.New(team.WithAgents(root)),
-		Models:             models,
-		Providers:          runConfig.Providers,
-		ProviderRegistry:   registry,
-		AgentDefaultModels: map[string]string{"root": "auto"},
-	}, nil
+	return modelLoadResult(runConfig, modelConfig, registry, root), nil
 }

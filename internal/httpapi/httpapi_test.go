@@ -148,6 +148,53 @@ func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace) {
 	return decodeJSON[protocol.ChatRef](h.t, resp), ws
 }
 
+func TestStoredSessionReadDoesNotOpenChatAndPaginates(t *testing.T) {
+	h := newHarness(t)
+	items := []protocol.Item{
+		{Kind: protocol.ItemKindMessage, Message: &protocol.MessageItem{ID: "m1", Role: "user", Text: "hello"}},
+		{Kind: protocol.ItemKindMessage, Message: &protocol.MessageItem{ID: "m2", Role: "assistant", Text: "hi", Cost: 0.01}},
+		{Kind: protocol.ItemKindTool, Tool: &protocol.ToolActivity{ID: "t1", Name: "read_file"}},
+	}
+	ws := h.openWorkspace()
+	h.fake.Seed("stored-read", "Stored", ws.Path, items)
+	base := "/api/workspaces/" + ws.WorkspaceID + "/sessions/stored-read"
+
+	resp := h.do(http.MethodGet, base, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stored session: %d", resp.StatusCode)
+	}
+	stored := decodeJSON[protocol.StoredSession](t, resp)
+	if stored.Meta.SessionID != "stored-read" || stored.Live || stored.Stats.Messages != 2 || stored.Stats.ToolCalls != 1 {
+		t.Fatalf("unexpected stored session: %+v", stored)
+	}
+	list := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/workspaces/"+ws.WorkspaceID+"/sessions", nil))
+	if len(list) != 1 || list[0].Cost != 0 {
+		t.Fatalf("unexpected session summary cost: %+v", list)
+	}
+	if h.fake.LastOpenRequest.ResumeSessionID != "" {
+		t.Fatalf("read opened a chat: %+v", h.fake.LastOpenRequest)
+	}
+
+	page := decodeJSON[protocol.StoredSessionItems](t, h.do(http.MethodGet, base+"/items?limit=2", nil))
+	if len(page.Items) != 2 || page.Total != 3 || page.NextOffset == nil || *page.NextOffset != 2 {
+		t.Fatalf("unexpected first page: %+v", page)
+	}
+	last := decodeJSON[protocol.StoredSessionItems](t, h.do(http.MethodGet, base+"/items?offset=2&limit=2", nil))
+	if len(last.Items) != 1 || last.NextOffset != nil {
+		t.Fatalf("unexpected last page: %+v", last)
+	}
+}
+
+func TestStoredSessionReadIsWorkspaceScoped(t *testing.T) {
+	h := newHarness(t)
+	h.fake.Seed("elsewhere", "Elsewhere", filepath.Join(h.root, "other"), nil)
+	ws := h.openWorkspace()
+	resp := h.do(http.MethodGet, "/api/workspaces/"+ws.WorkspaceID+"/sessions/elsewhere", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
 // ---------------------------------------------------------------------------
 
 func TestMessageAttachmentRoundTrip(t *testing.T) {
@@ -1335,6 +1382,37 @@ func TestToolPreviewIsBounded(t *testing.T) {
 	}
 }
 
+func TestGlobalChatOptionsDoNotCreateSession(t *testing.T) {
+	h := newHarness(t)
+
+	options := decodeJSON[protocol.ChatOptions](t, h.do(http.MethodGet, "/api/chat-options", nil))
+	if options.Model != "fake/model-a" || options.ThinkingLevel != "medium" {
+		t.Fatalf("unexpected defaults: %#v", options)
+	}
+	if len(options.Models) < 2 || len(options.ThinkingLevels) == 0 {
+		t.Fatalf("missing global choices: %#v", options)
+	}
+	if sessions := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/sessions/live", nil)); len(sessions) != 0 {
+		t.Fatalf("reading chat options created sessions: %#v", sessions)
+	}
+
+	model, thinking := "fake/model-b", "high"
+	updated := decodeJSON[protocol.ChatOptions](t, h.do(http.MethodPatch, "/api/chat-options", protocol.UpdateConfigRequest{
+		Model: &model, ThinkingLevel: &thinking,
+	}))
+	if updated.Model != model || updated.ThinkingLevel != thinking {
+		t.Fatalf("defaults were not updated: %#v", updated)
+	}
+	if sessions := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/sessions/live", nil)); len(sessions) != 0 {
+		t.Fatalf("updating chat options created sessions: %#v", sessions)
+	}
+
+	h.newChat()
+	if h.fake.LastOpenRequest.Model != model || h.fake.LastOpenRequest.ThinkingLevel != thinking {
+		t.Fatalf("new chat did not inherit defaults: %#v", h.fake.LastOpenRequest)
+	}
+}
+
 func TestConfigChanges(t *testing.T) {
 	h := newHarness(t)
 	ref, _ := h.newChat()
@@ -1438,6 +1516,25 @@ func TestDisposeCancelsPendingDialogs(t *testing.T) {
 	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventChatClosed }, 5*time.Second)
 }
 
+func TestToolCatalogAndToggle(t *testing.T) {
+	h := newHarness(t)
+	ref, _ := h.newChat()
+	path := "/api/chats/" + ref.ChatID + "/tools"
+	tools := decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, path, nil))
+	if len(tools) == 0 || !tools[0].Enabled {
+		t.Fatalf("expected enabled tools, got %+v", tools)
+	}
+	updated := decodeJSON[protocol.ToolOption](t, h.do(http.MethodPatch,
+		path+"/"+tools[0].Name, protocol.UpdateToolRequest{Enabled: false}))
+	if updated.Name != tools[0].Name || updated.Enabled {
+		t.Fatalf("expected disabled tool, got %+v", updated)
+	}
+	tools = decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, path, nil))
+	if tools[0].Enabled {
+		t.Fatalf("tool toggle was not retained: %+v", tools)
+	}
+}
+
 func TestErrorShapeHasNoInternals(t *testing.T) {
 	h := newHarness(t)
 	resp := h.do(http.MethodGet, "/api/chats/does-not-exist", nil)
@@ -1463,6 +1560,7 @@ func TestNoSecretsInResponses(t *testing.T) {
 		"/api/chats/" + ref.ChatID,
 		"/api/chats/" + ref.ChatID + "/models",
 		"/api/chats/" + ref.ChatID + "/commands",
+		"/api/chats/" + ref.ChatID + "/tools",
 		"/api/chats/" + ref.ChatID + "/stats",
 	}
 	for _, p := range paths {

@@ -12,7 +12,6 @@ import (
 
 	daagent "github.com/docker/docker-agent/pkg/agent"
 	dachat "github.com/docker/docker-agent/pkg/chat"
-	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/effort"
 	"github.com/docker/docker-agent/pkg/permissions"
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
@@ -160,27 +159,8 @@ func (c *chat) Meta() protocol.SessionMeta {
 }
 
 func (c *chat) supportedThinkingLevels() []string {
-	ag, err := c.team.Agent(c.agentName)
-	if err != nil || ag == nil {
-		return nil
-	}
-	models := ag.EffectiveModels()
-	if len(models) == 0 {
-		return nil
-	}
-	cfg := models[0].BaseConfig().ModelConfig
-	levels := effort.SupportedLevels(true, thinkingLevelMap(&cfg))
-	out := make([]string, 0, len(levels))
-	for _, l := range levels {
-		out = append(out, l.String())
-	}
-	return out
+	return runtimeThinkingLevels(context.Background(), c.rt)
 }
-
-// thinkingLevelMap is intentionally nil: the matched effort package treats a
-// nil map as "every level except explicit-only top tiers", which is the right
-// default when the model config declares nothing.
-func thinkingLevelMap(_ *latest.ModelConfig) effort.LevelMap { return nil }
 
 // ---------------------------------------------------------------------------
 // snapshot from the store
@@ -640,18 +620,7 @@ func (c *chat) Models(ctx context.Context) []protocol.ModelOption {
 	if !c.rt.SupportsModelSwitching() {
 		return nil
 	}
-	choices := c.rt.AvailableModels(ctx)
-	out := make([]protocol.ModelOption, 0, len(choices))
-	for _, m := range choices {
-		out = append(out, protocol.ModelOption{
-			Name: m.Name, Ref: m.Ref, Provider: m.Provider, Model: m.Model,
-			Family: m.Family, ContextLimit: m.ContextLimit,
-			InputCost: m.InputCost, OutputCost: m.OutputCost,
-			IsCurrent: m.IsCurrent, IsDefault: m.IsDefault,
-			IsCustom: m.IsCustom, IsCatalog: m.IsCatalog,
-		})
-	}
-	return out
+	return modelOptions(c.rt.AvailableModels(ctx))
 }
 
 func (c *chat) Commands(ctx context.Context) []protocol.CommandInfo {
@@ -672,6 +641,65 @@ func (c *chat) Commands(ctx context.Context) []protocol.CommandInfo {
 		}
 	}
 	return out
+}
+
+func (c *chat) Tools(ctx context.Context) ([]protocol.ToolOption, error) {
+	definitions, err := c.rt.CurrentAgentTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	disabled := make(map[string]bool, len(c.sess.ExcludedTools))
+	for _, name := range c.sess.ExcludedTools {
+		disabled[name] = true
+	}
+	c.mu.Unlock()
+	out := make([]protocol.ToolOption, 0, len(definitions))
+	for _, definition := range definitions {
+		out = append(out, protocol.ToolOption{
+			Name: definition.Name, Category: definition.Category,
+			Description: definition.Description, Enabled: !disabled[definition.Name],
+		})
+	}
+	return out, nil
+}
+
+func (c *chat) SetToolEnabled(_ context.Context, name string, enabled bool) error {
+	if err := c.idle(); err != nil {
+		return err
+	}
+	definitions, err := c.rt.CurrentAgentTools(context.Background())
+	if err != nil {
+		return err
+	}
+	known := false
+	for _, definition := range definitions {
+		if definition.Name == name {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return adapter.ErrNotFound
+	}
+	c.mu.Lock()
+	disabled := make([]string, 0, len(c.sess.ExcludedTools)+1)
+	seen := false
+	for _, current := range c.sess.ExcludedTools {
+		if current == name {
+			seen = true
+			if enabled {
+				continue
+			}
+		}
+		disabled = append(disabled, current)
+	}
+	if !enabled && !seen {
+		disabled = append(disabled, name)
+	}
+	c.sess.ExcludedTools = disabled
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *chat) idle() error {

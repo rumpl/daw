@@ -91,7 +91,7 @@ func (a *Adapter) ListSessions(_ context.Context, workingDir string) ([]protocol
 		out = append(out, protocol.SessionSummary{
 			SessionID: s.id, Title: s.title, WorkingDir: s.workingDir,
 			Attributes: cloneMap(s.attributes),
-			CreatedAt:  s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items),
+			CreatedAt:  s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items), Cost: s.usage.Cost,
 		})
 	}
 	sortSummaries(out)
@@ -132,6 +132,32 @@ func (a *Adapter) SeedWithAttributes(id, title, workingDir string, attributes ma
 	}
 }
 
+func (a *Adapter) ReadSession(_ context.Context, sessionID string) (adapter.StoredSession, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	st, ok := a.sessions[sessionID]
+	if !ok {
+		return adapter.StoredSession{}, adapter.ErrNotFound
+	}
+	items := append([]protocol.Item(nil), st.items...)
+	stats := storedStats(st)
+	origin := sessionlineage.FromAttributes(st.attributes)
+	return adapter.StoredSession{
+		Meta: protocol.StoredSessionMeta{
+			SessionID: st.id, Title: st.title, WorkingDir: st.workingDir,
+			AgentName: st.agentName, Model: st.model, CreatedAt: st.createdAt.UTC().Format(time.RFC3339),
+			ParentSessionID: origin.ParentSessionID, RootSessionID: origin.RootSessionID,
+			OriginKind: origin.Kind, OriginPluginID: origin.PluginID,
+		},
+		Items: items, Usage: st.usage, Stats: stats,
+	}, nil
+}
+
+// ChatOptions returns process-wide choices without opening a session.
+func (a *Adapter) ChatOptions(context.Context, string) ([]protocol.ModelOption, []string, error) {
+	return fakeModelOptions("fake/model-a"), []string{"none", "low", "medium", "high"}, nil
+}
+
 // OpenChat creates or resumes a fake chat.
 func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	a.mu.Lock()
@@ -165,8 +191,12 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 	}
 	c := &chat{
 		a: a, st: st,
-		events:  make(chan protocol.Event, 256),
-		pending: map[string]chan reply{},
+		events:   make(chan protocol.Event, 256),
+		pending:  map[string]chan reply{},
+		disabled: map[string]bool{},
+	}
+	for _, name := range req.DisabledTools {
+		c.disabled[name] = true
 	}
 	c.run = protocol.RunStatus{
 		State: protocol.RunStateIdle,
@@ -201,6 +231,7 @@ type chat struct {
 	followUp   []protocol.QueuedMessage
 	toolN      int
 	msgN       int
+	disabled   map[string]bool
 }
 
 func (c *chat) SessionID() string { return c.st.id }
@@ -681,17 +712,17 @@ func (c *chat) Elicit(_ context.Context, id string, action protocol.ElicitationA
 	return nil
 }
 
-func (c *chat) Models(context.Context) []protocol.ModelOption {
+func fakeModelOptions(current string) []protocol.ModelOption {
 	return []protocol.ModelOption{
 		{
 			Name: "default", Ref: "fake/model-a", Provider: "fake", Model: "model-a", Family: "fake",
 			ContextLimit: 200000, InputCost: 3, OutputCost: 15,
-			IsCurrent: c.st.model == "fake/model-a", IsDefault: true,
+			IsCurrent: current == "fake/model-a", IsDefault: true,
 		},
 		{
 			Name: "fast", Ref: "fake/model-b", Provider: "fake", Model: "model-b", Family: "fake",
 			ContextLimit: 128000, InputCost: 0.8, OutputCost: 4,
-			IsCurrent: c.st.model == "fake/model-b",
+			IsCurrent: current == "fake/model-b",
 		},
 		{
 			Name: "claude-sonnet-4-5", Ref: "anthropic/claude-sonnet-4-5", Provider: "anthropic",
@@ -705,12 +736,48 @@ func (c *chat) Models(context.Context) []protocol.ModelOption {
 	}
 }
 
+func (c *chat) Models(context.Context) []protocol.ModelOption {
+	return fakeModelOptions(c.st.model)
+}
+
 func (c *chat) Commands(context.Context) []protocol.CommandInfo {
 	return []protocol.CommandInfo{
 		{Name: "notool", Description: "Reply without calling a tool", Kind: "command"},
 		{Name: "elicit", Description: "Trigger an elicitation", Kind: "command"},
 		{Name: "transfer", Description: "Delegate to the sub-agent", Kind: "command"},
 	}
+}
+
+func (c *chat) Tools(context.Context) ([]protocol.ToolOption, error) {
+	definitions := []protocol.ToolOption{
+		{Name: "read_file", Category: "filesystem", Description: "Read a file"},
+		{Name: "write_file", Category: "filesystem", Description: "Write a file"},
+		{Name: "shell", Category: "shell", Description: "Run a shell command"},
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range definitions {
+		definitions[i].Enabled = !c.disabled[definitions[i].Name]
+	}
+	return definitions, nil
+}
+
+func (c *chat) SetToolEnabled(_ context.Context, name string, enabled bool) error {
+	if err := c.idle(); err != nil {
+		return err
+	}
+	known := name == "read_file" || name == "write_file" || name == "shell"
+	if !known {
+		return adapter.ErrNotFound
+	}
+	c.mu.Lock()
+	if enabled {
+		delete(c.disabled, name)
+	} else {
+		c.disabled[name] = true
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *chat) idle() error {
@@ -786,12 +853,10 @@ func (c *chat) Compact(context.Context) error {
 	return nil
 }
 
-func (c *chat) Stats(context.Context) protocol.Stats {
-	c.a.mu.Lock()
-	defer c.a.mu.Unlock()
+func storedStats(st *storedSession) protocol.Stats {
 	tools := 0
 	msgs := 0
-	for _, it := range c.st.items {
+	for _, it := range st.items {
 		switch it.Kind {
 		case protocol.ItemKindTool:
 			tools++
@@ -800,10 +865,17 @@ func (c *chat) Stats(context.Context) protocol.Stats {
 		}
 	}
 	return protocol.Stats{
-		Usage: c.st.usage, Messages: msgs, ToolCalls: tools,
-		Model: c.st.model, AgentName: c.st.agentName,
-		DurationSec: int64(c.a.now().Sub(c.st.createdAt).Seconds()),
+		Usage: st.usage, Messages: msgs, ToolCalls: tools,
+		Model: st.model, AgentName: st.agentName,
 	}
+}
+
+func (c *chat) Stats(context.Context) protocol.Stats {
+	c.a.mu.Lock()
+	defer c.a.mu.Unlock()
+	stats := storedStats(c.st)
+	stats.DurationSec = int64(c.a.now().Sub(c.st.createdAt).Seconds())
+	return stats
 }
 
 func (c *chat) Close(context.Context) error {
