@@ -12,7 +12,6 @@ import type {
 } from '@/protocol.gen';
 import type { SendMode } from '@/components/chat/Composer';
 import { useChat } from './useChat';
-import { useDraft } from './useDraft';
 import { useWorkspacePreferences } from '@/preferences';
 import { removeSessionSideViews } from '@/plugin-contributions';
 
@@ -45,7 +44,6 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
 
   const { prefs, recentWorkspaces, rememberWorkspace, forgetWorkspace } = useWorkspacePreferences(boot);
   const { state, connection, prepareChat, resnapshot } = useChat(chatId);
-  const { draft, setDraft } = useDraft(activeSessionId);
 
   useEffect(() => {
     void api.bootstrap().then(async (result) => {
@@ -165,8 +163,9 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     [loadChatExtras, prepareChat, refreshLiveSessions, refreshSessions],
   );
 
-  const newChat = (initialMessage?: string) =>
-    void guard(async () => {
+  const newChat = (initialMessage?: string) => {
+    let created = false;
+    return guard(async () => {
       if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
       const ref = await api.createChat(workspace.workspaceId);
       setChatId(ref.chatId);
@@ -189,10 +188,11 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       await Promise.all([loadChatExtras(ref.chatId), refreshSessions(workspace)]);
       if (initialMessage) {
         await api.send(ref.chatId, initialMessage, 'normal');
-        setDraft('');
       }
+      created = true;
       void refreshLiveSessions().catch(() => undefined);
-    });
+    }).then(() => created);
+  };
 
   const resumeChat = (sessionId: string, targetWorkspacePath?: string) =>
     void guard(async () => {
@@ -314,13 +314,15 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     if (chatId) void api.deleteAttachment(chatId, id).catch(() => undefined);
   };
 
-  const send = (text: string, mode: SendMode) =>
-    void guard(async () => {
+  const send = (text: string, mode: SendMode) => {
+    let sent = false;
+    return guard(async () => {
       if (!chatId) return;
       await api.send(chatId, text, mode, attachments.map((item) => item.id));
       setAttachments([]);
-      setDraft('');
-    });
+      sent = true;
+    }).then(() => sent);
+  };
 
   const patchConfig = (patch: { model?: string; thinkingLevel?: string }) =>
     void guard(async () => {
@@ -414,8 +416,6 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     state,
     connection,
     resnapshot,
-    draft,
-    setDraft,
     openWorkspace,
     newChat,
     resumeChat,

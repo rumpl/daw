@@ -1,6 +1,6 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import type { RefObject } from 'react';
+import { useMemo, type RefObject } from 'react';
 import { ChatHeader } from './ChatHeader';
 import { PluginActionButtons } from '@/components/plugins/PluginActionButtons';
 import { PluginSlotView } from '@/components/plugins/PluginSlotView';
@@ -9,7 +9,8 @@ import { Composer } from './Composer';
 import { Conversation } from '@/components/conversation/Conversation';
 import { PendingDialogs } from '@/components/dialogs/PendingDialogs';
 import { clip } from '@/safety';
-import { usePluginContributions } from '@/plugin-contributions';
+import { usePluginContributions, type ContributionContext, type PluginCommand } from '@/plugin-contributions';
+import { useDraft } from '@/hooks/useDraft';
 import type { useDashboard } from '@/hooks/useDashboard';
 
 type DashboardController = ReturnType<typeof useDashboard>;
@@ -22,27 +23,12 @@ interface ChatPaneProps {
 
 export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPaneProps) {
   const { commands: pluginCommands } = usePluginContributions();
-  const contributionContext = {
+  const contributionContext = useMemo(() => ({
     workspace: dashboard.workspace,
     chatId: dashboard.chatId,
     session: dashboard.state.meta,
     sessionId: dashboard.state.meta?.sessionId ?? dashboard.activeSessionId ?? undefined,
-  };
-
-  const sendWithPlugins = async (text: string, mode: 'normal' | 'steer' | 'followUp') => {
-    let resolved = text;
-    if (mode === 'normal' && text.startsWith('/')) {
-      const [name, ...rest] = text.slice(1).split(/\s+/);
-      const command = pluginCommands.find((item) => item.name === name);
-      if (command) {
-        const result = await command.run(rest.join(' '), contributionContext);
-        if (result === undefined) return;
-        resolved = result;
-      }
-    }
-    if (dashboard.chatId) dashboard.send(resolved, mode);
-    else dashboard.newChat(resolved);
-  };
+  }), [dashboard.activeSessionId, dashboard.chatId, dashboard.state.meta, dashboard.workspace]);
 
   return (
     <div className="chat-pane-layout">
@@ -94,35 +80,7 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
           <PluginSlotView slot="composer.actions" context={contributionContext} />
         </>
       ) : null}
-      <Composer
-        draft={dashboard.draft}
-        onDraftChange={dashboard.setDraft}
-        run={dashboard.state.run}
-        disabled={!dashboard.workspace || dashboard.busyAction || dashboard.state.closed}
-        placeholder={dashboard.workspace ? undefined : 'Choose a project to start a chat…'}
-        commands={[...dashboard.commands, ...pluginCommands.map((command) => ({ name: command.name, description: command.description, kind: 'plugin' }))]}
-        attachments={dashboard.attachments}
-        uploading={dashboard.uploading}
-        models={dashboard.models}
-        currentModel={dashboard.state.meta?.model ?? dashboard.defaultModel}
-        thinkingLevel={dashboard.state.meta?.thinkingLevel ?? dashboard.defaultThinkingLevel}
-        thinkingLevels={dashboard.state.meta?.thinkingLevels ?? dashboard.defaultThinkingLevels}
-        tools={dashboard.tools}
-        configDisabled={dashboard.busyAction || dashboard.state.run.state !== 'idle'}
-        toolsDisabled={dashboard.busyAction}
-        compactDisabled={!dashboard.chatId || dashboard.busyAction || dashboard.state.run.state !== 'idle'}
-        usageTokens={dashboard.state.usage.inputTokens + dashboard.state.usage.outputTokens}
-        usageCost={dashboard.state.usage.cost}
-        onSelectModel={(model) => dashboard.patchConfig({ model })}
-        onSelectThinking={(thinkingLevel) => dashboard.patchConfig({ thinkingLevel })}
-        onToolChange={dashboard.setToolEnabled}
-        onRefreshTools={dashboard.refreshChatOptions}
-        onCompact={dashboard.compact}
-        onAddAttachments={dashboard.addAttachments}
-        onRemoveAttachment={dashboard.removeAttachment}
-        onSend={(text, mode) => void sendWithPlugins(text, mode)}
-        onStop={dashboard.abort}
-      />
+      <ChatComposer dashboard={dashboard} pluginCommands={pluginCommands} contributionContext={contributionContext} />
 
       <PendingDialogs
         state={dashboard.state}
@@ -133,4 +91,59 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
       <SessionSideView context={contributionContext} />
     </div>
   );
+}
+
+function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
+  dashboard: DashboardController;
+  pluginCommands: PluginCommand[];
+  contributionContext: ContributionContext;
+}) {
+  const { draft, setDraft } = useDraft(dashboard.activeSessionId);
+
+  const sendWithPlugins = async (text: string, mode: 'normal' | 'steer' | 'followUp') => {
+    let resolved = text;
+    if (mode === 'normal' && text.startsWith('/')) {
+      const [name, ...rest] = text.slice(1).split(/\s+/);
+      const command = pluginCommands.find((item) => item.name === name);
+      if (command) {
+        const result = await command.run(rest.join(' '), contributionContext);
+        if (result === undefined) return;
+        resolved = result;
+      }
+    }
+    const sent = dashboard.chatId
+      ? await dashboard.send(resolved, mode)
+      : await dashboard.newChat(resolved);
+    if (sent) setDraft('');
+  };
+
+  return <Composer
+    draft={draft}
+    onDraftChange={setDraft}
+    run={dashboard.state.run}
+    disabled={!dashboard.workspace || dashboard.busyAction || dashboard.state.closed}
+    placeholder={dashboard.workspace ? undefined : 'Choose a project to start a chat…'}
+    commands={[...dashboard.commands, ...pluginCommands.map((command) => ({ name: command.name, description: command.description, kind: 'plugin' }))]}
+    attachments={dashboard.attachments}
+    uploading={dashboard.uploading}
+    models={dashboard.models}
+    currentModel={dashboard.state.meta?.model ?? dashboard.defaultModel}
+    thinkingLevel={dashboard.state.meta?.thinkingLevel ?? dashboard.defaultThinkingLevel}
+    thinkingLevels={dashboard.state.meta?.thinkingLevels ?? dashboard.defaultThinkingLevels}
+    tools={dashboard.tools}
+    configDisabled={dashboard.busyAction || dashboard.state.run.state !== 'idle'}
+    toolsDisabled={dashboard.busyAction}
+    compactDisabled={!dashboard.chatId || dashboard.busyAction || dashboard.state.run.state !== 'idle'}
+    usageTokens={dashboard.state.usage.inputTokens + dashboard.state.usage.outputTokens}
+    usageCost={dashboard.state.usage.cost}
+    onSelectModel={(model) => dashboard.patchConfig({ model })}
+    onSelectThinking={(thinkingLevel) => dashboard.patchConfig({ thinkingLevel })}
+    onToolChange={dashboard.setToolEnabled}
+    onRefreshTools={dashboard.refreshChatOptions}
+    onCompact={dashboard.compact}
+    onAddAttachments={dashboard.addAttachments}
+    onRemoveAttachment={dashboard.removeAttachment}
+    onSend={(text, mode) => void sendWithPlugins(text, mode)}
+    onStop={dashboard.abort}
+  />;
 }

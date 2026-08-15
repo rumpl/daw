@@ -17,25 +17,30 @@ export const ConversationRow = memo(function ConversationRow({ item, toolRendere
   attachmentRenderers: ReturnType<typeof usePluginContributions>['attachmentRenderers'];
   contributionContext?: ContributionContext;
 }) {
+  let content;
   switch (item.kind) {
     case 'message':
-      return item.message ? <MessageBubble message={item.message} attachmentRenderers={attachmentRenderers} contributionContext={contributionContext} /> : null;
+      content = item.message ? <MessageBubble message={item.message} attachmentRenderers={attachmentRenderers} contributionContext={contributionContext} /> : null;
+      break;
     case 'tool': {
-      if (!item.tool) return null;
+      if (!item.tool) break;
       const renderer = toolRenderers.find((candidate) => candidate.match(item.tool!));
-      return renderer ? (
+      content = renderer ? (
         <PluginBoundary message="Plugin renderer failed">
           <div className="plugin-tool-renderer"><PluginRenderContent render={() => renderer.render(item.tool!)} /></div>
         </PluginBoundary>
       ) : <ToolCard tool={item.tool} actions={<PluginToolActions tool={item.tool} context={contributionContext} />} />;
+      break;
     }
     case 'transfer':
-      return item.transfer ? <TransferCard transfer={item.transfer} /> : null;
+      content = item.transfer ? <TransferCard transfer={item.transfer} /> : null;
+      break;
     case 'notice':
-      return item.notice ? <NoticeCard notice={item.notice} /> : null;
+      content = item.notice ? <NoticeCard notice={item.notice} /> : null;
+      break;
     case 'summary':
-      return item.summary ? <SummaryCard summary={item.summary} /> : null;
-    default:
-      return null;
+      content = item.summary ? <SummaryCard summary={item.summary} /> : null;
+      break;
   }
+  return content ? <div className="conversation-row">{content}</div> : null;
 });
