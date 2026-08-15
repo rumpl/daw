@@ -4,6 +4,7 @@ import type { RefObject } from 'react';
 import { ChatHeader } from './ChatHeader';
 import { PluginActionButtons } from '@/components/plugins/PluginActionButtons';
 import { PluginSlotView } from '@/components/plugins/PluginSlotView';
+import { SessionSideView } from '@/components/plugins/SessionSideView';
 import { Composer } from './Composer';
 import { Conversation } from '@/components/conversation/Conversation';
 import { PendingDialogs } from '@/components/dialogs/PendingDialogs';
@@ -25,6 +26,7 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
     workspace: dashboard.workspace,
     chatId: dashboard.chatId,
     session: dashboard.state.meta,
+    sessionId: dashboard.state.meta?.sessionId ?? dashboard.activeSessionId ?? undefined,
   };
 
   const sendWithPlugins = async (text: string, mode: 'normal' | 'steer' | 'followUp') => {
@@ -43,7 +45,8 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
   };
 
   return (
-    <>
+    <div className="chat-pane-layout">
+      <div className="chat-pane-primary">
       <ChatHeader
         hasChat={Boolean(dashboard.chatId)}
         state={dashboard.state}
@@ -124,6 +127,8 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         onToolDecision={dashboard.decideTool}
         onElicitationAnswer={dashboard.answerElicitation}
       />
-    </>
+      </div>
+      <SessionSideView context={contributionContext} />
+    </div>
   );
 }

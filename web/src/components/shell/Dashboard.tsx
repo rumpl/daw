@@ -63,7 +63,8 @@ export function Dashboard() {
     workspace: dashboard.workspace,
     chatId: dashboard.chatId,
     session: dashboard.state.meta,
-  }), [dashboard.chatId, dashboard.state.meta, dashboard.workspace]);
+    sessionId: dashboard.state.meta?.sessionId ?? dashboard.activeSessionId ?? undefined,
+  }), [dashboard.activeSessionId, dashboard.chatId, dashboard.state.meta, dashboard.workspace]);
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);

@@ -61,7 +61,7 @@ export function PluginChat({ chatId }: { chatId: string }) {
       <Conversation
         items={state.items}
         queue={state.run.queue}
-        contributionContext={{workspace: null, chatId, session: state.meta}}
+        contributionContext={{workspace: null, chatId, session: state.meta, sessionId: state.meta?.sessionId}}
         empty={<><h2>Say something</h2><p>This chat has no messages yet.</p></>}
       />
       <Composer

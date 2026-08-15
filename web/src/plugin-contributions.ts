@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useSyncExternalStore } from 'react';
-import type { MessageItem, SessionMeta, Workspace } from './protocol.gen';
+import type { MessageItem, SessionMeta, ToolActivity, Workspace } from './protocol.gen';
 
 export type PluginSlot = 'assistant-message.actions' | 'composer.actions' | 'session-tab.badge' | 'sidebar.footer';
 export type PluginActionLocation = 'command-palette' | 'composer';
@@ -39,8 +39,24 @@ export interface PluginCommand {
 
 export interface ToolRendererContribution {
   id: string;
-  match(tool: import('./protocol.gen').ToolActivity): boolean;
-  render(tool: import('./protocol.gen').ToolActivity): ReactNode;
+  match(tool: ToolActivity): boolean;
+  render(tool: ToolActivity): ReactNode;
+}
+
+export interface ToolActionContribution {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+  description?: string;
+  match(tool: ToolActivity, context: ContributionContext): boolean;
+  run(tool: ToolActivity, context: ContributionContext): void | Promise<void>;
+}
+
+export interface SessionSideViewOptions {
+  id: string;
+  sessionId: string;
+  title: string;
+  render(context: ContributionContext & { close(): void }): ReactNode;
 }
 
 export interface AttachmentRendererContribution {
@@ -59,6 +75,7 @@ export interface PluginNotification {
 
 interface Owned<T> { pluginId: string; value: T }
 interface NotificationRecord extends PluginNotification { pluginId: string; key: string }
+export interface SessionSideViewRecord extends SessionSideViewOptions { pluginId: string; key: string }
 
 let revision = 0;
 const listeners = new Set<() => void>();
@@ -68,7 +85,9 @@ const badges = new Map<string, Owned<{ sessionId: string; value: string; tone: P
 const notifications = new Map<string, NotificationRecord>();
 const commands = new Map<string, Owned<PluginCommand>>();
 const toolRenderers = new Map<string, Owned<ToolRendererContribution>>();
+const toolActions = new Map<string, Owned<ToolActionContribution>>();
 const attachmentRenderers = new Map<string, Owned<AttachmentRendererContribution>>();
+const sideViews = new Map<string, SessionSideViewRecord>();
 const notificationTimers = new Map<string, number>();
 
 function emit() {
@@ -103,6 +122,24 @@ export function createContributionRegistry(pluginId: string) {
     registerToolRenderer(renderer: ToolRendererContribution) {
       return register(toolRenderers, pluginId, renderer);
     },
+    registerToolAction(action: ToolActionContribution) {
+      return register(toolActions, pluginId, action);
+    },
+    openSessionSideView(options: SessionSideViewOptions) {
+      const key = ownedKey(pluginId, options.id);
+      const record = { ...options, pluginId, key };
+      sideViews.set(options.sessionId, record);
+      emit();
+      let closed = false;
+      return () => {
+        if (closed) return;
+        closed = true;
+        if (sideViews.get(options.sessionId) === record) {
+          sideViews.delete(options.sessionId);
+          emit();
+        }
+      };
+    },
     registerAttachmentRenderer(renderer: AttachmentRendererContribution) {
       return register(attachmentRenderers, pluginId, renderer);
     },
@@ -130,10 +167,13 @@ export function createContributionRegistry(pluginId: string) {
 
 export function removePluginContributions(pluginId: string) {
   let changed = false;
-  for (const store of [actions, slots, badges, commands, toolRenderers, attachmentRenderers] as Array<Map<string, Owned<unknown>>>) {
+  for (const store of [actions, slots, badges, commands, toolRenderers, toolActions, attachmentRenderers] as Array<Map<string, Owned<unknown>>>) {
     for (const [key, entry] of store) {
       if (entry.pluginId === pluginId) changed = store.delete(key) || changed;
     }
+  }
+  for (const [sessionId, view] of sideViews) {
+    if (view.pluginId === pluginId) changed = sideViews.delete(sessionId) || changed;
   }
   for (const [key, entry] of notifications) {
     if (entry.pluginId === pluginId) {
@@ -144,6 +184,14 @@ export function removePluginContributions(pluginId: string) {
     }
   }
   if (changed) emit();
+}
+
+export function removeSessionSideViews(sessionId: string) {
+  if (sideViews.delete(sessionId)) emit();
+}
+
+export function closeSessionSideView(sessionId: string, key: string) {
+  if (sideViews.get(sessionId)?.key === key && sideViews.delete(sessionId)) emit();
 }
 
 export function dismissNotification(key: string) {
@@ -166,7 +214,9 @@ export function usePluginContributions() {
     badges: Array.from(badges, ([key, entry]) => ({...entry.value, _key: key})),
     commands: Array.from(commands, ([key, entry]) => ({...entry.value, _key: key})),
     toolRenderers: Array.from(toolRenderers, ([key, entry]) => ({...entry.value, _key: key})),
+    toolActions: Array.from(toolActions, ([key, entry]) => ({...entry.value, _key: key})),
     attachmentRenderers: Array.from(attachmentRenderers, ([key, entry]) => ({...entry.value, _key: key})),
+    sideViews: Array.from(sideViews.values()),
     notifications: Array.from(notifications.values()),
   };
 }

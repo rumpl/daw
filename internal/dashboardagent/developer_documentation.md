@@ -473,6 +473,15 @@ interface SlotContribution {
   order?:number;
   render(context:ContributionContext):ReactNode;
 }
+interface ToolActionContribution {
+  id:string; label:string; icon?:ReactNode; description?:string;
+  match(tool:ToolActivity, context:ContributionContext):boolean;
+  run(tool:ToolActivity, context:ContributionContext):void|Promise<void>;
+}
+interface SessionSideViewOptions {
+  id:string; sessionId:string; title:string;
+  render(context:ContributionContext & {close():void}):ReactNode;
+}
 interface PluginContributions {
   registerAction(action:PluginAction):()=>void;
   registerSlot(contribution:SlotContribution):()=>void;
@@ -480,6 +489,8 @@ interface PluginContributions {
     run(text:string,context:ContributionContext):string|void|Promise<string|void>}):()=>void;
   registerToolRenderer(renderer:{id:string;match(tool:ToolActivity):boolean;
     render(tool:ToolActivity):ReactNode}):()=>void;
+  registerToolAction(action:ToolActionContribution):()=>void;
+  openSessionSideView(options:SessionSideViewOptions):()=>void;
   registerAttachmentRenderer(renderer:{id:string;match(attachment:Attachment):boolean;
     render(attachment:Attachment):ReactNode}):()=>void;
   setSessionBadge(sessionId:string, badge:{id:string;value:string;
@@ -506,7 +517,12 @@ Managed event subscriptions reconnect with replay positions and are closed on
 deactivation. Plugin commands participate in slash completion; returning text
 supplies the prompt and returning undefined handles the action without sending.
 Matching tool and attachment renderers replace the host fallback under a plugin
-error boundary. The `assistant-message.actions` slot is rendered beside the
+error boundary. Matching tool actions add buttons beside the host tool card;
+they run only when the user clicks the button. `openSessionSideView`
+opens or replaces the contextual view beside that session and returns an
+idempotent close function. Views are scoped by stable session ID, survive tab
+switching, and are removed when their plugin stops or the live session closes.
+On narrow screens the view overlays the chat. The `assistant-message.actions` slot is rendered beside the
 “Download as Markdown” button on each completed assistant message and receives
 that message as `context.message`; other slot contexts omit `message`. The
 command palette opens with Cmd/Ctrl+K. Notification

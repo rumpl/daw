@@ -289,6 +289,33 @@ prompt; returning `undefined` means the command handled the action itself. A
 matching custom renderer replaces the host's normal tool or attachment
 presentation, with host error isolation.
 
+A plugin can add an action button to matching tool cards and open a view
+beside the session after the user clicks it:
+
+```js
+context.contributions.registerToolAction({
+  id: "preview-result",
+  label: "Preview",
+  // Optional `icon` accepts a host-React node; `label` remains the accessible name.
+  match: (tool, session) => tool.name === "write_file" && Boolean(session.sessionId),
+  run(tool, session) {
+    context.contributions.openSessionSideView({
+      id: "preview",
+      sessionId: session.sessionId,
+      title: String(tool.arguments?.path ?? "Preview"),
+      render: ({ close }) => context.ui.React.createElement("button", { onClick: close }, "Close")
+    });
+  }
+});
+```
+
+`openSessionSideView` replaces the currently visible side view for that session
+and returns an idempotent close function. Views follow their stable session ID,
+are restored when switching back to the session, and are removed when the
+plugin stops or the live session closes. On narrow screens the view overlays
+the chat. Tool actions are displayed on matching host tool cards and only run
+after the user clicks their button.
+
 ### Future consideration: context providers
 
 Plugin-provided model context is intentionally not part of API v1 for now. It

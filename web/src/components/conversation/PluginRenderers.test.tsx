@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Attachment, ToolActivity } from '@/protocol.gen';
 import { createContributionRegistry, removePluginContributions } from '@/plugin-contributions';
@@ -25,6 +25,24 @@ describe('plugin renderers', () => {
     expect(screen.getByText('custom tool')).toBeVisible();
     expect(screen.getByText('custom attachment')).toBeVisible();
     act(() => removePluginContributions('render-test'));
+  });
+
+  it('adds a matching tool action beside the trigger without toggling the tool', () => {
+    const run = vi.fn();
+    const registry = createContributionRegistry('tool-action-test');
+    registry.registerToolAction({ id: 'preview', label: 'Preview', match: value => value.id === tool.id, run });
+    const { container } = render(<Conversation items={[{kind: 'tool', tool}]} empty={null}
+      contributionContext={{ workspace: null, chatId: 'chat_1', session: null, sessionId: 'session-1' }} />);
+
+    const button = screen.getByRole('button', { name: 'Preview' });
+    expect(button.closest('.tool-header')).not.toBeNull();
+    expect(button.closest('.tool-trigger')).toBeNull();
+    fireEvent.click(button);
+    expect(run).toHaveBeenCalledWith(tool, expect.objectContaining({ sessionId: 'session-1' }));
+    expect(container.querySelector('.tool-trigger')).not.toHaveAttribute('data-panel-open');
+    return waitFor(() => expect(button).not.toBeDisabled()).then(() => {
+      act(() => removePluginContributions('tool-action-test'));
+    });
   });
 
   it('isolates renderer failures', () => {

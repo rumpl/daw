@@ -247,6 +247,32 @@ body {
 
 /* --- header: one row ------------------------------------------------------- */
 
+.chat-pane-layout { flex: 1 1 0; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.chat-pane-primary { flex: 1 1 0; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.session-side-view {
+  flex: 0 0 auto; align-self: stretch; height: 100%; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden; background: var(--bg);
+}
+.session-side-view-divider {
+  z-index: 5; flex: 0 0 5px; width: 5px; cursor: col-resize; touch-action: none;
+  border-left: 1px solid var(--rule); background: var(--bg-alt);
+}
+.session-side-view-divider:hover { border-color: var(--primary); background: var(--primary); }
+.resizing-side-view { cursor: col-resize; user-select: none; }
+.resizing-side-view iframe { pointer-events: none; }
+.session-side-view-header {
+  height: var(--header-h); flex: 0 0 var(--header-h); padding: 0 8px 0 14px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.session-side-view-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-side-view-content {
+  flex: 1 1 0; width: 100%; height: 0; min-width: 0; min-height: 0; position: relative; overflow: auto;
+  display: flex; flex-direction: column;
+}
+.session-side-view-content > * { flex: 1 1 0; width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.session-side-view-content > .plugin-contribution-error { display: block; padding: 16px; }
+
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 .main-panes { flex: 1; min-height: 0; min-width: 0; display: flex; }
 .pane-split {
@@ -452,6 +478,10 @@ body {
 .tool {
   margin: 3px var(--gutter); width: auto; background: transparent;
 }
+.tool-header { display: flex; align-items: center; min-width: 0; }
+.tool-header > .tool-trigger { flex: 1; min-width: 0; }
+.plugin-tool-actions { display: flex; align-items: center; gap: 3px; flex: none; padding-right: 4px; }
+.plugin-tool-actions button { height: 24px; min-height: 24px; padding: 0 7px; font-size: 11px; }
 .tool-trigger {
   width: 100%; display: grid; align-items: center; text-align: left;
   grid-template-columns: 14px minmax(0, 1fr) auto;
@@ -754,6 +784,11 @@ body {
   }
   .sidebar.open { transform: translateX(0); }
   .scrim { display: block; position: fixed; inset: 0; z-index: 49; background: rgba(10, 12, 15, .5); }
+  .session-side-view {
+    position: absolute; inset: 0; z-index: 45; width: 100% !important; max-width: none; min-width: 0;
+    border-left: 0; background: var(--bg);
+  }
+  .session-side-view-divider { display: none; }
 
   .project-path-row input { font-size: 16px; }
 

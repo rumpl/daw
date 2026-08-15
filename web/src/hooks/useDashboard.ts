@@ -15,6 +15,7 @@ import type { SendMode } from '@/components/chat/Composer';
 import { useChat } from './useChat';
 import { useDraft } from './useDraft';
 import { useWorkspacePreferences } from '@/preferences';
+import { removeSessionSideViews } from '@/plugin-contributions';
 
 interface DashboardRoute {
   sessionId: string | null;
@@ -206,6 +207,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     }, false);
 
   const closeLiveSession = (sessionId: string, liveChatId: string) => {
+    removeSessionSideViews(sessionId);
     const closingIndex = liveSessions.findIndex((session) => session.sessionId === sessionId);
     const remaining = liveSessions.filter((session) => session.sessionId !== sessionId);
     const adjacentSession = closingIndex < 0

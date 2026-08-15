@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -19,7 +20,7 @@ function fallbackTitle(name: string): string {
   return name.split(/[_-]+/).filter(Boolean).map((part) => part[0]?.toUpperCase() + part.slice(1)).join(' ') || 'Tool';
 }
 
-export function ToolCard({ tool }: { tool: ToolActivity }) {
+export function ToolCard({ tool, actions }: { tool: ToolActivity; actions?: ReactNode }) {
   const args = tool.arguments ?? {};
   const renderer = toolRenderers[tool.name];
   const title = tool.displayName || renderer?.title || fallbackTitle(tool.name);
@@ -30,6 +31,7 @@ export function ToolCard({ tool }: { tool: ToolActivity }) {
   return (
     <div className="tool-with-images">
       <Collapsible className={`tool tool-${tone} tool-kind-${tool.name}`} aria-label={`tool ${tool.name}`}>
+        <div className="tool-header">
         <CollapsibleTrigger render={
           <Button type="button" variant="ghost" className="tool-trigger">
             <ChevronRight className="tool-chevron" size={14} aria-hidden="true" />
@@ -45,6 +47,8 @@ export function ToolCard({ tool }: { tool: ToolActivity }) {
             ) : null}
           </Button>
         } />
+        {actions}
+        </div>
         <CollapsibleContent>
           <div className="tool-body">{body}</div>
           {tool.truncated ? <p className="tool-note">Output truncated for display.</p> : null}

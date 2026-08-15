@@ -1,5 +1,6 @@
 import { PluginBoundary } from '@/components/plugins/PluginBoundary';
 import { PluginRenderContent } from '@/components/plugins/PluginRenderContent';
+import { PluginToolActions } from '@/components/plugins/PluginToolActions';
 import { ToolCard } from '@/components/tools/ToolCard';
 import type { ContributionContext } from '@/plugin-contributions';
 import { usePluginContributions } from '@/plugin-contributions';
@@ -26,7 +27,7 @@ export const ConversationRow = memo(function ConversationRow({ item, toolRendere
         <PluginBoundary message="Plugin renderer failed">
           <div className="plugin-tool-renderer"><PluginRenderContent render={() => renderer.render(item.tool!)} /></div>
         </PluginBoundary>
-      ) : <ToolCard tool={item.tool} />;
+      ) : <ToolCard tool={item.tool} actions={<PluginToolActions tool={item.tool} context={contributionContext} />} />;
     }
     case 'transfer':
       return item.transfer ? <TransferCard transfer={item.transfer} /> : null;
