@@ -92,6 +92,12 @@ func (s *Server) handleUpdateDefaultTool(w http.ResponseWriter, r *http.Request)
 		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the tool setting could not be saved")
 		return
 	}
+	// Filtering is global: live runtimes and future runtimes receive the same
+	// exclusion set. Each runtime still owns its independent MCP transport.
+	preference := s.preferences.Get("")
+	for _, chat := range s.chats.all() {
+		chat.chat.SetDisabledTools(preference.DisabledTools)
+	}
 	for _, tool := range options.Tools {
 		if tool.Name == name {
 			tool.Enabled = req.Enabled
@@ -102,7 +108,7 @@ func (s *Server) handleUpdateDefaultTool(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) resolveChatOptions(ctx context.Context, preference chatprefs.Preference) (protocol.ChatOptions, error) {
-	models, thinkingLevels, tools, err := s.adapter.ChatOptions(ctx, preference.Model)
+	models, thinkingLevels, tools, err := s.adapter.ChatOptions(ctx, preference.Model, s.pluginMCPServers())
 	if err != nil {
 		return protocol.ChatOptions{}, err
 	}

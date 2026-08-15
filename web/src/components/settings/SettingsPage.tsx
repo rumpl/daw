@@ -107,7 +107,7 @@ export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlu
         </section>
 
         <section className="settings-section" aria-labelledby="tool-settings">
-          <div><h3 id="tool-settings">Default tools</h3><p>Disabled tools are not offered to the model in chats opened or resumed after this change.</p></div>
+          <div><h3 id="tool-settings">Tools</h3><p>One global enabled filter applies to every live and future chat.</p></div>
           {options ? <ToolPicker tools={options.tools ?? []} disabled={false}
             onChange={(name, enabled) => void updateTool(name, enabled)}
             onRefresh={async () => setOptions(await api.chatOptions())} /> : <p className="hint">Loading tools…</p>}

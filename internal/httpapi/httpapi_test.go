@@ -457,16 +457,9 @@ func TestAmbientSessionContextCreatesDurableLineage(t *testing.T) {
 
 	ws := h.openWorkspace()
 	parent := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID}))
-	var creationContext string
-	for _, server := range h.fake.LastOpenRequest.MCPServers {
-		for _, value := range server.Env {
-			if strings.HasPrefix(value, "DAW_SESSION_CONTEXT=") {
-				creationContext = strings.TrimPrefix(value, "DAW_SESSION_CONTEXT=")
-			}
-		}
-	}
+	creationContext := h.fake.LastOpenRequest.SessionContext
 	if creationContext == "" {
-		t.Fatal("parent MCP environment did not receive a session context")
+		t.Fatal("parent runtime did not receive a session context")
 	}
 	child := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/plugins/lineage-test/backend/spawn", map[string]string{
 		"workspaceId": ws.WorkspaceID, "sessionContext": creationContext,
@@ -497,8 +490,15 @@ func TestCreateChatIncludesPluginMCPServers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "backend", "index.js"), []byte(`export async function activate() {}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	options := decodeJSON[protocol.ChatOptions](t, h.do(http.MethodGet, "/api/chat-options", nil))
+	if len(options.Tools) < 4 {
+		t.Fatalf("global catalog did not include plugin MCP tools: %#v", options.Tools)
+	}
 	_, _ = h.newChat()
 	servers := h.fake.LastOpenRequest.MCPServers
+	if h.fake.LastOpenRequest.SessionContext == "" {
+		t.Fatal("runtime did not receive its session context")
+	}
 	if len(servers) != 2 || servers[0].Name != "mcp-tools-local" || servers[1].Name != "mcp-tools-remote" {
 		t.Fatalf("plugin MCP servers were not passed to the adapter: %#v", servers)
 	}

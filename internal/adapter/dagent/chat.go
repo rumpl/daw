@@ -681,6 +681,12 @@ func (c *chat) SetModel(ctx context.Context, ref string) error {
 	return nil
 }
 
+func (c *chat) SetDisabledTools(names []string) {
+	c.mu.Lock()
+	c.sess.ExcludedTools = append([]string(nil), names...)
+	c.mu.Unlock()
+}
+
 func (c *chat) SetThinking(ctx context.Context, level string) error {
 	if err := c.idle(); err != nil {
 		return err

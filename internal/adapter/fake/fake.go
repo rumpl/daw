@@ -30,8 +30,9 @@ type Adapter struct {
 	Now func() time.Time
 	// Delay, when set, slows the scripted turn (used by e2e to exercise the
 	// Stop button). Default 0 keeps unit tests instant.
-	Delay           time.Duration
-	LastOpenRequest adapter.OpenRequest
+	Delay             time.Duration
+	LastOpenRequest   adapter.OpenRequest
+	LastDisabledTools []string
 }
 
 type storedSession struct {
@@ -154,12 +155,18 @@ func (a *Adapter) ReadSession(_ context.Context, sessionID string) (adapter.Stor
 }
 
 // ChatOptions returns process-wide choices without opening a session.
-func (a *Adapter) ChatOptions(context.Context, string) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
-	return fakeModelOptions("fake/model-a"), []string{"none", "low", "medium", "high"}, []protocol.ToolOption{
+func (a *Adapter) ChatOptions(_ context.Context, _ string, mcpServers []adapter.MCPServer) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
+	tools := []protocol.ToolOption{
 		{Name: "read_file", Category: "filesystem", Description: "Read a file", Enabled: true},
 		{Name: "write_file", Category: "filesystem", Description: "Write a file", Enabled: true},
 		{Name: "shell", Category: "shell", Description: "Run a shell command", Enabled: true},
-	}, nil
+	}
+	for _, server := range mcpServers {
+		tools = append(tools, protocol.ToolOption{
+			Name: server.Name, Category: "mcp", Description: "Tools from " + server.Name, Enabled: true,
+		})
+	}
+	return fakeModelOptions("fake/model-a"), []string{"none", "low", "medium", "high"}, tools, nil
 }
 
 // OpenChat creates or resumes a fake chat.
@@ -195,12 +202,8 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 	}
 	c := &chat{
 		a: a, st: st,
-		events:   make(chan protocol.Event, 256),
-		pending:  map[string]chan reply{},
-		disabled: map[string]bool{},
-	}
-	for _, name := range req.DisabledTools {
-		c.disabled[name] = true
+		events:  make(chan protocol.Event, 256),
+		pending: map[string]chan reply{},
 	}
 	c.run = protocol.RunStatus{
 		State: protocol.RunStateIdle,
@@ -235,7 +238,6 @@ type chat struct {
 	followUp   []protocol.QueuedMessage
 	toolN      int
 	msgN       int
-	disabled   map[string]bool
 }
 
 func (c *chat) SessionID() string { return c.st.id }
@@ -780,6 +782,12 @@ func (c *chat) SetModel(_ context.Context, ref string) error {
 	meta := c.Meta()
 	c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
 	return nil
+}
+
+func (c *chat) SetDisabledTools(names []string) {
+	c.a.mu.Lock()
+	c.a.LastDisabledTools = append([]string(nil), names...)
+	c.a.mu.Unlock()
 }
 
 func (c *chat) SetThinking(_ context.Context, level string) error {

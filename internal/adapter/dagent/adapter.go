@@ -129,16 +129,25 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 	return info, nil
 }
 
+// The catalog runtime uses non-empty sentinel chat context because some MCP
+// servers validate their runtime contract during process startup. Its tools are
+// only listed; calls always use a real chat runtime with real context.
+const (
+	toolCatalogChatID         = "tool-catalog"
+	toolCatalogSessionContext = "tool-catalog"
+)
+
 // ChatOptions resolves global model and built-in tool choices without opening
 // or persisting a chat. Plugin-provided MCP toolsets are attached when a chat
 // is created because their processes receive that chat's runtime context.
-func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
+func (a *Adapter) ChatOptions(ctx context.Context, model string, mcpServers []adapter.MCPServer) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
 	workingDir, err := os.UserHomeDir()
 	if err != nil {
 		workingDir = os.TempDir()
 	}
 	runConfig := a.runtimeConfig(workingDir)
-	loadRes, err := dashboardagent.Build(ctx, runConfig)
+	loadRes, err := dashboardagent.Build(ctx, runConfig,
+		resolveMCPRuntimeConfig(mcpServers, workingDir, toolCatalogChatID, toolCatalogSessionContext)...)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -185,6 +194,26 @@ func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.Mod
 		})
 	}
 	return models, runtimeThinkingLevels(ctx, rt), tools, nil
+}
+
+func resolveMCPRuntimeConfig(servers []adapter.MCPServer, workingDir, chatID, sessionContext string) []adapter.MCPServer {
+	resolved := make([]adapter.MCPServer, len(servers))
+	copy(resolved, servers)
+	for i := range resolved {
+		resolved[i].Env = append([]string(nil), resolved[i].Env...)
+		if chatID != "" {
+			resolved[i].Env = append(resolved[i].Env, "DAW_CHAT_ID="+chatID)
+		}
+		if sessionContext != "" {
+			resolved[i].Env = append(resolved[i].Env, "DAW_SESSION_CONTEXT="+sessionContext)
+		}
+		if resolved[i].WorkingDir == "" {
+			resolved[i].WorkingDir = workingDir
+		} else {
+			resolved[i].WorkingDir = filepath.Join(workingDir, filepath.FromSlash(resolved[i].WorkingDir))
+		}
+	}
+	return resolved
 }
 
 func modelOptions(choices []daruntime.ModelChoice) []protocol.ModelOption {
@@ -319,7 +348,8 @@ func storedIdentity(sess *session.Session) (agentName, model string) {
 func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapter.Chat, error) {
 	a.log.Info("opening agent chat", "chat", req.ChatID, "session", req.ResumeSessionID, "resumed", req.ResumeSessionID != "", "mcp_servers", len(req.MCPServers))
 	runConfig := a.runtimeConfig(req.WorkingDir)
-	loadRes, err := dashboardagent.Build(ctx, runConfig, req.MCPServers...)
+	loadRes, err := dashboardagent.Build(ctx, runConfig,
+		resolveMCPRuntimeConfig(req.MCPServers, req.WorkingDir, req.ChatID, req.SessionContext)...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", adapter.ErrInvalidAgent, err)
 	}

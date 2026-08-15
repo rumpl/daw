@@ -161,6 +161,30 @@ func TestDefaultToolOptionsCanBeReadAndUpdatedWithoutAChat(t *testing.T) {
 	t.Fatal("shell was absent from default tool options")
 }
 
+func TestGlobalToolFilterUpdatesLiveChats(t *testing.T) {
+	root := t.TempDir()
+	s := newPreferenceTestServer(t, root, "")
+	s.workspaces.Add("ws", root)
+	recorder := httptest.NewRecorder()
+	s.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "", "", nil, "", "")
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("open chat: %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.SetPathValue("tool", "shell")
+	recorder = httptest.NewRecorder()
+	s.handleUpdateDefaultTool(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("update global tool: %d %s", recorder.Code, recorder.Body.String())
+	}
+	got := s.adapter.(*fake.Adapter).LastDisabledTools
+	if len(got) != 1 || got[0] != "shell" {
+		t.Fatalf("live runtime filter = %v, want [shell]", got)
+	}
+}
+
 func TestDefaultToolOptionsRejectUnknownTool(t *testing.T) {
 	s := newPreferenceTestServer(t, t.TempDir(), "")
 	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/missing", strings.NewReader(`{"enabled":false}`))

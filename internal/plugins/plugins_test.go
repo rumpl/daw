@@ -140,12 +140,9 @@ func TestMCPServersAreNamespacedAndWorkspaceResolved(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(base, "mcp-plugin", "backend", "index.js"), []byte(`export default () => new Response()`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	workspace := t.TempDir()
-	servers := MCPServers(base, workspace, "chat_test", "context_test")
-	if len(servers) != 2 || servers[0].PluginID != "mcp-plugin" || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != filepath.Join(workspace, "tools") ||
-		len(servers[0].Env) != 3 || !slices.Contains(servers[0].Env, "TOKEN=x") ||
-		!slices.Contains(servers[0].Env, "DAW_CHAT_ID=chat_test") ||
-		!slices.Contains(servers[0].Env, "DAW_SESSION_CONTEXT=context_test") || servers[1].Name != "mcp-plugin-remote" {
+	servers := MCPServers(base)
+	if len(servers) != 2 || servers[0].PluginID != "mcp-plugin" || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != "tools" ||
+		len(servers[0].Env) != 1 || !slices.Contains(servers[0].Env, "TOKEN=x") || servers[1].Name != "mcp-plugin-remote" {
 		t.Fatalf("unexpected MCP servers: %#v", servers)
 	}
 }

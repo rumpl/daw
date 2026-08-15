@@ -506,8 +506,9 @@ func backendRevision(root string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil))[:16], nil
 }
 
-// MCPServers resolves every manifest-declared MCP server for a workspace.
-func MCPServers(dir, workingDir, chatID, sessionContext string, active ...func(string) bool) []adapter.MCPServer {
+// MCPServers resolves every globally configured plugin MCP server. WorkingDir
+// remains relative here and is resolved independently for each runtime.
+func MCPServers(dir string, active ...func(string) bool) []adapter.MCPServer {
 	var out []adapter.MCPServer
 	for _, plugin := range Catalog(dir).Plugins {
 		if len(active) > 0 && !active[0](plugin.ID) {
@@ -523,23 +524,12 @@ func MCPServers(dir, workingDir, chatID, sessionContext string, active ...func(s
 			continue
 		}
 		for _, server := range m.Backend.MCP {
-			env := make([]string, 0, len(server.Env)+2)
+			env := make([]string, 0, len(server.Env))
 			for key, value := range server.Env {
 				env = append(env, key+"="+value)
 			}
-			// A local MCP process is scoped to one live chat, so trusted plugin
-			// tools can identify their caller without relying on model-supplied IDs.
-			if chatID != "" {
-				env = append(env, "DAW_CHAT_ID="+chatID)
-			}
-			if sessionContext != "" {
-				env = append(env, "DAW_SESSION_CONTEXT="+sessionContext)
-			}
 			sort.Strings(env)
-			cwd := workingDir
-			if server.WorkingDir != "" {
-				cwd = filepath.Join(workingDir, filepath.FromSlash(server.WorkingDir))
-			}
+			cwd := filepath.FromSlash(server.WorkingDir)
 			command := server.Command
 			args := append([]string(nil), server.Args...)
 			if command != "" && !filepath.IsAbs(command) && strings.Contains(command, "/") {

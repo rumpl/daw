@@ -40,11 +40,14 @@ type Info struct {
 type MCPServer struct {
 	// PluginID identifies trusted plugin-owned MCP processes so the HTTP host
 	// can inject that plugin's authenticated dashboard transport.
-	PluginID   string
-	Name       string
-	Command    string
-	Args       []string
-	Env        []string
+	PluginID string
+	Name     string
+	Command  string
+	Args     []string
+	Env      []string
+	// WorkingDir is relative to the runtime working directory. Keeping the
+	// declarative value here lets the same global MCP configuration be used to
+	// discover tools and to create each chat's independent transport.
 	WorkingDir string
 	URL        string
 	Transport  string
@@ -54,6 +57,7 @@ type MCPServer struct {
 // OpenRequest opens (or resumes) exactly one live chat.
 type OpenRequest struct {
 	ChatID          string
+	SessionContext  string
 	WorkingDir      string
 	ResumeSessionID string
 	// SessionAttributes are persisted by docker-agent on newly-created sessions.
@@ -68,8 +72,8 @@ type OpenRequest struct {
 	// place. A stale or unsupported preference is ignored by the adapter.
 	Model         string
 	ThinkingLevel string
-	// DisabledTools are restored from the process-wide dashboard exclusion
-	// set into docker-agent's per-session filter before the chat is exposed.
+	// DisabledTools is the global dashboard exclusion set applied to every
+	// runtime through docker-agent's session filter.
 	DisabledTools []string
 	MCPServers    []MCPServer
 }
@@ -85,8 +89,9 @@ type Adapter interface {
 	// runtime, loading toolsets, or claiming the session in the chat registry.
 	ReadSession(ctx context.Context, sessionID string) (StoredSession, error)
 	// ChatOptions resolves the process-wide model and tool catalogs without
-	// creating a workspace chat or session.
-	ChatOptions(ctx context.Context, model string) (models []protocol.ModelOption, thinkingLevels []string, tools []protocol.ToolOption, err error)
+	// creating a workspace chat or session. MCPServers is the same global
+	// configuration passed to every runtime; discovery creates its own transport.
+	ChatOptions(ctx context.Context, model string, mcpServers []MCPServer) (models []protocol.ModelOption, thinkingLevels []string, tools []protocol.ToolOption, err error)
 	OpenChat(ctx context.Context, req OpenRequest) (Chat, error)
 	Close() error
 }
@@ -128,6 +133,7 @@ type Chat interface {
 
 	SetModel(ctx context.Context, ref string) error
 	SetThinking(ctx context.Context, level string) error
+	SetDisabledTools(names []string)
 
 	Retitle(ctx context.Context, title string) error
 	Compact(ctx context.Context) error

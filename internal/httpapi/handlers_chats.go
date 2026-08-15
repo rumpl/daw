@@ -24,12 +24,8 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"))
 }
 
-// pluginMCPServers equips trusted local plugin MCP processes with the same
-// authenticated dashboard client transport as their owning Node backend. The
-// injected SDK chooses PluginAPIOrigin for web mode and PluginAPISocket for
-// Electron, so plugins never need a second ad-hoc socket to reach a backend.
-func (s *Server) pluginMCPServers(workingDir, chatID, sessionContext string) []adapter.MCPServer {
-	servers := plugins.MCPServers(s.pluginDir, workingDir, chatID, sessionContext, s.pluginManagement.running)
+func (s *Server) pluginMCPServers() []adapter.MCPServer {
+	servers := plugins.MCPServers(s.pluginDir, s.pluginManagement.running)
 	preparedSDK := map[string]bool{}
 	reserved := map[string]bool{
 		"DAW_API_ORIGIN":   true,
@@ -186,13 +182,13 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	creationContext := s.sessionContexts.Issue(sessioncontext.Context{ParentChatID: chatID})
 	preference := s.preferences.Get(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
-		ChatID: chatID, WorkingDir: workingDir, ResumeSessionID: resumeID,
+		ChatID: chatID, SessionContext: creationContext, WorkingDir: workingDir, ResumeSessionID: resumeID,
 		SessionAttributes:  attributes,
 		PersistImmediately: persistImmediately,
 		Model:              preference.Model,
 		ThinkingLevel:      preference.ThinkingLevel,
 		DisabledTools:      preference.DisabledTools,
-		MCPServers:         s.pluginMCPServers(workingDir, chatID, creationContext),
+		MCPServers:         s.pluginMCPServers(),
 	})
 	if err != nil {
 		s.sessionContexts.Revoke(creationContext)

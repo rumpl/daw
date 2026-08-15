@@ -381,16 +381,16 @@ unique `id` and exactly one of:
 - remote: HTTP(S) `url`, optional `transport` (`sse`, `streamable`, or
   `streamable-http`) and `headers`
 
-They are namespaced `<plugin-id>-<server-id>` and attached as docker-agent native
-MCP toolsets whenever a chat opens. MCP tools, prompts, elicitation, sampling,
-change notifications, lifecycle supervision, and shutdown therefore use the
-matched SDK directly. Existing live chats retain their opened graph after a
-plugin edit; new chats use the latest manifest. Trusted local MCP processes
+They are namespaced `<plugin-id>-<server-id>` and included in the global tool
+catalog and enabled filter. Each chat runtime creates an independent native MCP
+transport from that shared configuration. Existing transports retain their
+opened graph after a plugin edit; reopening uses the latest manifest. Trusted
+local MCP processes
 receive the owning plugin's process-private `@daw/plugin-backend` API transport
 and credentials, so they can call `/api/plugins/${pluginId}/backend/...`; the
 SDK selects loopback HTTP in web mode and UDS in Electron. Remote MCP servers
-never receive these credentials. Local MCP processes also receive `DAW_CHAT_ID`
-and `DAW_SESSION_CONTEXT` for their owning chat. Backends and local MCP
+never receive these credentials. Local MCP processes receive `DAW_CHAT_ID` and
+`DAW_SESSION_CONTEXT` when each runtime creates its transport. Backends and local MCP
 processes inherit `DAW_INSTANCE_ID`; any unavoidable private socket, lock, or
 other IPC resource must include it so concurrent web and Electron instances do
 not collide, though the authenticated backend route is preferred.

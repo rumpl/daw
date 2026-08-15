@@ -184,11 +184,13 @@ Plugins contribute agent tools through native MCP servers declared under
 - `command` with optional `args`, `env`, and workspace-relative `workingDir`
 - `url` with optional `transport` and `headers`
 
-Server names are namespaced as `<plugin-id>-<server-id>`. A fresh MCP toolset is
-attached whenever a chat opens, so tools, prompts, elicitation, sampling, tool
-change notifications, restart supervision, and shutdown all use docker-agent's
-native MCP runtime. Editing a plugin affects newly opened chats; existing live
-chats retain the toolset graph they opened with.
+Server names are namespaced as `<plugin-id>-<server-id>`. MCP server declarations
+are part of the global tool catalog and use the same global enabled filter as
+built-in tools. Each chat runtime creates its own MCP transport from that shared
+configuration, so prompts, elicitation, sampling, tool change notifications,
+restart supervision, and shutdown still use docker-agent's native MCP runtime.
+Editing a plugin updates the global catalog; existing transports retain the graph
+they opened with until their runtime is reopened.
 
 Environment and header values are trusted operator configuration and are never
 returned by the plugin catalog. Remote URLs must use HTTP(S), and local working
@@ -198,9 +200,9 @@ Trusted local MCP processes receive the same injected `@daw/plugin-backend`
 transport and credentials as their owning backend. They can import `dashboard`
 and `pluginId` and call `/api/plugins/${pluginId}/backend/...`; the SDK uses the
 loopback HTTP origin in web mode and the dashboard UDS in Electron automatically.
-They also receive `DAW_CHAT_ID` and `DAW_SESSION_CONTEXT` for their owning live
-chat. Credentials remain process-private and must never be returned as tool
-output or logged. Remote MCP servers never receive these local credentials.
+They also receive `DAW_CHAT_ID` and `DAW_SESSION_CONTEXT` when each runtime
+creates its transport. Credentials remain process-private and must never be
+returned as tool output or logged. Remote MCP servers never receive these local credentials.
 
 Every plugin backend and local MCP process also inherits `DAW_INSTANCE_ID`, a
 short identifier unique to the running dashboard process. Prefer the authenticated
