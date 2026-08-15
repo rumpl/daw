@@ -490,7 +490,7 @@ func TestCreateChatIncludesPluginMCPServers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"apiVersion":1,"id":"mcp-tools","name":"MCP tools","backend":{"entry":"backend/index.js","mcp":[{"id":"remote","url":"https://example.test/mcp","transport":"streamable-http"}]}}`
+	manifest := `{"apiVersion":1,"id":"mcp-tools","name":"MCP tools","backend":{"entry":"backend/index.js","mcp":[{"id":"local","command":"node","args":["tool.mjs"],"env":{"DAW_API_TOKEN":"manifest-must-not-override-host"}},{"id":"remote","url":"https://example.test/mcp","transport":"streamable-http"}]}}`
 	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -498,8 +498,20 @@ func TestCreateChatIncludesPluginMCPServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = h.newChat()
-	if len(h.fake.LastOpenRequest.MCPServers) != 1 || h.fake.LastOpenRequest.MCPServers[0].Name != "mcp-tools-remote" {
-		t.Fatalf("plugin MCP servers were not passed to the adapter: %#v", h.fake.LastOpenRequest.MCPServers)
+	servers := h.fake.LastOpenRequest.MCPServers
+	if len(servers) != 2 || servers[0].Name != "mcp-tools-local" || servers[1].Name != "mcp-tools-remote" {
+		t.Fatalf("plugin MCP servers were not passed to the adapter: %#v", servers)
+	}
+	localEnv := strings.Join(servers[0].Env, "\n")
+	if !strings.Contains(localEnv, "DAW_PLUGIN_ID=mcp-tools") ||
+		!strings.Contains(localEnv, "DAW_API_TOKEN=") ||
+		strings.Contains(localEnv, "manifest-must-not-override-host") ||
+		!strings.Contains(localEnv, "DAW_PLUGIN_TOKEN=") {
+		t.Fatalf("local plugin MCP did not receive its authenticated API transport: %#v", servers[0].Env)
+	}
+	remoteEnv := strings.Join(servers[1].Env, "\n")
+	if strings.Contains(remoteEnv, "DAW_API_TOKEN=") || strings.Contains(remoteEnv, "DAW_PLUGIN_TOKEN=") {
+		t.Fatalf("remote MCP received local process credentials: %#v", servers[1].Env)
 	}
 }
 
@@ -1389,7 +1401,7 @@ func TestGlobalChatOptionsDoNotCreateSession(t *testing.T) {
 	if options.Model != "fake/model-a" || options.ThinkingLevel != "medium" {
 		t.Fatalf("unexpected defaults: %#v", options)
 	}
-	if len(options.Models) < 2 || len(options.ThinkingLevels) == 0 {
+	if len(options.Models) < 2 || len(options.ThinkingLevels) == 0 || len(options.Tools) == 0 {
 		t.Fatalf("missing global choices: %#v", options)
 	}
 	if sessions := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/sessions/live", nil)); len(sessions) != 0 {
@@ -1516,48 +1528,6 @@ func TestDisposeCancelsPendingDialogs(t *testing.T) {
 	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventChatClosed }, 5*time.Second)
 }
 
-func TestToolCatalogAndToggle(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	path := "/api/chats/" + ref.ChatID + "/tools"
-	tools := decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, path, nil))
-	if len(tools) == 0 || !tools[0].Enabled {
-		t.Fatalf("expected enabled tools, got %+v", tools)
-	}
-	updated := decodeJSON[protocol.ToolOption](t, h.do(http.MethodPatch,
-		path+"/"+tools[0].Name, protocol.UpdateToolRequest{Enabled: false}))
-	if updated.Name != tools[0].Name || updated.Enabled {
-		t.Fatalf("expected disabled tool, got %+v", updated)
-	}
-	tools = decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, path, nil))
-	if tools[0].Enabled {
-		t.Fatalf("tool toggle was not retained: %+v", tools)
-	}
-}
-
-func TestGlobalToolToggleAppliesToNewChats(t *testing.T) {
-	h := newHarness(t)
-	first, ws := h.newChat()
-	path := "/api/chats/" + first.ChatID + "/tools"
-	if response := h.do(http.MethodPatch, path+"/shell", protocol.UpdateToolRequest{Enabled: false}); response.StatusCode != http.StatusOK {
-		t.Fatalf("disable shell: %d", response.StatusCode)
-	}
-	if response := h.do(http.MethodDelete, "/api/chats/"+first.ChatID, nil); response.StatusCode != http.StatusOK {
-		t.Fatalf("dispose first chat: %d", response.StatusCode)
-	}
-	second := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID}))
-	tools := decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, "/api/chats/"+second.ChatID+"/tools", nil))
-	for _, tool := range tools {
-		if tool.Name == "shell" {
-			if tool.Enabled {
-				t.Fatal("global shell exclusion was not inherited")
-			}
-			return
-		}
-	}
-	t.Fatal("shell tool was not found")
-}
-
 func TestErrorShapeHasNoInternals(t *testing.T) {
 	h := newHarness(t)
 	resp := h.do(http.MethodGet, "/api/chats/does-not-exist", nil)
@@ -1583,7 +1553,6 @@ func TestNoSecretsInResponses(t *testing.T) {
 		"/api/chats/" + ref.ChatID,
 		"/api/chats/" + ref.ChatID + "/models",
 		"/api/chats/" + ref.ChatID + "/commands",
-		"/api/chats/" + ref.ChatID + "/tools",
 		"/api/chats/" + ref.ChatID + "/stats",
 	}
 	for _, p := range paths {

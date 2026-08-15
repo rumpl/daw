@@ -686,13 +686,14 @@ type UpdateConfigRequest struct {
 	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
 }
 
-// ChatOptions is the process-wide model catalog and the defaults inherited by
-// new chats. Existing sessions retain their own overrides when resumed.
+// ChatOptions is the process-wide model and tool catalog and the defaults
+// inherited by new chats. Existing sessions retain model overrides when resumed.
 type ChatOptions struct {
 	Model          string        `json:"model"`
 	ThinkingLevel  string        `json:"thinkingLevel"`
 	ThinkingLevels []string      `json:"thinkingLevels"`
 	Models         []ModelOption `json:"models"`
+	Tools          []ToolOption  `json:"tools"`
 }
 
 // ToolConfirmationReply is POST /api/chats/:id/tool-confirmation.

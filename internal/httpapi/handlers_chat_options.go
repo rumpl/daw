@@ -68,8 +68,41 @@ func (s *Server) handleUpdateChatOptions(w http.ResponseWriter, r *http.Request)
 	s.json(w, http.StatusOK, options)
 }
 
+func (s *Server) handleUpdateDefaultTool(w http.ResponseWriter, r *http.Request) {
+	req, ok := decode[protocol.UpdateToolRequest](w, r, s)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("tool"))
+	if name == "" || len(name) > 256 {
+		s.fail(w, http.StatusBadRequest, "invalid_tool", "a valid tool name is required")
+		return
+	}
+	options, err := s.resolveChatOptions(r.Context(), s.preferences.Get(""))
+	if err != nil {
+		s.chatOptionsUnavailable(w, err)
+		return
+	}
+	if !slices.ContainsFunc(options.Tools, func(tool protocol.ToolOption) bool { return tool.Name == name }) {
+		s.fail(w, http.StatusNotFound, "unknown_tool", "unknown tool")
+		return
+	}
+	if err := s.preferences.SetToolEnabled(name, req.Enabled); err != nil {
+		s.log.Error("update default tool preference", "error", err)
+		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the tool setting could not be saved")
+		return
+	}
+	for _, tool := range options.Tools {
+		if tool.Name == name {
+			tool.Enabled = req.Enabled
+			s.json(w, http.StatusOK, tool)
+			return
+		}
+	}
+}
+
 func (s *Server) resolveChatOptions(ctx context.Context, preference chatprefs.Preference) (protocol.ChatOptions, error) {
-	models, thinkingLevels, err := s.adapter.ChatOptions(ctx, preference.Model)
+	models, thinkingLevels, tools, err := s.adapter.ChatOptions(ctx, preference.Model)
 	if err != nil {
 		return protocol.ChatOptions{}, err
 	}
@@ -103,9 +136,13 @@ func (s *Server) resolveChatOptions(ctx context.Context, preference chatprefs.Pr
 			thinkingLevel = thinkingLevels[0]
 		}
 	}
+	for i := range tools {
+		tools[i].Enabled = !slices.Contains(preference.DisabledTools, tools[i].Name)
+	}
+	slices.SortFunc(tools, func(a, b protocol.ToolOption) int { return strings.Compare(a.Name, b.Name) })
 	return protocol.ChatOptions{
 		Model: model, ThinkingLevel: thinkingLevel,
-		Models: models, ThinkingLevels: thinkingLevels,
+		Models: models, ThinkingLevels: thinkingLevels, Tools: tools,
 	}, nil
 }
 

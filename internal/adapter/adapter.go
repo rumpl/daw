@@ -38,6 +38,9 @@ type Info struct {
 }
 
 type MCPServer struct {
+	// PluginID identifies trusted plugin-owned MCP processes so the HTTP host
+	// can inject that plugin's authenticated dashboard transport.
+	PluginID   string
 	Name       string
 	Command    string
 	Args       []string
@@ -81,9 +84,9 @@ type Adapter interface {
 	// ReadSession reads persisted session history without constructing a live
 	// runtime, loading toolsets, or claiming the session in the chat registry.
 	ReadSession(ctx context.Context, sessionID string) (StoredSession, error)
-	// ChatOptions resolves the process-wide model catalog and the thinking
-	// levels supported by model without creating a workspace chat or session.
-	ChatOptions(ctx context.Context, model string) (models []protocol.ModelOption, thinkingLevels []string, err error)
+	// ChatOptions resolves the process-wide model and tool catalogs without
+	// creating a workspace chat or session.
+	ChatOptions(ctx context.Context, model string) (models []protocol.ModelOption, thinkingLevels []string, tools []protocol.ToolOption, err error)
 	OpenChat(ctx context.Context, req OpenRequest) (Chat, error)
 	Close() error
 }
@@ -122,11 +125,9 @@ type Chat interface {
 
 	Models(ctx context.Context) []protocol.ModelOption
 	Commands(ctx context.Context) []protocol.CommandInfo
-	Tools(ctx context.Context) ([]protocol.ToolOption, error)
 
 	SetModel(ctx context.Context, ref string) error
 	SetThinking(ctx context.Context, level string) error
-	SetToolEnabled(ctx context.Context, name string, enabled bool) error
 
 	Retitle(ctx context.Context, title string) error
 	Compact(ctx context.Context) error

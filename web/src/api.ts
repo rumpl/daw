@@ -77,6 +77,8 @@ export async function request<T>(method: string, path: string, body?: unknown, o
 
 export type PluginManagement = ManagedPlugin;
 
+export const CHAT_OPTIONS_CHANGE_EVENT = 'dawui:chat-options-change';
+
 export const api = {
   request,
   setCsrfToken(token: string): void {
@@ -133,6 +135,9 @@ export const api = {
   updateChatOptions(patch: UpdateConfigRequest): Promise<ChatOptions> {
     return request<ChatOptions>('PATCH', '/api/chat-options', patch);
   },
+  updateDefaultTool(name: string, enabled: boolean): Promise<ToolOption> {
+    return request<ToolOption>('PATCH', `/api/chat-options/tools/${encodeURIComponent(name)}`, { enabled });
+  },
   createChat(workspaceId: string, executionLocationId?: string): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats', { workspaceId, ...(executionLocationId ? { executionLocationId } : {}) });
   },
@@ -179,12 +184,6 @@ export const api = {
   },
   commands(chatId: string): Promise<CommandInfo[]> {
     return request<CommandInfo[]>('GET', `/api/chats/${encodeURIComponent(chatId)}/commands`);
-  },
-  tools(chatId: string): Promise<ToolOption[]> {
-    return request<ToolOption[]>('GET', `/api/chats/${encodeURIComponent(chatId)}/tools`);
-  },
-  updateTool(chatId: string, name: string, enabled: boolean): Promise<ToolOption> {
-    return request<ToolOption>('PATCH', `/api/chats/${encodeURIComponent(chatId)}/tools/${encodeURIComponent(name)}`, { enabled });
   },
   confirmTool(chatId: string, reply: ToolConfirmationReply): Promise<Accepted> {
     return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/tool-confirmation`, reply);

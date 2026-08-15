@@ -1,8 +1,9 @@
 // Command dawui runs the docker-agent web dashboard.
 //
-// It binds to the literal loopback host 127.0.0.1 and serves both the API and
-// the embedded frontend from a single process. 127.0.0.1 is the security
-// boundary; there is deliberately no HOST override.
+// By default it binds to the literal loopback host 127.0.0.1 and serves both
+// the API and embedded frontend from one process. The Electron host instead
+// sets DAWUI_SOCKET, making the same HTTP server listen only on a Unix domain
+// socket. There is deliberately no configurable TCP host.
 package main
 
 import (
@@ -51,14 +52,30 @@ func run() error {
 		logLevel = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	// Plugin backends and per-chat MCP processes inherit this identifier. It
+	// lets plugins isolate private IPC resources when a web server and Electron
+	// (or multiple development servers) run at the same time.
+	if err := os.Setenv("DAW_INSTANCE_ID", strconv.Itoa(os.Getpid())); err != nil {
+		return fmt.Errorf("setting dashboard instance id: %w", err)
+	}
 	// docker-agent logs through slog's process-global default. DAW passes its
 	// own logger explicitly, so discard the global logger to keep SDK internals
 	// out of the dashboard's output.
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
-	port, err := resolvePort(os.Getenv("PORT"))
-	if err != nil {
-		return err
+	socketPath := strings.TrimSpace(os.Getenv("DAWUI_SOCKET"))
+	port := defaultPort
+	var err error
+	if socketPath == "" {
+		port, err = resolvePort(os.Getenv("PORT"))
+		if err != nil {
+			return err
+		}
+	} else {
+		socketPath, err = filepath.Abs(socketPath)
+		if err != nil {
+			return fmt.Errorf("invalid DAWUI_SOCKET: %w", err)
+		}
 	}
 
 	guard, _, err := pathsec.NewGuard(pathsec.HomeRoots())
@@ -146,7 +163,15 @@ func run() error {
 	if err := os.MkdirAll(pluginDataDir, 0o700); err != nil {
 		return fmt.Errorf("creating plugin data directory: %w", err)
 	}
-	log.Info("dashboard starting", "version", appVersion, "port", port, "plugin_directory", pluginDir, "plugin_data_directory", pluginDataDir, "fake_adapter", fakeAdapter)
+	listenNetwork := "tcp4"
+	listenAddress := net.JoinHostPort(bindHost, strconv.Itoa(port))
+	pluginAPIOrigin := "http://" + listenAddress
+	if socketPath != "" {
+		listenNetwork = "unix"
+		listenAddress = socketPath
+		pluginAPIOrigin = "http://localhost"
+	}
+	log.Info("dashboard starting", "version", appVersion, "network", listenNetwork, "address", listenAddress, "plugin_directory", pluginDir, "plugin_data_directory", pluginDataDir, "fake_adapter", fakeAdapter)
 
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,
@@ -159,18 +184,30 @@ func run() error {
 		WorkspaceHistoryFile: workspaceHistoryFile,
 		ChatPreferencesFile:  chatPreferencesFile,
 		PluginDir:            pluginDir,
-		PluginAPIOrigin:      "http://" + net.JoinHostPort(bindHost, strconv.Itoa(port)),
+		PluginAPIOrigin:      pluginAPIOrigin,
+		PluginAPISocket:      socketPath,
 		PluginDataDir:        pluginDataDir,
 	})
 
-	addr := net.JoinHostPort(bindHost, strconv.Itoa(port))
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", addr)
+	var ln net.Listener
+	if socketPath != "" {
+		ln, err = listenUnix(ctx, socketPath)
+	} else {
+		ln, err = (&net.ListenConfig{}).Listen(ctx, listenNetwork, listenAddress)
+	}
 	if err != nil {
 		if isAddrInUse(err) {
+			if socketPath != "" {
+				return fmt.Errorf("Unix socket %s is already in use (EADDRINUSE)", socketPath)
+			}
 			return fmt.Errorf("port %d on %s is already in use (EADDRINUSE). "+
 				"Stop the other process or set PORT to a free port between 1024 and 65535", port, bindHost)
 		}
-		return fmt.Errorf("listening on %s: %w", addr, err)
+		return fmt.Errorf("listening on %s: %w", listenAddress, err)
+	}
+	defer ln.Close()
+	if socketPath != "" {
+		defer os.Remove(socketPath)
 	}
 
 	httpServer := &http.Server{
@@ -183,7 +220,11 @@ func run() error {
 	if !webassets.Available() {
 		log.Warn("frontend assets are not built into this binary; run `make build`")
 	}
-	fmt.Printf("docker-agent dashboard listening on http://%s\n", addr)
+	if socketPath != "" {
+		fmt.Printf("docker-agent dashboard listening on unix://%s\n", socketPath)
+	} else {
+		fmt.Printf("docker-agent dashboard listening on http://%s\n", listenAddress)
+	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
 	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
 	fmt.Printf("  global plugins: %s\n", pluginDir)
@@ -244,6 +285,38 @@ func resolvePort(v string) (int, error) {
 
 func isAddrInUse(err error) bool {
 	return errors.Is(err, syscall.EADDRINUSE)
+}
+
+// listenUnix removes an abandoned socket left after an unclean exit, but never
+// unlinks a live listener or an ordinary file. The socket is owner-only because
+// it carries the complete local dashboard API.
+func listenUnix(ctx context.Context, path string) (net.Listener, error) {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("DAWUI_SOCKET exists and is not a socket: %s", path)
+		}
+		conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			return nil, syscall.EADDRINUSE
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("removing stale Unix socket: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("checking Unix socket: %w", err)
+	}
+
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = ln.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("securing Unix socket: %w", err)
+	}
+	return ln, nil
 }
 
 func splitList(v string) []string {

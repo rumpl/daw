@@ -109,12 +109,14 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         thinkingLevels={dashboard.state.meta?.thinkingLevels ?? dashboard.defaultThinkingLevels}
         tools={dashboard.tools}
         configDisabled={dashboard.busyAction || dashboard.state.run.state !== 'idle'}
+        toolsDisabled={dashboard.busyAction}
         compactDisabled={!dashboard.chatId || dashboard.busyAction || dashboard.state.run.state !== 'idle'}
         usageTokens={dashboard.state.usage.inputTokens + dashboard.state.usage.outputTokens}
         usageCost={dashboard.state.usage.cost}
         onSelectModel={(model) => dashboard.patchConfig({ model })}
         onSelectThinking={(thinkingLevel) => dashboard.patchConfig({ thinkingLevel })}
         onToolChange={dashboard.setToolEnabled}
+        onRefreshTools={dashboard.refreshChatOptions}
         onCompact={dashboard.compact}
         onAddAttachments={dashboard.addAttachments}
         onRemoveAttachment={dashboard.removeAttachment}

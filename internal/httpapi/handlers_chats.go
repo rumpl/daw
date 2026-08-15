@@ -24,6 +24,53 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"))
 }
 
+// pluginMCPServers equips trusted local plugin MCP processes with the same
+// authenticated dashboard client transport as their owning Node backend. The
+// injected SDK chooses PluginAPIOrigin for web mode and PluginAPISocket for
+// Electron, so plugins never need a second ad-hoc socket to reach a backend.
+func (s *Server) pluginMCPServers(workingDir, chatID, sessionContext string) []adapter.MCPServer {
+	servers := plugins.MCPServers(s.pluginDir, workingDir, chatID, sessionContext, s.pluginManagement.running)
+	preparedSDK := map[string]bool{}
+	reserved := map[string]bool{
+		"DAW_API_ORIGIN":   true,
+		"DAW_API_SOCKET":   true,
+		"DAW_API_TOKEN":    true,
+		"DAW_PLUGIN_ID":    true,
+		"DAW_PLUGIN_TOKEN": true,
+	}
+	for i := range servers {
+		server := &servers[i]
+		if server.Command == "" || server.PluginID == "" {
+			continue
+		}
+		if !preparedSDK[server.PluginID] {
+			preparedSDK[server.PluginID] = true
+			if backend, err := plugins.ResolveBackend(s.pluginDir, server.PluginID); err == nil {
+				if err := installBackendSDK(backend.Directory); err != nil {
+					s.log.Warn("installing plugin SDK for local MCP", "plugin", server.PluginID, "error", err)
+				}
+			}
+		}
+		env := server.Env[:0]
+		for _, value := range server.Env {
+			name, _, _ := strings.Cut(value, "=")
+			if !reserved[name] {
+				env = append(env, value)
+			}
+		}
+		env = append(env,
+			"DAW_API_ORIGIN="+s.pluginAPIOrigin,
+			"DAW_API_SOCKET="+s.pluginAPISocket,
+			"DAW_API_TOKEN="+s.csrf,
+			"DAW_PLUGIN_ID="+server.PluginID,
+			"DAW_PLUGIN_TOKEN="+s.backends.internalToken,
+		)
+		sort.Strings(env)
+		server.Env = env
+	}
+	return servers
+}
+
 func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 	req, ok := decode[protocol.ResumeChatRequest](w, r, s)
 	if !ok {
@@ -145,7 +192,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		Model:              preference.Model,
 		ThinkingLevel:      preference.ThinkingLevel,
 		DisabledTools:      preference.DisabledTools,
-		MCPServers:         plugins.MCPServers(s.pluginDir, workingDir, chatID, creationContext, s.pluginManagement.running),
+		MCPServers:         s.pluginMCPServers(workingDir, chatID, creationContext),
 	})
 	if err != nil {
 		s.sessionContexts.Revoke(creationContext)
@@ -370,66 +417,6 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name < cmds[j].Name })
 	s.json(w, http.StatusOK, cmds)
-}
-
-func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.mustChat(w, r)
-	if !ok {
-		return
-	}
-	options, err := c.chat.Tools(r.Context())
-	if err != nil {
-		s.fail(w, http.StatusFailedDependency, "tools_unavailable", "the agent tools could not be loaded")
-		return
-	}
-	if options == nil {
-		options = []protocol.ToolOption{}
-	}
-	sort.Slice(options, func(i, j int) bool { return options[i].Name < options[j].Name })
-	s.json(w, http.StatusOK, options)
-}
-
-func (s *Server) handleTool(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.mustChat(w, r)
-	if !ok {
-		return
-	}
-	req, ok := decode[protocol.UpdateToolRequest](w, r, s)
-	if !ok {
-		return
-	}
-	name := strings.TrimSpace(r.PathValue("tool"))
-	if name == "" || len(name) > 256 {
-		s.fail(w, http.StatusBadRequest, "invalid_tool", "a valid tool name is required")
-		return
-	}
-	if err := c.chat.SetToolEnabled(r.Context(), name, req.Enabled); err != nil {
-		switch {
-		case errors.Is(err, adapter.ErrBusy):
-			s.fail(w, http.StatusConflict, "busy", "tools can only change while the agent is idle")
-		case errors.Is(err, adapter.ErrNotFound):
-			s.fail(w, http.StatusNotFound, "unknown_tool", "unknown tool")
-		default:
-			s.fail(w, http.StatusBadRequest, "tool_update_failed", "that tool could not be updated")
-		}
-		return
-	}
-	options, err := c.chat.Tools(r.Context())
-	if err != nil {
-		s.fail(w, http.StatusFailedDependency, "tools_unavailable", "the agent tools could not be loaded")
-		return
-	}
-	if err := s.preferences.SetToolEnabled(name, req.Enabled); err != nil {
-		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the tool was updated but could not be saved")
-		return
-	}
-	for _, option := range options {
-		if option.Name == name {
-			s.json(w, http.StatusOK, option)
-			return
-		}
-	}
-	s.fail(w, http.StatusNotFound, "unknown_tool", "unknown tool")
 }
 
 func (s *Server) handleToolConfirmation(w http.ResponseWriter, r *http.Request) {

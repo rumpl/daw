@@ -643,65 +643,6 @@ func (c *chat) Commands(ctx context.Context) []protocol.CommandInfo {
 	return out
 }
 
-func (c *chat) Tools(ctx context.Context) ([]protocol.ToolOption, error) {
-	definitions, err := c.rt.CurrentAgentTools(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	disabled := make(map[string]bool, len(c.sess.ExcludedTools))
-	for _, name := range c.sess.ExcludedTools {
-		disabled[name] = true
-	}
-	c.mu.Unlock()
-	out := make([]protocol.ToolOption, 0, len(definitions))
-	for _, definition := range definitions {
-		out = append(out, protocol.ToolOption{
-			Name: definition.Name, Category: definition.Category,
-			Description: definition.Description, Enabled: !disabled[definition.Name],
-		})
-	}
-	return out, nil
-}
-
-func (c *chat) SetToolEnabled(ctx context.Context, name string, enabled bool) error {
-	if err := c.idle(); err != nil {
-		return err
-	}
-	definitions, err := c.rt.CurrentAgentTools(ctx)
-	if err != nil {
-		return err
-	}
-	known := false
-	for _, definition := range definitions {
-		if definition.Name == name {
-			known = true
-			break
-		}
-	}
-	if !known {
-		return adapter.ErrNotFound
-	}
-	c.mu.Lock()
-	disabled := make([]string, 0, len(c.sess.ExcludedTools)+1)
-	seen := false
-	for _, current := range c.sess.ExcludedTools {
-		if current == name {
-			seen = true
-			if enabled {
-				continue
-			}
-		}
-		disabled = append(disabled, current)
-	}
-	if !enabled && !seen {
-		disabled = append(disabled, name)
-	}
-	c.sess.ExcludedTools = disabled
-	c.mu.Unlock()
-	return nil
-}
-
 func (c *chat) idle() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -53,6 +53,9 @@ type Options struct {
 	// PluginAPIOrigin is the loopback origin plugin backends use to call the
 	// dashboard API. It must not be a public or forwarded origin.
 	PluginAPIOrigin string
+	// PluginAPISocket makes plugin backends call the dashboard through this Unix
+	// domain socket. Empty preserves the normal loopback TCP transport.
+	PluginAPISocket string
 	// PluginDataDir stores host-managed plugin configuration and backend data.
 	PluginDataDir string
 }
@@ -60,16 +63,18 @@ type Options struct {
 // Server is the HTTP transport and application composition root. Stateful
 // domain behavior lives in the focused services below.
 type Server struct {
-	mux            *http.ServeMux
-	adapter        adapter.Adapter
-	hosts          *hostPolicy
-	csrf           string
-	appVersion     string
-	allowedTSUsers map[string]bool
-	static         http.Handler
-	log            *slog.Logger
-	started        time.Time
-	pluginDir      string
+	mux             *http.ServeMux
+	adapter         adapter.Adapter
+	hosts           *hostPolicy
+	csrf            string
+	appVersion      string
+	allowedTSUsers  map[string]bool
+	static          http.Handler
+	log             *slog.Logger
+	started         time.Time
+	pluginDir       string
+	pluginAPIOrigin string
+	pluginAPISocket string
 
 	guard              *pathsec.Guard
 	workspaces         *workspaces.Service
@@ -99,19 +104,21 @@ func New(opts Options) *Server {
 		}
 	}
 	s := &Server{
-		pluginDir:      strings.TrimSpace(opts.PluginDir),
-		guard:          opts.Guard,
-		mux:            http.NewServeMux(),
-		adapter:        opts.Adapter,
-		hosts:          newHostPolicy(opts.TailscaleHosts),
-		csrf:           newToken(),
-		appVersion:     opts.AppVersion,
-		allowedTSUsers: users,
-		static:         opts.Static,
-		log:            log,
-		started:        time.Now(),
-		events:         newDashboardEvents(),
-		pluginEvents:   newPluginEventHub(),
+		pluginDir:       strings.TrimSpace(opts.PluginDir),
+		pluginAPIOrigin: strings.TrimRight(opts.PluginAPIOrigin, "/"),
+		pluginAPISocket: strings.TrimSpace(opts.PluginAPISocket),
+		guard:           opts.Guard,
+		mux:             http.NewServeMux(),
+		adapter:         opts.Adapter,
+		hosts:           newHostPolicy(opts.TailscaleHosts),
+		csrf:            newToken(),
+		appVersion:      opts.AppVersion,
+		allowedTSUsers:  users,
+		static:          opts.Static,
+		log:             log,
+		started:         time.Now(),
+		events:          newDashboardEvents(),
+		pluginEvents:    newPluginEventHub(),
 	}
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
@@ -121,7 +128,7 @@ func New(opts Options) *Server {
 	s.pluginConfig = newPluginConfigStore(filepath.Join(strings.TrimSpace(opts.PluginDataDir), "config"))
 	s.pluginManagement = newPluginManagement(strings.TrimSpace(opts.PluginDataDir))
 	s.plugins = startPluginWatcher(s.pluginDir, s.events, log)
-	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), strings.TrimRight(opts.PluginAPIOrigin, "/"), s.csrf, s.pluginManagement.running, log)
+	s.backends = newPluginBackendManager(s.pluginDir, strings.TrimSpace(opts.PluginDataDir), s.pluginAPIOrigin, s.pluginAPISocket, s.csrf, s.pluginManagement.running, log)
 	s.routes()
 	return s
 }
@@ -158,6 +165,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions/{sessionId}/items", s.handleGetStoredSessionItems)
 	m.HandleFunc("GET /api/chat-options", s.handleGetChatOptions)
 	m.HandleFunc("PATCH /api/chat-options", s.handleUpdateChatOptions)
+	m.HandleFunc("PATCH /api/chat-options/tools/{tool}", s.handleUpdateDefaultTool)
 	m.HandleFunc("POST /api/chats", s.handleCreateChat)
 	m.HandleFunc("POST /api/chats/resume", s.handleResumeChat)
 	m.HandleFunc("GET /api/chats/{id}", s.handleGetChat)
@@ -169,8 +177,6 @@ func (s *Server) routes() {
 	m.HandleFunc("PATCH /api/chats/{id}/config", s.handleConfig)
 	m.HandleFunc("GET /api/chats/{id}/models", s.handleModels)
 	m.HandleFunc("GET /api/chats/{id}/commands", s.handleCommands)
-	m.HandleFunc("GET /api/chats/{id}/tools", s.handleTools)
-	m.HandleFunc("PATCH /api/chats/{id}/tools/{tool}", s.handleTool)
 	m.HandleFunc("POST /api/chats/{id}/tool-confirmation", s.handleToolConfirmation)
 	m.HandleFunc("POST /api/chats/{id}/elicitation", s.handleElicitation)
 	m.HandleFunc("POST /api/chats/{id}/retitle", s.handleRetitle)

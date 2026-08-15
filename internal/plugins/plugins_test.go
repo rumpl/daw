@@ -142,7 +142,7 @@ func TestMCPServersAreNamespacedAndWorkspaceResolved(t *testing.T) {
 	}
 	workspace := t.TempDir()
 	servers := MCPServers(base, workspace, "chat_test", "context_test")
-	if len(servers) != 2 || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != filepath.Join(workspace, "tools") ||
+	if len(servers) != 2 || servers[0].PluginID != "mcp-plugin" || servers[0].Name != "mcp-plugin-local" || servers[0].WorkingDir != filepath.Join(workspace, "tools") ||
 		len(servers[0].Env) != 3 || !slices.Contains(servers[0].Env, "TOKEN=x") ||
 		!slices.Contains(servers[0].Env, "DAW_CHAT_ID=chat_test") ||
 		!slices.Contains(servers[0].Env, "DAW_SESSION_CONTEXT=context_test") || servers[1].Name != "mcp-plugin-remote" {

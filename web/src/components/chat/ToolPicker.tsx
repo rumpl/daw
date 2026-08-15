@@ -7,13 +7,15 @@ import { clip } from '@/safety';
 import { Search, Wrench, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-export function ToolPicker({ tools, disabled, onChange }: {
+export function ToolPicker({ tools, disabled, onChange, onRefresh }: {
   tools: ToolOption[];
   disabled: boolean;
   onChange: (name: string, enabled: boolean) => void;
+  onRefresh?: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const filtered = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return tools.filter((tool) => {
@@ -23,8 +25,20 @@ export function ToolPicker({ tools, disabled, onChange }: {
   }, [query, tools]);
   const enabledCount = tools.filter((tool) => tool.enabled).length;
 
+  const setDialogOpen = (next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setQuery('');
+      return;
+    }
+    if (onRefresh) {
+      setRefreshing(true);
+      void onRefresh().catch(() => undefined).finally(() => setRefreshing(false));
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(''); }}>
+    <Dialog open={open} onOpenChange={setDialogOpen}>
       <DialogTrigger render={
         <Button type="button" variant="secondary" className="tool-picker-trigger" disabled={disabled}
           aria-label={`Tools: ${enabledCount} of ${tools.length} enabled`} />
@@ -45,7 +59,7 @@ export function ToolPicker({ tools, disabled, onChange }: {
           <Input value={query} placeholder="Search tools…" onChange={(event) => setQuery(event.target.value)} />
         </label>
         <ScrollArea className="tool-picker-list">
-          {filtered.length === 0 ? <p className="tool-picker-empty">No matching tools.</p> : (
+          {refreshing && tools.length === 0 ? <p className="tool-picker-empty">Loading tools…</p> : filtered.length === 0 ? <p className="tool-picker-empty">No matching tools.</p> : (
             <ul>
               {filtered.map((tool) => (
                 <li key={tool.name}>

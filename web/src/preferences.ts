@@ -4,23 +4,27 @@ import type { SendMode } from '@/components/chat/Composer';
 
 const LS_PREFS = 'dawui.prefs.v1';
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export interface Prefs {
   /** Most-recent-first list of workspace paths that opened successfully. */
   recentWorkspaces: string[];
   deliveryMode: SendMode;
+  theme: ThemeMode;
 }
 
 export function loadPrefs(): Prefs {
   try {
     const raw = localStorage.getItem(LS_PREFS);
-    if (!raw) return { recentWorkspaces: [], deliveryMode: 'normal' };
+    if (!raw) return { recentWorkspaces: [], deliveryMode: 'normal', theme: 'system' };
     const parsed = JSON.parse(raw) as Partial<Prefs>;
     return {
       recentWorkspaces: (parsed.recentWorkspaces ?? []).filter((path) => typeof path === 'string').slice(0, 8),
       deliveryMode: parsed.deliveryMode ?? 'normal',
+      theme: parsed.theme === 'light' || parsed.theme === 'dark' ? parsed.theme : 'system',
     };
   } catch {
-    return { recentWorkspaces: [], deliveryMode: 'normal' };
+    return { recentWorkspaces: [], deliveryMode: 'normal', theme: 'system' };
   }
 }
 
@@ -30,6 +34,13 @@ function savePrefs(prefs: Prefs) {
   } catch {
     /* Storage is optional. */
   }
+}
+
+export function updateThemePreference(theme: ThemeMode) {
+  const prefs = loadPrefs();
+  const next = { ...prefs, theme };
+  savePrefs(next);
+  return next;
 }
 
 export function useWorkspacePreferences(boot: Bootstrap | null) {

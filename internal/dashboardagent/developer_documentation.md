@@ -103,11 +103,14 @@ selection or agent-resolution API.
     attaching to its already-live runtime. A session can have only one live
     runtime in this server.
 - `GET /api/chat-options` → `200 ChatOptions`
-  - Returns the process-wide model catalog, supported thinking levels, and the
-    defaults inherited by new chats. It does not create a chat or session.
+  - Returns the process-wide model and tool catalogs, supported thinking levels,
+    and the defaults inherited by new chats. It does not create a chat or session.
 - `PATCH /api/chat-options` → `200 ChatOptions`
   - Body: `{model?: string, thinkingLevel?: string}`. Updates global defaults;
     an explicit empty string clears a preference. No chat is required.
+- `PATCH /api/chat-options/tools/{tool}` → `200 ToolOption`
+  - Body: `{enabled: boolean}`. Updates whether the named tool is offered by
+    chats opened or resumed after the change.
 - `GET /api/chats/{id}` → `200 Snapshot`
   - Complete authoritative chat state for resnapshot/reconciliation.
 - `GET /api/chats/{id}/events[?lastEventId=N]` → SSE stream
@@ -134,8 +137,6 @@ selection or agent-resolution API.
   - Only valid while idle. Returns `200 SessionMeta`.
 - `GET /api/chats/{id}/models` → `200 ModelOption[]`
 - `GET /api/chats/{id}/commands` → `200 CommandInfo[]`
-- `GET /api/chats/{id}/tools` → `200 ToolOption[]`
-- `PATCH /api/chats/{id}/tools/{tool}` with `UpdateToolRequest` → `200 ToolOption` (idle chats only)
 - `POST /api/chats/{id}/tool-confirmation`
   - Body: `{toolCallId, decision, reason}`. Decisions: `approve`,
     `approveAlways`, `reject`. Returns `202 Accepted`.
@@ -268,6 +269,7 @@ interface ModelOption {
 interface ChatOptions {
   model: string; thinkingLevel: string;
   thinkingLevels: string[] | null; models: ModelOption[] | null;
+  tools: ToolOption[] | null;
 }
 interface CommandInfo { name: string; description: string; kind: string }
 interface Stats {
@@ -383,7 +385,15 @@ They are namespaced `<plugin-id>-<server-id>` and attached as docker-agent nativ
 MCP toolsets whenever a chat opens. MCP tools, prompts, elicitation, sampling,
 change notifications, lifecycle supervision, and shutdown therefore use the
 matched SDK directly. Existing live chats retain their opened graph after a
-plugin edit; new chats use the latest manifest.
+plugin edit; new chats use the latest manifest. Trusted local MCP processes
+receive the owning plugin's process-private `@daw/plugin-backend` API transport
+and credentials, so they can call `/api/plugins/${pluginId}/backend/...`; the
+SDK selects loopback HTTP in web mode and UDS in Electron. Remote MCP servers
+never receive these credentials. Local MCP processes also receive `DAW_CHAT_ID`
+and `DAW_SESSION_CONTEXT` for their owning chat. Backends and local MCP
+processes inherit `DAW_INSTANCE_ID`; any unavoidable private socket, lock, or
+other IPC resource must include it so concurrent web and Electron instances do
+not collide, though the authenticated backend route is preferred.
 
 Backend entries may export `activate(context)`, `default`/`handler(request,
 context)`, and `webhook(request, context)`. Activation may return an async
@@ -575,6 +585,7 @@ interface DashboardAPI {
     options?:{offset?:number;limit?:number;signal?:AbortSignal}):Promise<StoredSessionItems>;
   chatOptions(): Promise<ChatOptions>;
   updateChatOptions(patch:{model?:string;thinkingLevel?:string}):Promise<ChatOptions>;
+  updateDefaultTool(name:string, enabled:boolean):Promise<ToolOption>;
   createChat(workspaceId:string, executionLocationId?:string): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;

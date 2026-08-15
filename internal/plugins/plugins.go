@@ -547,7 +547,8 @@ func MCPServers(dir, workingDir, chatID, sessionContext string, active ...func(s
 			}
 			name := plugin.ID + "-" + server.ID
 			out = append(out, adapter.MCPServer{
-				Name: name, Command: command, Args: args, Env: env,
+				PluginID: plugin.ID,
+				Name:     name, Command: command, Args: args, Env: env,
 				WorkingDir: cwd, URL: server.URL, Transport: server.Transport, Headers: server.Headers,
 			})
 		}

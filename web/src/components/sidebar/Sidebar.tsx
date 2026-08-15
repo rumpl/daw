@@ -30,8 +30,8 @@ interface SidebarProps {
   onNewChat: () => void;
   onResumeChat: (sessionId: string, workspacePath?: string) => void;
   onOpenPlugin: (pluginId: string, path: string) => void;
-  onOpenPluginSettings?: () => void;
-  pluginSettingsActive?: boolean;
+  onOpenSettings?: () => void;
+  settingsActive?: boolean;
 }
 
 function projectLabel(path: string) {
@@ -56,8 +56,8 @@ export function Sidebar({
   onNewChat,
   onResumeChat,
   onOpenPlugin,
-  onOpenPluginSettings,
-  pluginSettingsActive,
+  onOpenSettings,
+  settingsActive,
 }: SidebarProps) {
   const contributionContext = { workspace, chatId: null, session: null };
   const [sessionFilter, setSessionFilter] = useState('');
@@ -226,8 +226,8 @@ export function Sidebar({
         <Tooltip>
           <TooltipTrigger render={
             <Button type="button" size="icon-sm" variant="ghost" className="sidebar-settings-button"
-              aria-label="Settings" aria-current={pluginSettingsActive ? 'page' : undefined}
-              onClick={() => onOpenPluginSettings?.()}>
+              aria-label="Settings" aria-current={settingsActive ? 'page' : undefined}
+              onClick={() => onOpenSettings?.()}>
               <Settings aria-hidden="true" />
             </Button>
           } />

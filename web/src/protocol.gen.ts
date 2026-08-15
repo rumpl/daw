@@ -459,6 +459,7 @@ export interface ChatOptions {
   thinkingLevel: string;
   thinkingLevels: Array<string> | null;
   models: Array<ModelOption> | null;
+  tools: Array<ToolOption> | null;
 }
 
 export interface ToolConfirmationReply {

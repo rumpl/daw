@@ -8,14 +8,21 @@ BIN := bin/dawui
 PORT ?= 4788
 GO ?= go
 
-.PHONY: all deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
-        ci build build-web build-go start clean smoke-real screenshots help
+.PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
+        ci build build-web build-go start electron package-electron clean smoke-real screenshots help
 
 all: build
 
 ## deps: install frontend dependencies from the committed lockfile
 deps:
 	cd web && npm ci || npm install
+
+## electron-deps: install the desktop host and its native Electron runtime
+electron-deps:
+	cd electron && npm ci
+	# npm may have ignore-scripts=true (for example under Socket Firewall),
+	# which skips Electron's required binary download. Run it explicitly.
+	cd electron && ELECTRON_SKIP_BINARY_DOWNLOAD= node node_modules/electron/install.js
 
 ## generate: regenerate the TypeScript protocol mirror from the Go types
 generate:
@@ -113,6 +120,14 @@ start: $(BIN)
 $(BIN):
 	$(MAKE) build
 
+## electron: build and launch the Electron desktop app (backend uses a UDS)
+electron: build electron-deps
+	cd electron && npm start
+
+## package-electron: create a native Electron artifact in electron/dist
+package-electron: build electron-deps
+	cd electron && npm run dist
+
 ## screenshots: capture desktop + mobile UI screenshots against the fake adapter
 screenshots: build
 	@pkill -f 'bin/dawui' 2>/dev/null || true
@@ -125,7 +140,7 @@ smoke-real:
 	./scripts/smoke-real.sh
 
 clean:
-	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules
+	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules electron/node_modules electron/dist
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'

@@ -61,6 +61,26 @@ make dev       # Go API on :4788, Vite on :4789 proxying /api
 make dev-fake  # same, with a deterministic fake agent (no model calls)
 ```
 
+### Desktop app (Electron)
+
+```bash
+make electron          # build the UI/backend and launch Electron
+make package-electron  # write a DMG/ZIP or AppImage to electron/dist
+```
+
+Electron starts the Go backend itself. It does **not** reserve a TCP port: the
+backend listens on an owner-only Unix domain socket, and Electron exposes that
+HTTP stream to the renderer through the private `daw://localhost` protocol.
+API calls, uploads, dynamic plugin modules and SSE all use that transport. The
+packaged app contains the Go backend and embedded frontend, so no separately
+installed server is needed. On macOS and Linux the desktop host imports your
+login-shell environment before starting the backend, ensuring apps opened from
+Finder or the desktop retain the same model credentials and tool `PATH` as the
+CLI.
+
+Desktop packaging currently targets macOS and Linux because it relies on Unix
+domain sockets.
+
 ---
 
 ## Using it
@@ -145,6 +165,7 @@ credential helpers.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `4788` | TCP port, validated 1024–65535 |
+| `DAWUI_SOCKET` | — | Listen on this Unix socket instead of TCP (used by Electron) |
 | `TAILSCALE_HOSTNAMES` | — | Hostnames to accept besides loopback |
 | `ALLOWED_TAILSCALE_USERS` | — | Tailnet logins allowed through Tailscale Serve |
 | `DAWUI_SESSION_DB` | docker-agent's default | Session database path |
@@ -153,8 +174,9 @@ credential helpers.
 | `DAWUI_PLUGIN_DIR` | `<data>/dawui/plugins` | Global trusted frontend and Node backend plugin directory |
 | `DAWUI_DEBUG` | — | Debug logging |
 
-The server binds to `127.0.0.1` only; there is no host override. Workspaces are
-limited to your home directory.
+The standalone server binds to `127.0.0.1` only; there is no host override.
+When `DAWUI_SOCKET` is set, it opens only that owner-readable Unix socket and
+ignores `PORT`. Workspaces are limited to your home directory.
 
 ---
 
@@ -184,7 +206,8 @@ app itself with `make start`.
 ## How it works
 
 ```
-cmd/dawui                 server entrypoint: bind, port validation, signals
+cmd/dawui                 server entrypoint: TCP/UDS bind, validation, signals
+electron/                  desktop host: backend lifecycle and UDS protocol bridge
 internal/protocol         wire types shared with the browser (+ TS generator)
 internal/adapter          the typed docker-agent seam
 internal/adapter/dagent   the real adapter: embeds the docker-agent SDK

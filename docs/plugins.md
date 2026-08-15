@@ -194,6 +194,20 @@ Environment and header values are trusted operator configuration and are never
 returned by the plugin catalog. Remote URLs must use HTTP(S), and local working
 directories cannot escape the active workspace.
 
+Trusted local MCP processes receive the same injected `@daw/plugin-backend`
+transport and credentials as their owning backend. They can import `dashboard`
+and `pluginId` and call `/api/plugins/${pluginId}/backend/...`; the SDK uses the
+loopback HTTP origin in web mode and the dashboard UDS in Electron automatically.
+They also receive `DAW_CHAT_ID` and `DAW_SESSION_CONTEXT` for their owning live
+chat. Credentials remain process-private and must never be returned as tool
+output or logged. Remote MCP servers never receive these local credentials.
+
+Every plugin backend and local MCP process also inherits `DAW_INSTANCE_ID`, a
+short identifier unique to the running dashboard process. Prefer the authenticated
+backend route above; if a plugin still needs private sockets, locks, or other IPC
+resources, it must include this value in the resource name so concurrent web and
+Electron dashboard instances cannot collide.
+
 ## Global activation and contributions
 
 A plugin may export `activate(context)`. It runs while the plugin is installed,

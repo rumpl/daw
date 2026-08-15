@@ -28,6 +28,7 @@ type pluginBackendManager struct {
 	dir           string
 	dataDir       string
 	apiOrigin     string
+	apiSocket     string
 	csrf          string
 	internalToken string
 	active        func(string) bool
@@ -44,8 +45,8 @@ type pluginBackendProcess struct {
 	done     chan struct{}
 }
 
-func newPluginBackendManager(dir, dataDir, apiOrigin, csrf string, active func(string) bool, log *slog.Logger) *pluginBackendManager {
-	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, csrf: csrf, internalToken: newToken(), active: active, log: log, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
+func newPluginBackendManager(dir, dataDir, apiOrigin, apiSocket, csrf string, active func(string) bool, log *slog.Logger) *pluginBackendManager {
+	manager := &pluginBackendManager{dir: dir, dataDir: dataDir, apiOrigin: apiOrigin, apiSocket: apiSocket, csrf: csrf, internalToken: newToken(), active: active, log: log, processes: map[string]*pluginBackendProcess{}, stop: make(chan struct{}), done: make(chan struct{})}
 	go manager.run()
 	return manager
 }
@@ -194,6 +195,7 @@ func (m *pluginBackendManager) start(backend plugins.Backend) (*pluginBackendPro
 	cmd.Dir = backend.Directory
 	cmd.Env = append(os.Environ(),
 		"DAW_API_ORIGIN="+m.apiOrigin,
+		"DAW_API_SOCKET="+m.apiSocket,
 		"DAW_API_TOKEN="+m.csrf,
 		"DAW_PLUGIN_TOKEN="+m.internalToken,
 		"DAW_PLUGIN_ID="+backend.PluginID,
@@ -308,14 +310,49 @@ func installBackendSDK(dir string) error {
 
 const backendSDKSource = `
 import fs from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
+import { Readable } from "node:stream";
 export class DashboardApiError extends Error {
   constructor(message, code, status, details) { super(message); this.name = "DashboardApiError"; this.code = code; this.status = status; this.details = details; }
 }
+async function fetchUnix(socketPath, requestURL, init) {
+  // A Request performs the same body/header normalization as fetch, including
+  // FormData boundaries, before Node's HTTP client sends it over the UDS.
+  const normalized = new Request(requestURL, init);
+  const payload = normalized.body === null ? undefined : Buffer.from(await normalized.arrayBuffer());
+  const headers = Object.fromEntries(normalized.headers);
+  headers.host = "localhost";
+  if (payload) headers["content-length"] = String(payload.byteLength);
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      socketPath,
+      path: requestURL.pathname + requestURL.search,
+      method: normalized.method,
+      headers,
+      signal: init.signal,
+    }, (response) => {
+      const responseHeaders = new Headers();
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (Array.isArray(value)) for (const item of value) responseHeaders.append(name, item);
+        else if (value !== undefined) responseHeaders.set(name, value);
+      }
+      const noBody = normalized.method === "HEAD" || response.statusCode === 204 || response.statusCode === 304;
+      resolve(new Response(noBody ? null : Readable.toWeb(response), {
+        status: response.statusCode || 500,
+        statusText: response.statusMessage,
+        headers: responseHeaders,
+      }));
+    });
+    request.on("error", reject);
+    request.end(payload);
+  });
+}
 export function createDashboardClient() {
   const origin = process.env.DAW_API_ORIGIN;
+  const socketPath = process.env.DAW_API_SOCKET;
   const token = process.env.DAW_API_TOKEN;
-  if (!origin || !token) throw new Error("dashboard backend environment is unavailable");
+  if ((!origin && !socketPath) || !token) throw new Error("dashboard backend environment is unavailable");
   return {
     // sessionContext is an opaque capability supplied by a chat-scoped MCP
     // process. The backend SDK transports it as provenance, not request data.
@@ -331,7 +368,9 @@ export function createDashboardClient() {
       if (body !== undefined && !(body instanceof FormData) && typeof body !== "string" && !ArrayBuffer.isView(body)) {
         headers.set("Content-Type", "application/json"); payload = JSON.stringify(body);
       }
-      return fetch(new URL(requestPath, origin), { ...fetchOptions, method, headers, body: payload, redirect: "error" });
+      const requestURL = new URL(requestPath, origin || "http://localhost");
+      const init = { ...fetchOptions, method, headers, body: payload, redirect: "error" };
+      return socketPath ? fetchUnix(socketPath, requestURL, init) : fetch(requestURL, init);
     },
     async request(method, requestPath, body, options) {
       const response = await this.raw(method, requestPath, body, options);

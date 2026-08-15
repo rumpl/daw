@@ -27,12 +27,14 @@ export function Composer({
   thinkingLevels = [],
   tools = [],
   configDisabled = false,
+  toolsDisabled = configDisabled,
   compactDisabled = configDisabled,
   usageTokens = 0,
   usageCost = 0,
   onSelectModel = () => undefined,
   onSelectThinking = () => undefined,
   onToolChange = () => undefined,
+  onRefreshTools,
   onCompact = () => undefined,
   onAddAttachments,
   onRemoveAttachment,
@@ -53,12 +55,14 @@ export function Composer({
   thinkingLevels?: string[];
   tools?: ToolOption[];
   configDisabled?: boolean;
+  toolsDisabled?: boolean;
   compactDisabled?: boolean;
   usageTokens?: number;
   usageCost?: number;
   onSelectModel?: (model: string) => void;
   onSelectThinking?: (thinkingLevel: string) => void;
   onToolChange?: (name: string, enabled: boolean) => void;
+  onRefreshTools?: () => Promise<void>;
   onCompact?: () => void;
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (id: string) => void;
@@ -143,7 +147,7 @@ export function Composer({
               </Select>
             ) : null}
             {tools.length > 0 ? (
-              <ToolPicker tools={tools} disabled={configDisabled} onChange={onToolChange} />
+              <ToolPicker tools={tools} disabled={toolsDisabled} onChange={onToolChange} onRefresh={onRefreshTools} />
             ) : null}
             {currentModel ? (
               <Tooltip>

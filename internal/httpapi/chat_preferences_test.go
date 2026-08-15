@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rumpl/daw/internal/adapter/fake"
@@ -129,6 +130,47 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 		t.Fatalf("resumed chat did not restore its preferences: %+v", meta)
 	}
 	second.Shutdown(t.Context())
+}
+
+func TestDefaultToolOptionsCanBeReadAndUpdatedWithoutAChat(t *testing.T) {
+	root := t.TempDir()
+	preferencesFile := filepath.Join(t.TempDir(), "preferences.json")
+	s := newPreferenceTestServer(t, root, preferencesFile)
+
+	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.SetPathValue("tool", "shell")
+	recorder := httptest.NewRecorder()
+	s.handleUpdateDefaultTool(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("update default tool: %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	options, err := s.resolveChatOptions(t.Context(), s.preferences.Get(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range options.Tools {
+		if tool.Name == "shell" {
+			if tool.Enabled {
+				t.Fatal("shell remained enabled")
+			}
+			return
+		}
+	}
+	t.Fatal("shell was absent from default tool options")
+}
+
+func TestDefaultToolOptionsRejectUnknownTool(t *testing.T) {
+	s := newPreferenceTestServer(t, t.TempDir(), "")
+	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/missing", strings.NewReader(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.SetPathValue("tool", "missing")
+	recorder := httptest.NewRecorder()
+	s.handleUpdateDefaultTool(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown tool status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
 }
 
 func TestChatPreferencesMergeIndependentControls(t *testing.T) {

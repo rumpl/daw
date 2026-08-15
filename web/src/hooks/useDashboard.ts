@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError } from '@/api';
+import { api, ApiError, CHAT_OPTIONS_CHANGE_EVENT } from '@/api';
 import type {
   Attachment,
   Bootstrap,
@@ -7,7 +7,6 @@ import type {
   CommandInfo,
   ModelOption,
   SessionSummary,
-  ToolOption,
   UpdateConfigRequest,
   Workspace,
 } from '@/protocol.gen';
@@ -35,10 +34,9 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [defaultOptions, setDefaultOptions] = useState<ChatOptions>({
-    model: '', thinkingLevel: '', thinkingLevels: [], models: [],
+    model: '', thinkingLevel: '', thinkingLevels: [], models: [], tools: [],
   });
   const [commands, setCommands] = useState<CommandInfo[]>([]);
-  const [tools, setTools] = useState<ToolOption[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -62,6 +60,12 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       setBootError(cause instanceof Error ? cause.message : 'failed to reach the server'),
     );
     // Preferences are intentionally sampled once during bootstrap.
+  }, []);
+
+  useEffect(() => {
+    const refreshOptions = () => { void api.chatOptions().then(setDefaultOptions).catch(() => undefined); };
+    window.addEventListener(CHAT_OPTIONS_CHANGE_EVENT, refreshOptions);
+    return () => window.removeEventListener(CHAT_OPTIONS_CHANGE_EVENT, refreshOptions);
   }, []);
 
   const guard = useCallback(async (action: () => Promise<void>, showBusy = true) => {
@@ -110,12 +114,11 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   }, [activeSessionId, state.run.state]);
 
   const loadChatExtras = useCallback(async (nextChatId: string) => {
-    const [nextModels, nextCommands, nextTools] = await Promise.all([
-      api.models(nextChatId), api.commands(nextChatId), api.tools(nextChatId),
+    const [nextModels, nextCommands] = await Promise.all([
+      api.models(nextChatId), api.commands(nextChatId),
     ]);
     setModels(nextModels);
     setCommands(nextCommands);
-    setTools(nextTools);
   }, []);
 
   const clearChat = useCallback(() => {
@@ -123,7 +126,6 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     setActiveSessionId(null);
     setModels([]);
     setCommands([]);
-    setTools([]);
     setAttachments([]);
   }, []);
 
@@ -334,11 +336,18 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
       setDefaultOptions(nextDefaults);
     });
 
+  const refreshChatOptions = useCallback(async () => {
+    setDefaultOptions(await api.chatOptions());
+  }, []);
+
   const setToolEnabled = (name: string, enabled: boolean) =>
     void guard(async () => {
-      if (!chatId) return;
-      const updated = await api.updateTool(chatId, name, enabled);
-      setTools((current) => current.map((tool) => tool.name === updated.name ? updated : tool));
+      const updated = await api.updateDefaultTool(name, enabled);
+      setDefaultOptions((current) => ({
+        ...current,
+        tools: (current.tools ?? []).map((tool) => tool.name === updated.name ? updated : tool),
+      }));
+      window.dispatchEvent(new Event(CHAT_OPTIONS_CHANGE_EVENT));
     });
 
   const runChatAction = (action: (currentChatId: string) => Promise<unknown>) =>
@@ -395,7 +404,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     defaultThinkingLevel: defaultOptions.thinkingLevel,
     defaultThinkingLevels: defaultOptions.thinkingLevels ?? [],
     commands,
-    tools,
+    tools: defaultOptions.tools ?? [],
     attachments,
     uploading,
     error,
@@ -416,6 +425,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     addAttachments,
     removeAttachment,
     patchConfig,
+    refreshChatOptions,
     setToolEnabled,
     compact: () => runChatAction((id) => api.compact(id)),
     rename: (title: string) => runChatAction((id) => api.retitle(id, title)),

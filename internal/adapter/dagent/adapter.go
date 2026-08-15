@@ -129,29 +129,24 @@ func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 	return info, nil
 }
 
-// runtimeConfig builds the per-load runtime configuration. Credentials are
-// never touched here: docker-agent's own environment provider and credential
-// helpers resolve them inside the SDK.
-// ChatOptions resolves the global model catalog without creating a workspace
-// chat or allocating a session. docker-agent currently owns catalog discovery
-// on LocalRuntime, so this constructs a short-lived, model-only runtime from
-// global user configuration; the working directory is deliberately not part
-// of model selection.
-func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.ModelOption, []string, error) {
+// ChatOptions resolves global model and built-in tool choices without opening
+// or persisting a chat. Plugin-provided MCP toolsets are attached when a chat
+// is created because their processes receive that chat's runtime context.
+func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
 	workingDir, err := os.UserHomeDir()
 	if err != nil {
 		workingDir = os.TempDir()
 	}
 	runConfig := a.runtimeConfig(workingDir)
-	loadRes, err := dashboardagent.BuildModelResolver(ctx, runConfig)
+	loadRes, err := dashboardagent.Build(ctx, runConfig)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	t := loadRes.Team
 	defer t.StopToolSets(context.WithoutCancel(ctx))
 	ag, err := t.AgentOrDefault("")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	switcher := &daruntime.ModelSwitcherConfig{
@@ -168,17 +163,28 @@ func (a *Adapter) ChatOptions(ctx context.Context, model string) ([]protocol.Mod
 		daruntime.WithModelSwitcherConfig(switcher),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rt.Close()
 
 	if model != "" {
 		if err := rt.SetAgentModel(ctx, ag.Name(), model); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	models := modelOptions(rt.AvailableModels(ctx))
-	return models, runtimeThinkingLevels(ctx, rt), nil
+	definitions, err := rt.CurrentAgentTools(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tools := make([]protocol.ToolOption, 0, len(definitions))
+	for _, definition := range definitions {
+		tools = append(tools, protocol.ToolOption{
+			Name: definition.Name, Category: definition.Category,
+			Description: definition.Description, Enabled: true,
+		})
+	}
+	return models, runtimeThinkingLevels(ctx, rt), tools, nil
 }
 
 func modelOptions(choices []daruntime.ModelChoice) []protocol.ModelOption {

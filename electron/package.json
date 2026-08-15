@@ -1,0 +1,51 @@
+{
+  "name": "daw-desktop",
+  "version": "1.0.0",
+  "description": "Electron desktop host for the Docker Agent dashboard",
+  "author": "DAW contributors",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "electron:install": "ELECTRON_SKIP_BINARY_DOWNLOAD= node node_modules/electron/install.js",
+    "start": "npm run electron:install && electron .",
+    "dist": "npm run electron:install && electron-builder"
+  },
+  "devDependencies": {
+    "electron": "41.10.5",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.docker.daw",
+    "productName": "Docker Agent Dashboard",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../bin/dawui",
+        "to": "backend/dawui"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "binaries": [
+        "Contents/Resources/backend/dawui"
+      ],
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "AppImage"
+      ]
+    }
+  }
+}

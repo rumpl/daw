@@ -154,8 +154,12 @@ func (a *Adapter) ReadSession(_ context.Context, sessionID string) (adapter.Stor
 }
 
 // ChatOptions returns process-wide choices without opening a session.
-func (a *Adapter) ChatOptions(context.Context, string) ([]protocol.ModelOption, []string, error) {
-	return fakeModelOptions("fake/model-a"), []string{"none", "low", "medium", "high"}, nil
+func (a *Adapter) ChatOptions(context.Context, string) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
+	return fakeModelOptions("fake/model-a"), []string{"none", "low", "medium", "high"}, []protocol.ToolOption{
+		{Name: "read_file", Category: "filesystem", Description: "Read a file", Enabled: true},
+		{Name: "write_file", Category: "filesystem", Description: "Write a file", Enabled: true},
+		{Name: "shell", Category: "shell", Description: "Run a shell command", Enabled: true},
+	}, nil
 }
 
 // OpenChat creates or resumes a fake chat.
@@ -746,38 +750,6 @@ func (c *chat) Commands(context.Context) []protocol.CommandInfo {
 		{Name: "elicit", Description: "Trigger an elicitation", Kind: "command"},
 		{Name: "transfer", Description: "Delegate to the sub-agent", Kind: "command"},
 	}
-}
-
-func (c *chat) Tools(context.Context) ([]protocol.ToolOption, error) {
-	definitions := []protocol.ToolOption{
-		{Name: "read_file", Category: "filesystem", Description: "Read a file"},
-		{Name: "write_file", Category: "filesystem", Description: "Write a file"},
-		{Name: "shell", Category: "shell", Description: "Run a shell command"},
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for i := range definitions {
-		definitions[i].Enabled = !c.disabled[definitions[i].Name]
-	}
-	return definitions, nil
-}
-
-func (c *chat) SetToolEnabled(_ context.Context, name string, enabled bool) error {
-	if err := c.idle(); err != nil {
-		return err
-	}
-	known := name == "read_file" || name == "write_file" || name == "shell"
-	if !known {
-		return adapter.ErrNotFound
-	}
-	c.mu.Lock()
-	if enabled {
-		delete(c.disabled, name)
-	} else {
-		c.disabled[name] = true
-	}
-	c.mu.Unlock()
-	return nil
 }
 
 func (c *chat) idle() error {

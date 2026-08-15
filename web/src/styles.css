@@ -371,7 +371,14 @@ body {
 }
 .sidebar-settings-button { margin: 0; flex: none; }
 .sidebar-settings-button[aria-current='page'] { color: var(--accent-foreground); background: var(--accent); }
-.plugin-settings { flex: 1; min-height: 0; overflow: auto; padding: 28px max(var(--gutter), calc((100% - 900px) / 2)); }
+.plugin-settings, .settings-page { flex: 1; min-height: 0; overflow: auto; padding: 28px max(var(--gutter), calc((100% - 900px) / 2)); }
+.settings-page > .banner { margin: 14px 0 0; }
+.settings-section { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 0; border-bottom: 1px solid var(--rule); }
+.settings-section > div:first-child { min-width: 0; }
+.settings-section h3 { margin: 0; font-size: 15px; }
+.settings-section p { margin: 3px 0 0; color: var(--fg-dim); font-size: 12.5px; }
+.settings-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.settings-section > button, .settings-section > [data-slot='select-trigger'], .settings-controls { flex: none; }
 .plugin-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); }
 .plugin-settings-heading h2 { margin: 0; font-size: 20px; }
 .plugin-settings-heading p { margin: 3px 0 0; color: var(--fg-dim); }
@@ -397,6 +404,8 @@ body {
 .plugin-management-actions { display: flex; align-items: flex-start; gap: 6px; flex: none; }
 .plugin-settings > .banner { margin: 0; padding-left: 0; padding-right: 0; }
 @media (max-width: 700px) {
+  .settings-section { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .settings-controls { justify-content: flex-start; }
   .plugin-management-list > li { flex-direction: column; gap: 12px; }
   .plugin-management-actions { flex-wrap: wrap; }
 }

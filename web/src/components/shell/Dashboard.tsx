@@ -6,6 +6,7 @@ import { PluginNotifications } from '@/components/plugins/PluginNotifications';
 import { PluginPage } from '@/components/plugins/PluginPage';
 import { PluginRuntime } from '@/components/plugins/PluginRuntime';
 import { PluginSettingsPage } from '@/components/plugins/PluginSettingsPage';
+import { SettingsPage } from '@/components/settings/SettingsPage';
 import { Sidebar as DashboardSidebar } from '@/components/sidebar/Sidebar';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Sidebar as ShellSidebar, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
@@ -29,7 +30,9 @@ export function Dashboard() {
   const routePluginId = params.pluginId ?? null;
   const routePluginPath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '');
   const location = useLocation();
+  const settingsActive = location.pathname === '/settings';
   const pluginSettingsActive = location.pathname === '/settings/plugins';
+  const anySettingsActive = settingsActive || pluginSettingsActive;
   const navigate = useNavigate();
   const routeWorkspacePath = useMemo(
     () => new URLSearchParams(location.search).get('workspace'),
@@ -228,7 +231,11 @@ export function Dashboard() {
 
     return (
       <section className="main-pane" key={PRIMARY_PANE_ID}>
-        {pluginSettingsActive ? (
+        {settingsActive ? (
+          <SettingsPage menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
+            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)}
+            onOpenPlugins={() => navigate('/settings/plugins')} />
+        ) : pluginSettingsActive ? (
           <PluginSettingsPage boot={dashboard.boot!} revision={dashboardEvents.pluginsRevision}
             menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
             onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} />
@@ -266,13 +273,13 @@ export function Dashboard() {
           recentWorkspaces={dashboard.recentWorkspaces} plugins={pluginCatalog.plugins ?? []}
           pluginErrors={pluginCatalog.errors ?? []} activePluginId={routePluginId}
           activePluginPath={routePluginPath}
-          activeSessionId={routePluginId || pluginSettingsActive ? null : dashboard.activeSessionId}
+          activeSessionId={routePluginId || anySettingsActive ? null : dashboard.activeSessionId}
           workspacePath={dashboard.workspacePath}
           busy={dashboard.busyAction} drawerRef={drawerRef}
           onWorkspacePathChange={dashboard.setWorkspacePath} onOpenWorkspace={dashboard.openWorkspace}
           onNewChat={() => dashboard.newChat()} onResumeChat={dashboard.resumeChat} onOpenPlugin={openPlugin}
-          pluginSettingsActive={pluginSettingsActive}
-          onOpenPluginSettings={() => { dashboard.setDrawerOpen(false); navigate('/settings/plugins'); }}
+          settingsActive={anySettingsActive}
+          onOpenSettings={() => { dashboard.setDrawerOpen(false); navigate('/settings'); }}
         />
       </ShellSidebar>
 
