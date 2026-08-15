@@ -70,7 +70,7 @@ export function SessionTabs({
 
   return (
     <Tabs value={activeValue} className="session-tabs-root block min-w-0 gap-0 bg-muted/40">
-      <TabsList className="session-tabs h-10 w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-muted/40 px-5 py-1" aria-label="Open tabs">
+      <TabsList className="session-tabs h-[42px] w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-muted/40 px-2 py-[5px] group-data-horizontal/tabs:h-[42px]" aria-label="Open tabs">
         {sessions.map((session) => {
           const title = session.title || 'Untitled';
           const active = session.sessionId === activeSessionId;
@@ -78,8 +78,8 @@ export function SessionTabs({
           return (
             <div
               className={cn(
-                'session-tab group/tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md hover:bg-background/50',
-                active && 'bg-background shadow-sm ring-1 ring-border',
+                'session-tab group/tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md border border-border p-1 hover:bg-background/50',
+                active && 'bg-background shadow-sm',
                 draggedSessionId === session.sessionId && 'opacity-50',
                 dropTargetId === session.sessionId && 'ring-2 ring-primary',
               )}
@@ -105,7 +105,7 @@ export function SessionTabs({
             >
               <TabsTrigger
                 value={`session:${session.sessionId}`}
-                className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden bg-transparent pr-7 pl-2 shadow-none data-active:bg-transparent [&>span:first-child]:truncate"
+                className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden border-transparent bg-transparent pr-7 pl-2 shadow-none data-active:border-transparent data-active:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent [&>span:first-child]:truncate"
                 data-running={session.runState === 'running' || undefined}
                 aria-current={active ? 'page' : undefined}
                 title={`${title} — ${runStatus} — ${session.workingDir}`}
@@ -135,10 +135,10 @@ export function SessionTabs({
           const active = plugin.id === activePluginId;
           return (
             <div className={cn(
-              'session-tab plugin-tab group/tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md hover:bg-background/50',
-              active && 'bg-background shadow-sm ring-1 ring-border',
+              'session-tab plugin-tab group/tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md border border-border p-1 hover:bg-background/50',
+              active && 'bg-background shadow-sm',
             )} data-active={active || undefined} key={`plugin:${plugin.id}`}>
-              <TabsTrigger value={`plugin:${plugin.id}`} className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden bg-transparent pr-7 pl-2 shadow-none data-active:bg-transparent [&>span:first-child]:truncate"
+              <TabsTrigger value={`plugin:${plugin.id}`} className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden border-transparent bg-transparent pr-7 pl-2 shadow-none data-active:border-transparent data-active:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent [&>span:first-child]:truncate"
                 aria-current={active ? 'page' : undefined} title={plugin.description || plugin.name}
                 aria-label={`${plugin.name} plugin`} onClick={() => { if (!active) onOpenPlugin?.(plugin.id, path); }}>
                 <span>{clip(plugin.name, 50)}</span>
