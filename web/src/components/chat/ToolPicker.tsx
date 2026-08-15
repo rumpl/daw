@@ -38,7 +38,7 @@ export function ToolPicker({ tools, disabled, onChange }: {
             <X aria-hidden="true" />
           </DialogClose>
         </div>
-        <p className="tool-picker-help">Disabled tools are not offered to the model. Changes apply to this session and require the agent to be idle.</p>
+        <p className="tool-picker-help">Disabled tools are not offered to the model. This global setting is inherited whenever a chat is opened or resumed.</p>
         <label className="tool-picker-search">
           <span className="sr-only">Search tools</span>
           <Search aria-hidden="true" />

@@ -419,13 +419,7 @@ func (s *Server) handleTool(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusFailedDependency, "tools_unavailable", "the agent tools could not be loaded")
 		return
 	}
-	disabled := make([]string, 0)
-	for _, option := range options {
-		if !option.Enabled {
-			disabled = append(disabled, option.Name)
-		}
-	}
-	if err := s.preferences.RememberTools(c.chat.SessionID(), disabled); err != nil {
+	if err := s.preferences.SetToolEnabled(name, req.Enabled); err != nil {
 		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the tool was updated but could not be saved")
 		return
 	}

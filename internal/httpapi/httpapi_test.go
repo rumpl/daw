@@ -1535,6 +1535,29 @@ func TestToolCatalogAndToggle(t *testing.T) {
 	}
 }
 
+func TestGlobalToolToggleAppliesToNewChats(t *testing.T) {
+	h := newHarness(t)
+	first, ws := h.newChat()
+	path := "/api/chats/" + first.ChatID + "/tools"
+	if response := h.do(http.MethodPatch, path+"/shell", protocol.UpdateToolRequest{Enabled: false}); response.StatusCode != http.StatusOK {
+		t.Fatalf("disable shell: %d", response.StatusCode)
+	}
+	if response := h.do(http.MethodDelete, "/api/chats/"+first.ChatID, nil); response.StatusCode != http.StatusOK {
+		t.Fatalf("dispose first chat: %d", response.StatusCode)
+	}
+	second := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{WorkspaceID: ws.WorkspaceID}))
+	tools := decodeJSON[[]protocol.ToolOption](t, h.do(http.MethodGet, "/api/chats/"+second.ChatID+"/tools", nil))
+	for _, tool := range tools {
+		if tool.Name == "shell" {
+			if tool.Enabled {
+				t.Fatal("global shell exclusion was not inherited")
+			}
+			return
+		}
+	}
+	t.Fatal("shell tool was not found")
+}
+
 func TestErrorShapeHasNoInternals(t *testing.T) {
 	h := newHarness(t)
 	resp := h.do(http.MethodGet, "/api/chats/does-not-exist", nil)

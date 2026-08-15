@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -53,7 +54,9 @@ func (s *Service) Get(sessionID string) Preference {
 	if sessionID == "" {
 		return clonePreference(s.state.Default)
 	}
-	return clonePreference(s.state.Sessions[sessionID])
+	preference := clonePreference(s.state.Sessions[sessionID])
+	preference.DisabledTools = append([]string(nil), s.state.Default.DisabledTools...)
+	return preference
 }
 
 // UpdateDefault changes the process-wide choices inherited by new chats.
@@ -114,18 +117,39 @@ func clonePreference(preference Preference) Preference {
 	return preference
 }
 
-// RememberTools persists the complete disabled-tool set for one session.
-func (s *Service) RememberTools(sessionID string, disabled []string) error {
-	if s.file == "" || strings.TrimSpace(sessionID) == "" {
-		return nil
-	}
+// SetToolEnabled changes one entry in the process-wide exclusion set without
+// dropping disabled plugin tools that are absent from the current workspace.
+func (s *Service) SetToolEnabled(name string, enabled bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current := s.state.Sessions[sessionID]
+	current := s.state.Default
+	disabled := append([]string(nil), current.DisabledTools...)
+	if enabled {
+		disabled = slices.DeleteFunc(disabled, func(item string) bool { return item == name })
+	} else {
+		disabled = append(disabled, name)
+	}
 	current.DisabledTools = sanitizeToolNames(disabled)
 	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	s.state.Sessions[sessionID] = current
-	pruneChatPreferences(s.state.Sessions)
+	s.state.Default = current
+	if s.file == "" {
+		return nil
+	}
+	return write(s.file, s.state)
+}
+
+// UpdateTools replaces the process-wide exclusion set inherited by every
+// newly opened or resumed chat.
+func (s *Service) UpdateTools(disabled []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.state.Default
+	current.DisabledTools = sanitizeToolNames(disabled)
+	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.state.Default = current
+	if s.file == "" {
+		return nil
+	}
 	return write(s.file, s.state)
 }
 
@@ -135,9 +159,9 @@ const (
 	maxSessionPreferences  = 2048
 )
 
-// Preference is deliberately small and non-secret. A per-session entry
-// preserves the controls when that session is resumed; Default makes the most
-// recently selected values the starting point for a brand-new chat.
+// Preference is deliberately small and non-secret. Model and ThinkingLevel
+// can have per-session values; DisabledTools is meaningful only on Default and
+// is inherited process-wide by every chat.
 type Preference struct {
 	Model         string   `json:"model,omitempty"`
 	ThinkingLevel string   `json:"thinkingLevel,omitempty"`
@@ -176,13 +200,20 @@ func read(path string) (preferences, error) {
 		preferences.Sessions = map[string]Preference{}
 	}
 	preferences.Default = sanitizeChatPreference(preferences.Default)
+	// DisabledTools was briefly stored per session. Fold those values into the
+	// global set when reading so existing users keep their choices.
+	globalTools := append([]string(nil), preferences.Default.DisabledTools...)
 	for id, preference := range preferences.Sessions {
 		if strings.TrimSpace(id) == "" {
 			delete(preferences.Sessions, id)
 			continue
 		}
-		preferences.Sessions[id] = sanitizeChatPreference(preference)
+		preference = sanitizeChatPreference(preference)
+		globalTools = append(globalTools, preference.DisabledTools...)
+		preference.DisabledTools = nil
+		preferences.Sessions[id] = preference
 	}
+	preferences.Default.DisabledTools = sanitizeToolNames(globalTools)
 	return preferences, nil
 }
 

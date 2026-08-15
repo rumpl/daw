@@ -65,8 +65,8 @@ type OpenRequest struct {
 	// place. A stale or unsupported preference is ignored by the adapter.
 	Model         string
 	ThinkingLevel string
-	// DisabledTools are restored into docker-agent's per-session exclusion
-	// filter before the chat is exposed to the browser.
+	// DisabledTools are restored from the process-wide dashboard exclusion
+	// set into docker-agent's per-session filter before the chat is exposed.
 	DisabledTools []string
 	MCPServers    []MCPServer
 }

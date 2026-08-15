@@ -664,11 +664,11 @@ func (c *chat) Tools(ctx context.Context) ([]protocol.ToolOption, error) {
 	return out, nil
 }
 
-func (c *chat) SetToolEnabled(_ context.Context, name string, enabled bool) error {
+func (c *chat) SetToolEnabled(ctx context.Context, name string, enabled bool) error {
 	if err := c.idle(); err != nil {
 		return err
 	}
-	definitions, err := c.rt.CurrentAgentTools(context.Background())
+	definitions, err := c.rt.CurrentAgentTools(ctx)
 	if err != nil {
 		return err
 	}
