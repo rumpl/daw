@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Minimize2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Attachment, CommandInfo, ModelOption, RunStatus, ToolOption } from '@/protocol.gen';
 import { clip, formatCost, formatTokens } from '@/safety';
 import { ModelPicker } from './ModelPicker';
@@ -21,6 +21,7 @@ export function Composer({
   attachments,
   uploading,
   placeholder,
+  focusKey,
   models = [],
   currentModel = '',
   thinkingLevel = '',
@@ -49,6 +50,7 @@ export function Composer({
   attachments: Attachment[];
   uploading: boolean;
   placeholder?: string;
+  focusKey?: string | null;
   models?: ModelOption[];
   currentModel?: string;
   thinkingLevel?: string;
@@ -70,14 +72,20 @@ export function Composer({
   onStop: () => void;
 }) {
   const [menuIndex, setMenuIndex] = useState(0);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = run.state !== 'idle';
   const slash = draft.startsWith('/') && !draft.includes(' ') ? draft.slice(1).toLowerCase() : null;
   const matches = slash === null ? [] : commands.filter((command) => command.name.toLowerCase().startsWith(slash)).slice(0, 6);
+
+  useEffect(() => {
+    if (focusKey && !disabled) inputRef.current?.focus();
+  }, [disabled, focusKey]);
 
   const submit = (alternate: boolean) => {
     const text = draft.trim();
     if ((!text && attachments.length === 0) || disabled || uploading) return;
     onSend(text, busy ? (alternate ? 'followUp' : 'steer') : 'normal');
+    inputRef.current?.focus();
   };
 
   return (
@@ -105,6 +113,7 @@ export function Composer({
         running={busy}
         attachments={attachments}
         placeholder={placeholder ?? (busy ? 'Steer the current run, or use Alt+Enter to queue a follow-up…' : 'Ask for a follow-up…')}
+        inputRef={inputRef}
         onValueChange={onDraftChange}
         onSubmit={submit}
         onStop={onStop}

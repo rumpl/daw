@@ -44,6 +44,33 @@ describe('Composer', () => {
     expect(onDraftChange).toHaveBeenCalled();
   });
 
+  it('focuses the message input when a chat becomes active', () => {
+    render(
+      <Composer
+        draft=""
+        onDraftChange={vi.fn()}
+        run={idle}
+        disabled={false}
+        focusKey="session-1"
+        commands={[]}
+        attachments={[]}
+        uploading={false}
+        onAddAttachments={vi.fn()}
+        onRemoveAttachment={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText('Message')).toHaveFocus();
+  });
+
+  it('returns focus to the message input after clicking Send', async () => {
+    const user = userEvent.setup();
+    setup(idle, 'hello');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByLabelText('Message')).toHaveFocus();
+  });
+
   it('always offers an explicit Send button', () => {
     setup(idle, 'hi');
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();

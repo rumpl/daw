@@ -123,6 +123,7 @@ function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
     run={dashboard.state.run}
     disabled={!dashboard.workspace || dashboard.busyAction || dashboard.state.closed}
     placeholder={dashboard.workspace ? undefined : 'Choose a project to start a chat…'}
+    focusKey={dashboard.activeSessionId}
     commands={[...dashboard.commands, ...pluginCommands.map((command) => ({ name: command.name, description: command.description, kind: 'plugin' }))]}
     attachments={dashboard.attachments}
     uploading={dashboard.uploading}
