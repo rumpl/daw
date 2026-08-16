@@ -9,6 +9,9 @@ const { Readable } = require('node:stream');
 const APP_SCHEME = 'daw';
 const APP_HOST = 'localhost';
 const STARTUP_TIMEOUT_MS = 30_000;
+const APP_ICON = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(__dirname, 'build', 'icon.png');
 
 // Register before app readiness so Chromium treats daw:// like a normal secure
 // origin. This is required for module scripts, dynamic plugin imports, fetch,
@@ -228,6 +231,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     title: 'Docker Agent Dashboard',
+    icon: APP_ICON,
     backgroundColor: '#111111',
     show: false,
     webPreferences: {
@@ -259,6 +263,7 @@ async function main() {
   startBackend(socketPath);
   await waitForBackend(socketPath);
   await protocol.handle(APP_SCHEME, (request) => proxyToBackend(request, socketPath));
+  if (process.platform === 'darwin') app.dock.setIcon(APP_ICON);
   createWindow();
 
   app.on('activate', () => {

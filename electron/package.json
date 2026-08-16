@@ -26,12 +26,18 @@
       {
         "from": "../bin/dawui",
         "to": "backend/dawui"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "directories": {
+      "buildResources": "build",
       "output": "dist"
     },
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "binaries": [
         "Contents/Resources/backend/dawui"
@@ -42,6 +48,7 @@
       ]
     },
     "linux": {
+      "icon": "build/icon.png",
       "category": "Development",
       "target": [
         "AppImage"
