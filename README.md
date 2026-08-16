@@ -63,8 +63,8 @@ make dev-fake  # same, with a deterministic fake agent (no model calls)
 
 ### Run agent execution in a Docker Sandbox (experimental)
 
-Install Docker Sandboxes (`sbx`), then start the normal host dashboard with a
-workspace-specific sandbox runner behind it:
+Install Docker Sandboxes (`sbx`), then start the normal host dashboard with
+one sandbox runner per persistent session:
 
 ```bash
 make start-sandbox                         # current directory
@@ -78,26 +78,46 @@ plugin MCP processes run in the sandbox. The selected workspace and global
 plugin directory are mounted at their original absolute paths, so tool edits
 are reflected on the host.
 
-The host and runner communicate over an authenticated, loopback-published port.
-Local plugin MCP processes call their host plugin backends through a separate,
-authenticated `host.docker.internal` bridge. That bridge accepts only the
-calling plugin's `/backend` route; dashboard CSRF and internal backend tokens
-are never placed in the sandbox. The main host API remains bound to loopback.
-Sessions are currently persisted by the sandbox runner and exposed through the
-host API.
+On the first launch for a new runner build, DAW creates one seed sandbox and
+saves it with `sbx template save` as a content-addressed template. This one-time
+bake currently takes about 40 seconds. The 96 MB runner then lives in the
+sandbox image instead of being uploaded for every session. Measured session
+sandbox startup from the baked template is about 4 seconds.
 
-Docker Sandboxes keeps model credentials in its host-side secret store. If a
-model reports a `proxy-managed` authentication error, import your existing
-credential and restart the sandbox:
+DAW does not prewarm ownerless sandboxes. Creating a chat—including a
+gossip-created child—starts its dedicated sandbox directly from the template.
+Closing the live chat stops its sandbox without removing it. Resuming the
+session restarts the same sandbox and rediscovers its ephemeral port. The host
+persists the session-to-sandbox index under `~/.cagent/dawui/`.
+
+The logical workspace is mounted into every session sandbox. A plugin execution
+location may select another directory (for example a sibling Git worktree); DAW
+mounts that path into only the selected session sandbox while keeping the
+session indexed under the original workspace. Filesystem edits are still shared
+through the host mounts.
+
+The host and each runner communicate over authenticated, loopback-published
+ports. Local plugin MCP processes call their host plugin backends through a
+separate authenticated `host.docker.internal` bridge. That bridge accepts only
+the calling plugin's `/backend` route; dashboard CSRF and internal backend
+tokens never enter the sandbox. The main host API remains bound to loopback.
+
+Docker Sandboxes keeps model credentials in its host-side secret store. Import
+the providers you use before starting DAW. Provider HTTP clients honor the
+sandbox's standard `HTTP_PROXY` and `HTTPS_PROXY` environment so the host proxy
+injects credentials on the first real model request. DAW relaunches the runner
+through `sbx exec` after sandbox initialization so it starts in the active proxy
+process context; it sends no warm-up provider requests:
 
 ```bash
 sbx secret import openai       # or anthropic, xai, etc.
-sbx rm -f <sandbox-name>
 make start-sandbox
 ```
 
 The runner is constructed from `internal/dashboardagent.Build`; there is no
-YAML copy of the agent. The generated Linux binary is local and gitignored. See
+YAML copy of the agent. The generated Linux binary is local and gitignored. Its
+content hash is part of the template tag, so rebuilding it produces a new
+immutable template while existing sessions retain their original image. See
 [`kits/daw-runner/README.md`](kits/daw-runner/README.md) for details.
 
 ### Desktop app (Electron)

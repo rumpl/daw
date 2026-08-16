@@ -1,8 +1,9 @@
-// Command daw-sandbox starts the sandbox-local runner used by the dashboard.
+// Command daw-sandbox launches the host dashboard's Docker Sandbox execution mode.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,10 +36,53 @@ func run() error {
 	memory := flag.String("memory", "", "sandbox memory limit, for example 8g")
 	wait := flag.Duration("wait", 2*time.Minute, "maximum time to wait for the runner API")
 	dashboard := flag.String("dashboard", "", "host dashboard executable to run after the sandbox is ready")
+	perSession := flag.Bool("per-session", false, "let the host dashboard provision one sandbox per session")
+	template := flag.String("template", "", "existing sandbox template image (per-session mode builds one when empty)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *perSession {
+		if *dashboard == "" {
+			return errors.New("-per-session requires -dashboard")
+		}
+		workspacePath, err := filepath.Abs(*workspace)
+		if err != nil {
+			return err
+		}
+		kitPath, err := filepath.Abs(*kit)
+		if err != nil {
+			return err
+		}
+		pluginPath := ""
+		if strings.TrimSpace(*pluginDir) != "" {
+			pluginPath, err = filepath.Abs(*pluginDir)
+			if err != nil {
+				return err
+			}
+		}
+		templateRef := strings.TrimSpace(*template)
+		if templateRef == "" {
+			fmt.Println("ensuring content-addressed daw-runner sandbox template...")
+			templateRef, err = sandboxrunner.EnsureTemplate(ctx, sbx.New(), sandboxrunner.TemplateOptions{
+				Workspace: workspacePath, Kit: kitPath, CPUs: *cpus, Memory: *memory, Wait: *wait,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		fmt.Printf("sandbox template: %s\n", templateRef)
+		return runDashboard(ctx, *dashboard,
+			"DAWUI_SANDBOX_PER_SESSION=1",
+			"DAWUI_SANDBOX_WORKSPACE="+workspacePath,
+			"DAWUI_SANDBOX_KIT="+kitPath,
+			"DAWUI_SANDBOX_TEMPLATE="+templateRef,
+			"DAWUI_SANDBOX_PLUGIN_DIR="+pluginPath,
+			"DAWUI_SANDBOX_CPUS="+strconv.Itoa(*cpus),
+			"DAWUI_SANDBOX_MEMORY="+*memory,
+			"DAWUI_SANDBOX_WAIT="+wait.String(),
+		)
+	}
 	client := sbx.New()
 	runner, err := sandboxrunner.Start(ctx, client, sandboxrunner.Options{
 		Workspace: *workspace, Kit: *kit, PluginDir: *pluginDir,
@@ -51,9 +96,6 @@ func run() error {
 	if err := sandboxrunner.WaitReady(readyCtx, runner.Endpoint, runner.Token); err != nil {
 		return err
 	}
-	if err := sandboxrunner.PrimeCredentials(readyCtx, client, runner.Name); err != nil {
-		return err
-	}
 
 	fmt.Printf("sandbox: %s\n", runner.Name)
 	fmt.Printf("runner:  %s\n", runner.Endpoint)
@@ -65,25 +107,28 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	return runDashboard(ctx, *dashboard,
+		"DAWUI_RUNNER_URL="+runner.Endpoint,
+		"DAWUI_RUNNER_TOKEN="+runner.Token,
+		"DAWUI_RUNNER_WORKSPACE="+workspacePath,
+	)
+}
+
+func runDashboard(ctx context.Context, executable string, values ...string) error {
 	hostUser, err := user.Current()
 	if err != nil {
 		return err
 	}
-	hostHome := hostUser.HomeDir
-	command := exec.CommandContext(ctx, *dashboard)
+	command := exec.CommandContext(ctx, executable)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-	environment := make([]string, 0, len(os.Environ())+4)
+	environment := make([]string, 0, len(os.Environ())+len(values)+1)
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "HOME=") {
 			environment = append(environment, entry)
 		}
 	}
-	command.Env = append(environment,
-		"HOME="+hostHome,
-		"DAWUI_RUNNER_URL="+runner.Endpoint,
-		"DAWUI_RUNNER_TOKEN="+runner.Token,
-		"DAWUI_RUNNER_WORKSPACE="+workspacePath,
-	)
+	command.Env = append(environment, "HOME="+hostUser.HomeDir)
+	command.Env = append(command.Env, values...)
 	return command.Run()
 }
 
