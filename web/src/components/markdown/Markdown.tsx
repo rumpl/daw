@@ -1,4 +1,4 @@
-import { memo, isValidElement } from 'react';
+import { memo, isValidElement, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,47 @@ import 'katex/dist/katex.min.css';
 import { isExternal, safeUrl } from '@/safety';
 import { Mermaid } from './Mermaid';
 import { CodeBlock } from './CodeBlock';
+
+interface HastNode {
+  type: string;
+  value?: string;
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
+  children?: HastNode[];
+  tagName?: string;
+  properties?: Record<string, unknown>;
+}
+
+function streamingTextFade(from: number, phase: 'a' | 'b') {
+  return () => (tree: HastNode) => {
+    const visit = (node: HastNode) => {
+      if (!node.children) return;
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== 'text' || typeof child.value !== 'string') {
+          visit(child);
+          return [child];
+        }
+
+        const start = child.position?.start?.offset;
+        const end = child.position?.end?.offset;
+        if (start === undefined || end === undefined || end <= from) return [child];
+
+        const splitAt = Math.max(0, Math.min(child.value.length, from - start));
+        const prefix = child.value.slice(0, splitAt);
+        const suffix = child.value.slice(splitAt);
+        if (!suffix) return [child];
+
+        const animated: HastNode = {
+          type: 'element',
+          tagName: 'span',
+          properties: { className: [`stream-token-enter-${phase}`] },
+          children: [{ ...child, value: suffix }],
+        };
+        return prefix ? [{ ...child, value: prefix }, animated] : [animated];
+      });
+    };
+    visit(tree);
+  };
+}
 
 /**
  * Pull the raw source and language out of react-markdown's <pre> child, which
@@ -38,12 +79,27 @@ function fencedCode(child: ReactNode): { lang: string; code: string } | null {
  * path never produces an HTML string; dangerouslySetInnerHTML is used only by
  * the Mermaid component on sanitized, library-generated SVG.
  */
-export const Markdown = memo(function Markdown({ children }: { children: string }) {
+export const Markdown = memo(function Markdown({ children, animateFrom, animationPhase = 'a' }: {
+  children: string;
+  animateFrom?: number;
+  animationPhase?: 'a' | 'b';
+}) {
+  const rehypePlugins = useMemo(() => {
+    const plugins: NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']> = [
+      rehypeKatex,
+      [rehypeHighlight, { detect: false, ignoreMissing: true }],
+    ];
+    if (animateFrom !== undefined && animateFrom < children.length) {
+      plugins.push(streamingTextFade(animateFrom, animationPhase));
+    }
+    return plugins;
+  }, [animateFrom, animationPhase, children.length]);
+
   return (
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }]]}
+        rehypePlugins={rehypePlugins}
         // No rehype-raw / skipHtml default keeps embedded HTML as text.
         components={{
           a({ href, children: content }) {

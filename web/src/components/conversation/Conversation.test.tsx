@@ -107,6 +107,21 @@ describe('Conversation', () => {
     expect(container.querySelector('.msg-streaming pre')).toBeNull();
   });
 
+  it('fades only text appended to a streaming assistant message', () => {
+    const initial = assistantMessage({ id: 'stream', text: 'Hello ', streaming: true });
+    const { container, rerender } = render(<Conversation items={[initial]} empty={null} />);
+    expect(container.querySelector('[class^="stream-token-enter-"]')).toBeNull();
+
+    rerender(<Conversation items={[assistantMessage({ id: 'stream', text: 'Hello world', streaming: true })]} empty={null} />);
+    expect(container.querySelector('.stream-token-enter-a')).toHaveTextContent('world');
+
+    rerender(<Conversation items={[assistantMessage({ id: 'stream', text: 'Hello world again', streaming: true })]} empty={null} />);
+    expect(container.querySelector('.stream-token-enter-b')?.textContent).toBe(' again');
+
+    rerender(<Conversation items={[assistantMessage({ id: 'stream', text: 'Hello world again', streaming: false })]} empty={null} />);
+    expect(container.querySelector('[class^="stream-token-enter-"]')).toBeNull();
+  });
+
   it('renders reasoning with its existing styling class and Markdown', () => {
     const { container } = render(
       <Conversation

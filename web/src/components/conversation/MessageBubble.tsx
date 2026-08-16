@@ -8,6 +8,7 @@ import type { ContributionContext } from '@/plugin-contributions';
 import { usePluginContributions } from '@/plugin-contributions';
 import type { MessageItem } from '@/protocol.gen';
 import { clip } from '@/safety';
+import { useLayoutEffect, useRef } from 'react';
 import { Download } from 'lucide-react';
 
 function attachmentImageSrc(attachment: NonNullable<MessageItem['attachments']>[number]): string | null {
@@ -40,6 +41,20 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
 }) {
   const isUser = message.role === 'user';
   const canDownload = !isUser && !message.streaming;
+  const previousStreamRef = useRef({ id: message.id, textLength: message.text.length, phase: false });
+  const previousStream = previousStreamRef.current;
+  const sameStream = previousStream.id === message.id;
+  const appended = message.streaming && sameStream && message.text.length > previousStream.textLength;
+  const animateFrom = appended ? previousStream.textLength : undefined;
+  const animationPhase = previousStream.phase ? 'b' : 'a';
+
+  useLayoutEffect(() => {
+    previousStreamRef.current = {
+      id: message.id,
+      textLength: message.text.length,
+      phase: appended ? !previousStream.phase : previousStream.phase,
+    };
+  }, [appended, message.id, message.text.length, previousStream.phase]);
 
   return (
     <article className={`msg msg-${isUser ? 'user' : 'assistant'}${canDownload ? ' msg-downloadable' : ''}`} aria-label={`${message.role} message`}>
@@ -86,7 +101,7 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
       {message.reasoning ? <div className="reasoning"><Markdown>{message.reasoning}</Markdown></div> : null}
       {message.streaming ? (
         <div className="msg-streaming" aria-live="polite">
-          <Markdown>{message.text}</Markdown>
+          <Markdown animateFrom={animateFrom} animationPhase={animationPhase}>{message.text}</Markdown>
           <span className="caret" aria-hidden="true" />
         </div>
       ) : isUser ? <pre className="msg-plain">{message.text}</pre> : <Markdown>{message.text}</Markdown>}

@@ -3,6 +3,19 @@ import { render, screen } from '@testing-library/react';
 import { Markdown } from './Markdown';
 
 describe('Markdown rendering', () => {
+  it('wraps only the newly appended source range for streaming animation', () => {
+    const { container, rerender } = render(
+      <Markdown animateFrom={6} animationPhase="a">Hello new tokens</Markdown>,
+    );
+    const animated = container.querySelector('.stream-token-enter-a');
+    expect(animated).toHaveTextContent('new tokens');
+    expect(container.querySelector('p')?.childNodes[0]?.textContent).toBe('Hello ');
+
+    rerender(<Markdown animateFrom={7} animationPhase="b">**Bold new** tail</Markdown>);
+    expect(container.querySelector('.stream-token-enter-b')?.textContent).toBe('new');
+    expect(container.querySelector('strong')).toHaveTextContent('Bold new');
+  });
+
   it('renders GFM tables and code without raw HTML', () => {
     const { container } = render(
       <Markdown>{'| a | b |\n| - | - |\n| 1 | 2 |\n\n```sh\nls -la\n```'}</Markdown>,

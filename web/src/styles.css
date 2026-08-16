@@ -451,6 +451,10 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.stream-token-enter-a { animation: stream-token-enter-a 240ms ease-out both; }
+.stream-token-enter-b { animation: stream-token-enter-b 240ms ease-out both; }
+@keyframes stream-token-enter-a { from { opacity: 0; } to { opacity: 1; } }
+@keyframes stream-token-enter-b { from { opacity: 0; } to { opacity: 1; } }
 
 .empty { margin: auto; text-align: center; color: var(--fg-dim); padding: 24px; }
 .empty h2 { margin: 0 0 6px; font-size: 15px; color: var(--fg); font-weight: 600; }
