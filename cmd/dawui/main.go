@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +26,7 @@ import (
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/dagent"
 	"github.com/rumpl/daw/internal/adapter/fake"
+	remoteadapter "github.com/rumpl/daw/internal/adapter/remote"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/webassets"
@@ -78,7 +81,11 @@ func run() error {
 		}
 	}
 
-	guard, _, err := pathsec.NewGuard(pathsec.HomeRoots())
+	workspaceRoots := pathsec.HomeRoots()
+	if runnerWorkspace := strings.TrimSpace(os.Getenv("DAWUI_RUNNER_WORKSPACE")); runnerWorkspace != "" {
+		workspaceRoots = []string{runnerWorkspace}
+	}
+	guard, _, err := pathsec.NewGuard(workspaceRoots)
 	if err != nil {
 		return fmt.Errorf("the home directory is not usable as a workspace root: %w", err)
 	}
@@ -87,7 +94,14 @@ func run() error {
 	defer stop()
 
 	var ad adapter.Adapter
+	var mcpBridgeListener net.Listener
+	var mcpBridgeToken string
 	fakeAdapter := os.Getenv("DAWUI_FAKE_ADAPTER") == "1"
+	runnerEndpoint := strings.TrimSpace(os.Getenv("DAWUI_RUNNER_URL"))
+	sandboxed := runnerEndpoint != ""
+	if fakeAdapter && sandboxed {
+		return errors.New("DAWUI_FAKE_ADAPTER and DAWUI_RUNNER_URL cannot be combined")
+	}
 	if fakeAdapter {
 		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
 		f := fake.New()
@@ -98,6 +112,30 @@ func run() error {
 		}
 		f.Seed("seeded-session-1", "Earlier conversation", os.Getenv("DAWUI_FAKE_WORKSPACE"), nil)
 		ad = f
+	} else if sandboxed {
+		if socketPath != "" {
+			return errors.New("sandbox runner mode does not yet support the Electron Unix-socket transport")
+		}
+		mcpBridgeListener, err = (&net.ListenConfig{}).Listen(ctx, "tcp4", "127.0.0.1:0")
+		if err != nil {
+			return fmt.Errorf("start sandbox MCP callback bridge: %w", err)
+		}
+		defer mcpBridgeListener.Close()
+		mcpBridgeToken, err = randomToken()
+		if err != nil {
+			return fmt.Errorf("create sandbox MCP callback token: %w", err)
+		}
+		bridgePort := mcpBridgeListener.Addr().(*net.TCPAddr).Port
+		remoteAdapter, err := remoteadapter.New(remoteadapter.Config{
+			Endpoint:       runnerEndpoint,
+			Token:          os.Getenv("DAWUI_RUNNER_TOKEN"),
+			CallbackOrigin: "http://host.docker.internal:" + strconv.Itoa(bridgePort),
+			CallbackToken:  mcpBridgeToken,
+		})
+		if err != nil {
+			return err
+		}
+		ad = remoteAdapter
 	} else {
 		realAdapter, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
 		if err != nil {
@@ -106,25 +144,35 @@ func run() error {
 		ad = realAdapter
 	}
 
-	// The real dashboard keeps its project MRU and chat control preferences
-	// beside docker-agent's session data. Tests using the fake adapter stay
-	// isolated unless they explicitly provide file paths.
-	workspaceHistoryFile := strings.TrimSpace(os.Getenv("DAWUI_WORKSPACE_HISTORY_FILE"))
-	chatPreferencesFile := strings.TrimSpace(os.Getenv("DAWUI_CHAT_PREFERENCES_FILE"))
-	if (workspaceHistoryFile == "" || chatPreferencesFile == "") && !fakeAdapter {
-		info, err := ad.Info(ctx)
-		if err != nil {
-			return fmt.Errorf("docker-agent could not report its data directory: %w", err)
+	// Control-plane state and plugins stay on the host even when the adapter is
+	// remote. Only the runner's session/runtime state belongs to the sandbox.
+	controlDataDir := ""
+	if !fakeAdapter {
+		if sandboxed {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("resolve host data directory: %w", err)
+			}
+			controlDataDir = filepath.Join(home, ".cagent")
+		} else {
+			info, err := ad.Info(ctx)
+			if err != nil {
+				return fmt.Errorf("docker-agent could not report its data directory: %w", err)
+			}
+			controlDataDir = strings.TrimSpace(info.DataDir)
 		}
-		if strings.TrimSpace(info.DataDir) == "" {
+		if controlDataDir == "" {
 			return errors.New("docker-agent reported an empty data directory")
 		}
-		if workspaceHistoryFile == "" {
-			workspaceHistoryFile = filepath.Join(info.DataDir, "dawui-workspaces.json")
-		}
-		if chatPreferencesFile == "" {
-			chatPreferencesFile = filepath.Join(info.DataDir, "dawui-chat-preferences.json")
-		}
+	}
+
+	workspaceHistoryFile := strings.TrimSpace(os.Getenv("DAWUI_WORKSPACE_HISTORY_FILE"))
+	chatPreferencesFile := strings.TrimSpace(os.Getenv("DAWUI_CHAT_PREFERENCES_FILE"))
+	if workspaceHistoryFile == "" && !fakeAdapter {
+		workspaceHistoryFile = filepath.Join(controlDataDir, "dawui-workspaces.json")
+	}
+	if chatPreferencesFile == "" && !fakeAdapter {
+		chatPreferencesFile = filepath.Join(controlDataDir, "dawui-chat-preferences.json")
 	}
 
 	pluginDir := strings.TrimSpace(os.Getenv("DAWUI_PLUGIN_DIR"))
@@ -132,11 +180,7 @@ func run() error {
 		if fakeAdapter {
 			pluginDir = filepath.Join(os.TempDir(), "dawui-fake-plugins")
 		} else {
-			info, err := ad.Info(ctx)
-			if err != nil {
-				return fmt.Errorf("docker-agent could not report its data directory: %w", err)
-			}
-			pluginDir = filepath.Join(info.DataDir, "dawui", "plugins")
+			pluginDir = filepath.Join(controlDataDir, "dawui", "plugins")
 		}
 	}
 	pluginDir, err = absoluteUserPath(pluginDir)
@@ -171,13 +215,15 @@ func run() error {
 		listenAddress = socketPath
 		pluginAPIOrigin = "http://localhost"
 	}
-	log.Info("dashboard starting", "version", appVersion, "network", listenNetwork, "address", listenAddress, "plugin_directory", pluginDir, "plugin_data_directory", pluginDataDir, "fake_adapter", fakeAdapter)
+	log.Info("dashboard starting", "version", appVersion, "network", listenNetwork, "address", listenAddress, "plugin_directory", pluginDir, "plugin_data_directory", pluginDataDir, "fake_adapter", fakeAdapter, "sandboxed", sandboxed)
+	tailscaleHosts := splitList(os.Getenv("TAILSCALE_HOSTNAMES"))
 
 	srv := httpapi.New(httpapi.Options{
 		Adapter:              ad,
 		Guard:                guard,
 		AppVersion:           appVersion,
-		TailscaleHosts:       splitList(os.Getenv("TAILSCALE_HOSTNAMES")),
+		Sandboxed:            sandboxed,
+		TailscaleHosts:       tailscaleHosts,
 		AllowedTSUsers:       splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
 		Static:               webassets.Handler(),
 		Logger:               log,
@@ -226,12 +272,23 @@ func run() error {
 		fmt.Printf("docker-agent dashboard listening on http://%s\n", listenAddress)
 	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
-	fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
+	if sandboxed {
+		fmt.Printf("  sandbox runner: %s\n", runnerEndpoint)
+	} else {
+		fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
+	}
 	fmt.Printf("  global plugins: %s\n", pluginDir)
 	fmt.Println("  all chats are autonomous: EVERY tool call is auto-approved")
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() { errCh <- httpServer.Serve(ln) }()
+	var mcpBridgeServer *http.Server
+	if mcpBridgeListener != nil {
+		mcpBridgeServer = &http.Server{
+			Handler: srv.MCPBridge(mcpBridgeToken), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
+		}
+		go func() { errCh <- mcpBridgeServer.Serve(mcpBridgeListener) }()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -245,7 +302,18 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
+	if mcpBridgeServer != nil {
+		_ = mcpBridgeServer.Shutdown(shutdownCtx)
+	}
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+func randomToken() (string, error) {
+	var value [32]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value[:]), nil
 }
 
 func absoluteUserPath(path string) (string, error) {

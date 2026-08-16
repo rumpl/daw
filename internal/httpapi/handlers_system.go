@@ -26,25 +26,28 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	wsHints := s.workspaces.Hints()
 
 	notices := append([]protocol.Notice(nil), info.Notices...)
-	notices = append(notices,
-		protocol.Notice{
-			ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
-			Message: "Every tool call, including shell commands, is auto-approved and runs " +
-				"on this host as your user.",
-		},
-		protocol.Notice{
+	autoApprovedMessage := "Every tool call, including shell commands, is auto-approved and runs on this host as your user."
+	if s.sandboxed {
+		autoApprovedMessage = "Every tool call is auto-approved, but executes inside the Docker Sandbox rather than on the host."
+	}
+	notices = append(notices, protocol.Notice{
+		ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
+		Message: autoApprovedMessage,
+	})
+	if !s.sandboxed {
+		notices = append(notices, protocol.Notice{
 			ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
 			Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
 				"with your user's permissions. There is no sandbox. Use `docker agent run --sandbox` " +
 				"in a terminal if you need isolation.",
-		},
-	)
+		})
+	}
 
 	s.json(w, http.StatusOK, protocol.Bootstrap{
 		AppVersion: s.appVersion, AgentVersion: info.AgentVersion, AgentCommit: info.AgentCommit,
 		ConfigDir: info.ConfigDir, DataDir: info.DataDir, CacheDir: info.CacheDir,
 		SessionDB: info.SessionDB, PluginDir: s.pluginDir,
-		CSRFToken: s.csrf, Sandboxed: false,
+		CSRFToken: s.csrf, Sandboxed: s.sandboxed,
 		ModelsAvailable: info.ModelsAvailable, ModelsHint: info.ModelsHint,
 		WorkspaceHints: wsHints, Notices: notices,
 	})

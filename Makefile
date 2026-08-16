@@ -5,11 +5,12 @@
 
 SHELL := /bin/bash
 BIN := bin/dawui
+RUNNER_KIT_BIN := kits/daw-runner/files/home/.local/lib/daw-runner
 PORT ?= 4788
 GO ?= go
 
 .PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
-        ci build build-web build-go start electron package-electron clean smoke-real screenshots help
+        ci build build-web build-go build-runner-kit start start-sandbox electron package-electron clean smoke-real screenshots help
 
 all: build
 
@@ -113,9 +114,21 @@ build-go:
 	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
 	  -o $(BIN) ./cmd/dawui
 
+## build-runner-kit: cross-compile the code-defined Linux runner into the local sandbox kit
+build-runner-kit:
+	mkdir -p $(dir $(RUNNER_KIT_BIN))
+	CGO_ENABLED=0 GOOS=linux GOARCH=$$($(GO) env GOARCH) $(GO) build -trimpath -ldflags "\
+	  -X main.appVersion=$$(git describe --tags --always 2>/dev/null || echo dev) \
+	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
+	  -o $(RUNNER_KIT_BIN) ./cmd/daw-runner
+
 ## start: run the compiled production binary
 start: $(BIN)
 	PORT=$(PORT) ./$(BIN)
+
+## start-sandbox: build and create a sandbox containing the code-defined runner
+start-sandbox: build build-runner-kit
+	$(GO) run ./cmd/daw-sandbox -workspace "$${WORKSPACE:-.}" -dashboard ./$(BIN)
 
 $(BIN):
 	$(MAKE) build
@@ -141,6 +154,7 @@ smoke-real:
 
 clean:
 	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules electron/node_modules electron/dist
+	rm -f $(RUNNER_KIT_BIN)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'
