@@ -196,6 +196,36 @@ describe('Conversation', () => {
     expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
   });
 
+  it('animates rows appended to the active conversation but not initial history', () => {
+    const first = assistantMessage({ id: 'first', text: 'Existing' });
+    const second = assistantMessage({ id: 'second', text: 'Incoming' });
+    const { container, rerender } = render(
+      <Conversation items={[first]} contributionContext={{ workspace: null, chatId: 'chat-1', session: null }} empty={null} />,
+    );
+
+    expect(container.querySelector('[aria-label="assistant message"]')?.parentElement)
+      .not.toHaveClass('conversation-row-enter');
+
+    rerender(
+      <Conversation items={[first, second]} contributionContext={{ workspace: null, chatId: 'chat-1', session: null }} empty={null} />,
+    );
+    const rows = container.querySelectorAll('.conversation-row');
+    expect(rows[0]).not.toHaveClass('conversation-row-enter');
+    expect(rows[1]).toHaveClass('conversation-row-enter');
+
+    rerender(
+      <Conversation items={[first, assistantMessage({ id: 'second', text: 'Incoming update' })]}
+        contributionContext={{ workspace: null, chatId: 'chat-1', session: null }} empty={null} />,
+    );
+    expect(container.querySelectorAll('.conversation-row')[1]).toHaveClass('conversation-row-enter');
+
+    rerender(
+      <Conversation items={[assistantMessage({ id: 'other', text: 'Other chat history' })]}
+        contributionContext={{ workspace: null, chatId: 'chat-2', session: null }} empty={null} />,
+    );
+    expect(container.querySelector('.conversation-row')).not.toHaveClass('conversation-row-enter');
+  });
+
   it('does not render user messages as Markdown', () => {
     const { container } = render(
       <Conversation

@@ -5,18 +5,24 @@ import { ToolCard } from '@/components/tools/ToolCard';
 import type { ContributionContext } from '@/plugin-contributions';
 import { usePluginContributions } from '@/plugin-contributions';
 import type { Item } from '@/protocol.gen';
-import { memo } from 'react';
+import { memo, useRef } from 'react';
+import { cn } from '@/lib/utils';
 import { MessageBubble } from './MessageBubble';
 import { NoticeCard } from './NoticeCard';
 import { SummaryCard } from './SummaryCard';
 import { TransferCard } from './TransferCard';
 
-export const ConversationRow = memo(function ConversationRow({ item, toolRenderers, attachmentRenderers, contributionContext }: {
+export const ConversationRow = memo(function ConversationRow({ item, entering = false, toolRenderers, attachmentRenderers, contributionContext }: {
   item: Item;
+  entering?: boolean;
   toolRenderers: ReturnType<typeof usePluginContributions>['toolRenderers'];
   attachmentRenderers: ReturnType<typeof usePluginContributions>['attachmentRenderers'];
   contributionContext?: ContributionContext;
 }) {
+  // Tool rows often receive an update immediately after they mount. Keep the
+  // entry class latched so that follow-up SSE renders cannot cancel the CSS
+  // animation before its first visible frame.
+  const animateEntry = useRef(entering).current;
   let content;
   switch (item.kind) {
     case 'message':
@@ -42,5 +48,5 @@ export const ConversationRow = memo(function ConversationRow({ item, toolRendere
       content = item.summary ? <SummaryCard summary={item.summary} /> : null;
       break;
   }
-  return content ? <div className="conversation-row">{content}</div> : null;
+  return content ? <div className={cn('conversation-row', animateEntry && 'conversation-row-enter')}>{content}</div> : null;
 });
