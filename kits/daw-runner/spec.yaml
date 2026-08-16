@@ -1,0 +1,120 @@
+schemaVersion: "2"
+kind: sandbox
+name: daw-runner
+version: "0.1.0"
+displayName: Docker Agent Dashboard runner
+description: Runs the dashboard coding agent API inside a Docker Sandbox.
+sourceURL: https://github.com/rumpl/daw
+extends: docker-agent
+
+sandbox:
+  entrypoint:
+    - /home/agent/.local/bin/start-daw-runner
+  resources:
+    cpu: 2
+    memory: 4g
+
+ports:
+  - container: 8080
+    protocol: tcp
+    name: runner-api
+
+# Docker Sandboxes currently does not carry the built-in docker-agent
+# credential declarations through `extends`, so repeat the proxy bindings here.
+# The real secrets remain in the host keychain; only proxy-managed sentinels are
+# exposed to the runner.
+credentials:
+  - service: anthropic
+    apiKey:
+      name: ANTHROPIC_API_KEY
+      proxyManaged: true
+      inject:
+        - domain: api.anthropic.com
+          header: x-api-key
+          format: "%s"
+        - domain: claude.ai
+          header: x-api-key
+          format: "%s"
+        - domain: console.anthropic.com
+          header: x-api-key
+          format: "%s"
+  - service: google
+    apiKey:
+      name: GOOGLE_API_KEY
+      proxyManaged: true
+      inject:
+        - domain: aiplatform.googleapis.com
+          header: x-goog-api-key
+          format: "%s"
+        - domain: generativelanguage.googleapis.com
+          header: x-goog-api-key
+          format: "%s"
+        - domain: oauth2.googleapis.com
+          header: x-goog-api-key
+          format: "%s"
+        - domain: vertexai.googleapis.com
+          header: x-goog-api-key
+          format: "%s"
+  - service: mistral
+    apiKey:
+      name: MISTRAL_API_KEY
+      proxyManaged: true
+  - service: nebius
+    apiKey:
+      name: NEBIUS_API_KEY
+      proxyManaged: true
+  - service: openai
+    apiKey:
+      name: OPENAI_API_KEY
+      proxyManaged: true
+      inject:
+        - domain: api.openai.com
+          header: Authorization
+          format: Bearer %s
+  - service: openrouter
+    apiKey:
+      name: OPENROUTER_API_KEY
+      proxyManaged: true
+      inject:
+        - domain: openrouter.ai
+          header: Authorization
+          format: Bearer %s
+  - service: xai
+    apiKey:
+      name: XAI_API_KEY
+      proxyManaged: true
+
+setup:
+  startup:
+    - command:
+        - /home/agent/.local/bin/start-daw-runner
+      user: "1000"
+      background: true
+      description: Keep the dashboard runner API active whenever the sandbox is running.
+  files:
+    - path: /home/agent/.local/bin/start-daw-runner
+      mode: "0755"
+      content: |
+        #!/bin/sh
+        set -eu
+        export DAW_RUNNER_WORKSPACE="${WORKDIR}"
+        IFS= read -r DAW_RUNNER_TOKEN < /home/agent/.config/daw/runner-token
+        export DAW_RUNNER_TOKEN
+        mkdir -p /home/agent/.cagent/daw-runner
+        pid_file=/home/agent/.cagent/daw-runner/runner.pid
+        if [ -s "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+          exit 0
+        fi
+        echo $$ >"$pid_file"
+        exec /home/agent/.local/lib/daw-runner \
+          >>/home/agent/.cagent/daw-runner/runner.log 2>&1
+      description: Start the code-defined dashboard runner for the mounted workspace.
+
+agentInstructions:
+  filename: AGENTS.md
+  content: |
+    ## Docker Agent Dashboard sandbox
+
+    This workspace is being edited by a dashboard runner inside a Docker Sandbox.
+    Commands, filesystem access, child processes, and Docker containers are isolated
+    in the sandbox VM rather than running directly on the host.

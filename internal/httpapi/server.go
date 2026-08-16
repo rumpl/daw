@@ -31,9 +31,12 @@ const heartbeatInterval = 20 * time.Second
 
 // Options configures the server.
 type Options struct {
-	Adapter        adapter.Adapter
-	Guard          *pathsec.Guard
-	AppVersion     string
+	Adapter    adapter.Adapter
+	Guard      *pathsec.Guard
+	AppVersion string
+	// Sandboxed reports that tool execution is isolated from the host. The
+	// standalone dashboard leaves this false; daw-runner sets it true.
+	Sandboxed      bool
 	TailscaleHosts []string
 	AllowedTSUsers []string
 	// Static serves the built frontend; nil disables the UI (API-only tests).
@@ -68,6 +71,7 @@ type Server struct {
 	hosts           *hostPolicy
 	csrf            string
 	appVersion      string
+	sandboxed       bool
 	allowedTSUsers  map[string]bool
 	static          http.Handler
 	log             *slog.Logger
@@ -113,6 +117,7 @@ func New(opts Options) *Server {
 		hosts:           newHostPolicy(opts.TailscaleHosts),
 		csrf:            newToken(),
 		appVersion:      opts.AppVersion,
+		sandboxed:       opts.Sandboxed,
 		allowedTSUsers:  users,
 		static:          opts.Static,
 		log:             log,

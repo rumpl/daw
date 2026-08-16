@@ -6,3 +6,6 @@ node_modules
 /internal/webassets/dist/
 
 /screenshots/
+
+# Linux runner staged into the local Docker Sandbox kit by make build-runner-kit.
+/kits/daw-runner/files/home/.local/lib/daw-runner

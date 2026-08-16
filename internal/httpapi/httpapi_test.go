@@ -272,6 +272,70 @@ func TestHealthAndBootstrap(t *testing.T) {
 	}
 }
 
+func TestSandboxedBootstrap(t *testing.T) {
+	root := t.TempDir()
+	guard, _, err := pathsec.NewGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := fake.New()
+	server := httpapi.New(httpapi.Options{
+		Adapter: adapter, Guard: guard, AppVersion: "test", Sandboxed: true,
+		PluginDir: t.TempDir(), PluginDataDir: t.TempDir(),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	request.Host = "127.0.0.1"
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("bootstrap: %d", response.Code)
+	}
+	var bootstrap protocol.Bootstrap
+	if err := json.Unmarshal(response.Body.Bytes(), &bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if !bootstrap.Sandboxed {
+		t.Fatal("sandbox runner bootstrap did not report isolation")
+	}
+	for _, notice := range bootstrap.Notices {
+		if notice.Code == "no_sandbox" {
+			t.Fatal("sandbox runner bootstrap included the host-only no-sandbox notice")
+		}
+	}
+}
+
+func TestMCPBridgeIsAuthenticatedAndBackendScoped(t *testing.T) {
+	root := t.TempDir()
+	guard, _, err := pathsec.NewGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httpapi.New(httpapi.Options{
+		Adapter: fake.New(), Guard: guard, PluginDir: t.TempDir(), PluginDataDir: t.TempDir(),
+	})
+	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
+	bridge := server.MCPBridge("bridge-secret")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/bootstrap", nil)
+	response := httptest.NewRecorder()
+	bridge.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token status = %d", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/chats", nil)
+	request.Header.Set(httpapi.CSRFHeader, "bridge-secret")
+	request.Header.Set("X-DAW-Plugin-Token", "bridge-secret")
+	request.Header.Set("X-DAW-Plugin-ID", "example")
+	response = httptest.NewRecorder()
+	bridge.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("out-of-scope path status = %d", response.Code)
+	}
+}
+
 func TestGlobalPluginCatalogAndAssets(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.pluginDir, "hello")

@@ -61,6 +61,45 @@ make dev       # Go API on :4788, Vite on :4789 proxying /api
 make dev-fake  # same, with a deterministic fake agent (no model calls)
 ```
 
+### Run agent execution in a Docker Sandbox (experimental)
+
+Install Docker Sandboxes (`sbx`), then start the normal host dashboard with a
+workspace-specific sandbox runner behind it:
+
+```bash
+make start-sandbox                         # current directory
+WORKSPACE=/absolute/project make start-sandbox
+```
+
+Open the usual <http://127.0.0.1:4788> URL. The browser, dashboard API, workspace
+history, preferences, plugin catalog, and plugin backends remain on the host.
+The code-defined `dashboard-coder`, model runtime, shell/filesystem tools, and
+plugin MCP processes run in the sandbox. The selected workspace and global
+plugin directory are mounted at their original absolute paths, so tool edits
+are reflected on the host.
+
+The host and runner communicate over an authenticated, loopback-published port.
+Local plugin MCP processes call their host plugin backends through a separate,
+authenticated `host.docker.internal` bridge. That bridge accepts only the
+calling plugin's `/backend` route; dashboard CSRF and internal backend tokens
+are never placed in the sandbox. The main host API remains bound to loopback.
+Sessions are currently persisted by the sandbox runner and exposed through the
+host API.
+
+Docker Sandboxes keeps model credentials in its host-side secret store. If a
+model reports a `proxy-managed` authentication error, import your existing
+credential and restart the sandbox:
+
+```bash
+sbx secret import openai       # or anthropic, xai, etc.
+sbx rm -f <sandbox-name>
+make start-sandbox
+```
+
+The runner is constructed from `internal/dashboardagent.Build`; there is no
+YAML copy of the agent. The generated Linux binary is local and gitignored. See
+[`kits/daw-runner/README.md`](kits/daw-runner/README.md) for details.
+
 ### Desktop app (Electron)
 
 ```bash
