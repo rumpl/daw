@@ -126,9 +126,9 @@ build-runner-kit:
 start: $(BIN)
 	PORT=$(PORT) ./$(BIN)
 
-## start-sandbox: build and create a sandbox containing the code-defined runner
+## start-sandbox: build and run one Docker Sandbox per persistent session
 start-sandbox: build build-runner-kit
-	$(GO) run ./cmd/daw-sandbox -workspace "$${WORKSPACE:-.}" -dashboard ./$(BIN)
+	$(GO) run ./cmd/daw-sandbox -per-session -workspace "$${WORKSPACE:-.}" -dashboard ./$(BIN)
 
 $(BIN):
 	$(MAKE) build

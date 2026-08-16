@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/rumpl/daw/internal/adapter/dagent"
 	"github.com/rumpl/daw/internal/adapter/fake"
 	remoteadapter "github.com/rumpl/daw/internal/adapter/remote"
+	sandboxadapter "github.com/rumpl/daw/internal/adapter/sandbox"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/webassets"
@@ -81,11 +83,7 @@ func run() error {
 		}
 	}
 
-	workspaceRoots := pathsec.HomeRoots()
-	if runnerWorkspace := strings.TrimSpace(os.Getenv("DAWUI_RUNNER_WORKSPACE")); runnerWorkspace != "" {
-		workspaceRoots = []string{runnerWorkspace}
-	}
-	guard, _, err := pathsec.NewGuard(workspaceRoots)
+	guard, _, err := pathsec.NewGuard(pathsec.HomeRoots())
 	if err != nil {
 		return fmt.Errorf("the home directory is not usable as a workspace root: %w", err)
 	}
@@ -98,9 +96,13 @@ func run() error {
 	var mcpBridgeToken string
 	fakeAdapter := os.Getenv("DAWUI_FAKE_ADAPTER") == "1"
 	runnerEndpoint := strings.TrimSpace(os.Getenv("DAWUI_RUNNER_URL"))
-	sandboxed := runnerEndpoint != ""
+	perSessionSandbox := os.Getenv("DAWUI_SANDBOX_PER_SESSION") == "1"
+	sandboxed := runnerEndpoint != "" || perSessionSandbox
 	if fakeAdapter && sandboxed {
-		return errors.New("DAWUI_FAKE_ADAPTER and DAWUI_RUNNER_URL cannot be combined")
+		return errors.New("DAWUI_FAKE_ADAPTER cannot be combined with sandbox runner mode")
+	}
+	if runnerEndpoint != "" && perSessionSandbox {
+		return errors.New("DAWUI_RUNNER_URL and DAWUI_SANDBOX_PER_SESSION cannot be combined")
 	}
 	if fakeAdapter {
 		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
@@ -126,16 +128,52 @@ func run() error {
 			return fmt.Errorf("create sandbox MCP callback token: %w", err)
 		}
 		bridgePort := mcpBridgeListener.Addr().(*net.TCPAddr).Port
-		remoteAdapter, err := remoteadapter.New(remoteadapter.Config{
-			Endpoint:       runnerEndpoint,
-			Token:          os.Getenv("DAWUI_RUNNER_TOKEN"),
-			CallbackOrigin: "http://host.docker.internal:" + strconv.Itoa(bridgePort),
-			CallbackToken:  mcpBridgeToken,
-		})
-		if err != nil {
-			return err
+		callbackOrigin := "http://host.docker.internal:" + strconv.Itoa(bridgePort)
+		if perSessionSandbox {
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				return fmt.Errorf("resolve sandbox session index: %w", homeErr)
+			}
+			workspace := strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_WORKSPACE"))
+			var sandboxCPUs int
+			if value := strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_CPUS")); value != "" {
+				sandboxCPUs, err = strconv.Atoi(value)
+				if err != nil || sandboxCPUs < 0 {
+					return fmt.Errorf("invalid DAWUI_SANDBOX_CPUS: %q", value)
+				}
+			}
+			var readyTimeout time.Duration
+			if value := strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_WAIT")); value != "" {
+				readyTimeout, err = time.ParseDuration(value)
+				if err != nil {
+					return fmt.Errorf("invalid DAWUI_SANDBOX_WAIT: %w", err)
+				}
+			}
+			indexSum := sha256.Sum256([]byte(filepath.Clean(workspace)))
+			perSessionAdapter, adapterErr := sandboxadapter.New(sandboxadapter.Config{
+				Workspace:      workspace,
+				Kit:            strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_KIT")),
+				Template:       strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_TEMPLATE")),
+				PluginDir:      strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_PLUGIN_DIR")),
+				IndexFile:      filepath.Join(home, ".cagent", "dawui", "sandbox-sessions-"+hex.EncodeToString(indexSum[:6])+".json"),
+				CallbackOrigin: callbackOrigin, CallbackToken: mcpBridgeToken,
+				CPUs: sandboxCPUs, Memory: strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_MEMORY")),
+				ReadyTimeout: readyTimeout, Logger: log,
+			})
+			if adapterErr != nil {
+				return adapterErr
+			}
+			ad = perSessionAdapter
+		} else {
+			remoteAdapter, adapterErr := remoteadapter.New(remoteadapter.Config{
+				Endpoint: runnerEndpoint, Token: os.Getenv("DAWUI_RUNNER_TOKEN"),
+				CallbackOrigin: callbackOrigin, CallbackToken: mcpBridgeToken,
+			})
+			if adapterErr != nil {
+				return adapterErr
+			}
+			ad = remoteAdapter
 		}
-		ad = remoteAdapter
 	} else {
 		realAdapter, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
 		if err != nil {
@@ -272,7 +310,9 @@ func run() error {
 		fmt.Printf("docker-agent dashboard listening on http://%s\n", listenAddress)
 	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
-	if sandboxed {
+	if perSessionSandbox {
+		fmt.Println("  sandbox runners: one stopped/resumable sandbox per session")
+	} else if sandboxed {
 		fmt.Printf("  sandbox runner: %s\n", runnerEndpoint)
 	} else {
 		fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
