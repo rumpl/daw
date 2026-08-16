@@ -4,9 +4,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeHighlight from 'rehype-highlight';
 import 'katex/dist/katex.min.css';
 import { isExternal, safeUrl } from '@/safety';
 import { Mermaid } from './Mermaid';
+import { CodeBlock } from './CodeBlock';
 
 /**
  * Pull the raw source and language out of react-markdown's <pre> child, which
@@ -41,7 +43,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeKatex, [rehypeHighlight, { detect: false, ignoreMissing: true }]]}
         // No rehype-raw / skipHtml default keeps embedded HTML as text.
         components={{
           a({ href, children: content }) {
@@ -64,6 +66,9 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             const fenced = fencedCode(content);
             if (fenced?.lang === 'mermaid') {
               return <Mermaid code={fenced.code} />;
+            }
+            if (fenced) {
+              return <CodeBlock code={fenced.code} language={fenced.lang}>{content}</CodeBlock>;
             }
             return (
               <pre className="md-pre" tabIndex={0}>

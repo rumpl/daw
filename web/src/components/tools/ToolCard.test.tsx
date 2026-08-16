@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@/test-utils';
+import { fireEvent, render, screen, waitFor } from '@/test-utils';
 import { describe, expect, it } from 'vitest';
 import type { ToolActivity } from '@/protocol.gen';
 import { ToolCard } from './ToolCard';
@@ -69,6 +69,20 @@ describe('ToolCard', () => {
     expect(screen.getByText('File contents')).toBeVisible();
   });
 
+  it('syntax-highlights write_file previews for known file extensions', () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'write_file', category: 'filesystem', displayName: 'Write', arguments: { path: 'hello.ts', contentBytes: 20, contentLines: 1, contentPreview: 'const answer = 42;' }, preview: 'File written successfully.' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+    expect(container.querySelector('.write-code code.language-typescript')).not.toBeNull();
+    expect(container.querySelector('.write-code .hljs-keyword')?.textContent).toBe('const');
+  });
+
+  it('leaves write_file previews plain for unknown file extensions', () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'write_file', category: 'filesystem', displayName: 'Write', arguments: { path: 'hello.unknown', contentPreview: 'plain contents' }, preview: 'File written successfully.' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+    expect(container.querySelector('.write-code')).toBeNull();
+    expect(screen.getByText('plain contents')).toBeVisible();
+  });
+
   it('renders image attachments without expanding the tool', () => {
     render(<ToolCard tool={tool({
       name: 'read_file',
@@ -80,10 +94,16 @@ describe('ToolCard', () => {
     expect(screen.getByText('screenshot.png · image/png')).toBeVisible();
   });
 
-  it('renders edit previews as removed and added text', () => {
-    const { container } = render(<ToolCard tool={tool({ name: 'edit_file', category: 'filesystem', displayName: 'Edit', arguments: { path: 'app.ts', editCount: 1, edits: [{ oldText: 'const old = true', newText: 'const next = true', removedLines: 1, addedLines: 1 }] }, preview: 'File edited successfully.' })} />);
+  it('renders edit previews as a split, line-aligned diff', async () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'edit_file', category: 'filesystem', displayName: 'Edit', arguments: { path: 'app.ts', editCount: 1, edits: [{ oldText: 'const shared = true;\nconst old = true;', newText: 'const shared = true;\nconst next = true;', removedLines: 1, addedLines: 1 }] }, preview: 'File edited successfully.' })} />);
     fireEvent.click(container.querySelector('.tool-trigger')!);
-    expect(screen.getByText('const old = true')).toHaveClass('diff-remove');
-    expect(screen.getByText('const next = true')).toHaveClass('diff-add');
+    const diff = screen.getByLabelText('Split diff for change 1');
+    expect(diff).toHaveTextContent('Before');
+    expect(diff).toHaveTextContent('After');
+    expect(diff.querySelector('table')).not.toBeNull();
+    await waitFor(() => expect(diff).toHaveTextContent('const old = true;'));
+    expect(diff).toHaveTextContent('const next = true;');
+    expect(diff.textContent?.match(/const shared = true;/g)).toHaveLength(2);
+    expect(screen.queryByText('File edited successfully.')).not.toBeInTheDocument();
   });
 });

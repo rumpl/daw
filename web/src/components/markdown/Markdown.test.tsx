@@ -60,9 +60,23 @@ describe('Markdown rendering', () => {
     expect(container.querySelector('.md-mermaid')).not.toBeNull();
   });
 
-  it('keeps a non-mermaid code fence as a plain code block', () => {
+  it('syntax-highlights a fenced language in a labeled code card', () => {
+    const { container } = render(<Markdown>{'```go\npackage main\n\nfunc main() {}\n```'}</Markdown>);
+    expect(container.querySelector('.md-code-block')).not.toBeNull();
+    expect(container.querySelector('.language-go .hljs-keyword')?.textContent).toBe('package');
+    expect(screen.getByText('Go')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument();
+  });
+
+  it('falls back to unhighlighted code for an unknown language', () => {
+    const { container } = render(<Markdown>{'```madeup\nhello world\n```'}</Markdown>);
+    expect(container.querySelector('.language-madeup')?.textContent).toContain('hello world');
+  });
+
+  it('keeps a non-mermaid code fence as a code block', () => {
     const { container } = render(<Markdown>{'```js\nconst a = 1;\n```'}</Markdown>);
     expect(container.querySelector('pre.md-pre')).not.toBeNull();
+    expect(container.querySelector('.md-code-block')).not.toBeNull();
     expect(container.querySelector('.md-mermaid')).toBeNull();
   });
 });

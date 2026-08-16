@@ -290,7 +290,7 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 			Attributes: summary.Attributes,
 			CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339),
 			Messages:   summary.NumMessages,
-			Cost:       summary.Cost,
+			// Cost:       summary.Cost,
 		})
 	}
 	return out, nil
