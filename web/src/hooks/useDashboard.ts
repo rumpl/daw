@@ -237,7 +237,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
         refreshLiveSessions(),
         workspace ? refreshSessions(workspace) : Promise.resolve(),
       ]);
-    });
+    }, false);
   };
 
   // The URL is the source of truth for browser navigation and hard refreshes.
