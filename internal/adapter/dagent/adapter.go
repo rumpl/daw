@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -152,7 +153,11 @@ func (a *Adapter) ChatOptions(ctx context.Context, model string, mcpServers []ad
 		return nil, nil, nil, err
 	}
 	t := loadRes.Team
-	defer t.StopToolSets(context.WithoutCancel(ctx))
+	defer func() {
+		if err := t.StopToolSets(context.WithoutCancel(ctx)); err != nil {
+			a.log.Warn("stopping catalog toolsets", "error", err)
+		}
+	}()
 	ag, err := t.AgentOrDefault("")
 	if err != nil {
 		return nil, nil, nil, err
@@ -232,7 +237,7 @@ func modelOptions(choices []daruntime.ModelChoice) []protocol.ModelOption {
 
 func runtimeThinkingLevels(ctx context.Context, rt daruntime.Runtime) []string {
 	resolver, ok := rt.(interface {
-		CurrentAgentThinkingLevels(context.Context) []effort.Level
+		CurrentAgentThinkingLevels(ctx context.Context) []effort.Level
 	})
 	if !ok {
 		return nil
@@ -325,15 +330,15 @@ func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.St
 
 func storedIdentity(sess *session.Session) (agentName, model string) {
 	items := sess.MessagesSnapshot()
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Message == nil {
+	for _, item := range slices.Backward(items) {
+		if item.Message == nil {
 			continue
 		}
 		if agentName == "" {
-			agentName = items[i].Message.AgentName
+			agentName = item.Message.AgentName
 		}
 		if model == "" {
-			model = items[i].Message.Message.Model
+			model = item.Message.Message.Model
 		}
 		if agentName != "" && model != "" {
 			break

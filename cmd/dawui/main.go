@@ -198,7 +198,7 @@ func run() error {
 	if err != nil {
 		if isAddrInUse(err) {
 			if socketPath != "" {
-				return fmt.Errorf("Unix socket %s is already in use (EADDRINUSE)", socketPath)
+				return fmt.Errorf("unix socket %s is already in use (EADDRINUSE)", socketPath)
 			}
 			return fmt.Errorf("port %d on %s is already in use (EADDRINUSE). "+
 				"Stop the other process or set PORT to a free port between 1024 and 65535", port, bindHost)
@@ -295,7 +295,8 @@ func listenUnix(ctx context.Context, path string) (net.Listener, error) {
 		if info.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("DAWUI_SOCKET exists and is not a socket: %s", path)
 		}
-		conn, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+		dialer := &net.Dialer{Timeout: 200 * time.Millisecond}
+		conn, dialErr := dialer.DialContext(ctx, "unix", path)
 		if dialErr == nil {
 			_ = conn.Close()
 			return nil, syscall.EADDRINUSE

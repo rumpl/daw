@@ -1,5 +1,7 @@
 package sessionlineage
 
+import "maps"
+
 const (
 	AttributeParentSessionID = "daw.origin.parent_session_id"
 	AttributeRootSessionID   = "daw.origin.root_session_id"
@@ -47,11 +49,7 @@ func Merge(base, extra map[string]string) map[string]string {
 		return nil
 	}
 	merged := make(map[string]string, len(base)+len(extra))
-	for key, value := range base {
-		merged[key] = value
-	}
-	for key, value := range extra {
-		merged[key] = value
-	}
+	maps.Copy(merged, base)
+	maps.Copy(merged, extra)
 	return merged
 }

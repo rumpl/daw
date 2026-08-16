@@ -137,7 +137,7 @@ func TestDefaultToolOptionsCanBeReadAndUpdatedWithoutAChat(t *testing.T) {
 	preferencesFile := filepath.Join(t.TempDir(), "preferences.json")
 	s := newPreferenceTestServer(t, root, preferencesFile)
 
-	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("tool", "shell")
 	recorder := httptest.NewRecorder()
@@ -171,7 +171,7 @@ func TestGlobalToolFilterUpdatesLiveChats(t *testing.T) {
 		t.Fatalf("open chat: %d %s", recorder.Code, recorder.Body.String())
 	}
 
-	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/chat-options/tools/shell", strings.NewReader(`{"enabled":false}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("tool", "shell")
 	recorder = httptest.NewRecorder()
@@ -187,7 +187,7 @@ func TestGlobalToolFilterUpdatesLiveChats(t *testing.T) {
 
 func TestDefaultToolOptionsRejectUnknownTool(t *testing.T) {
 	s := newPreferenceTestServer(t, t.TempDir(), "")
-	request := httptest.NewRequest(http.MethodPatch, "/api/chat-options/tools/missing", strings.NewReader(`{"enabled":false}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/chat-options/tools/missing", strings.NewReader(`{"enabled":false}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("tool", "missing")
 	recorder := httptest.NewRecorder()

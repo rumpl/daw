@@ -1,8 +1,9 @@
 package main
 
 import (
-	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -31,7 +32,8 @@ func TestListenUnixCreatesOwnerOnlySocket(t *testing.T) {
 		t.Fatalf("socket mode = %o, want 600", got)
 	}
 
-	conn, err := net.DialTimeout("unix", path, time.Second)
+	dialer := &net.Dialer{Timeout: time.Second}
+	conn, err := dialer.DialContext(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatalf("dial socket: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestListenUnixDoesNotReplaceLiveSocket(t *testing.T) {
 	}
 	defer ln.Close()
 
-	_, err = listenUnix(context.Background(), path)
+	_, err = listenUnix(t.Context(), path)
 	if !errors.Is(err, syscall.EADDRINUSE) {
 		t.Fatalf("second listen error = %v, want EADDRINUSE", err)
 	}
@@ -57,8 +59,9 @@ func TestListenUnixDoesNotReplaceLiveSocket(t *testing.T) {
 
 func shortSocketPath(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "dw-")
-	if err != nil {
+	sum := sha256.Sum256([]byte(t.TempDir()))
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("dw-%x", sum[:6]))
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
@@ -70,7 +73,7 @@ func TestListenUnixReplacesStaleSocketButNotRegularFile(t *testing.T) {
 		t.Skip("Unix domain sockets are not available on Windows")
 	}
 	path := shortSocketPath(t)
-	stale, err := net.Listen("unix", path)
+	stale, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
