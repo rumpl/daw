@@ -16,8 +16,15 @@ export function Conversation({ items, queue, empty, contributionContext }: {
   contributionContext?: ContributionContext;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const hasContent = items.length > 0
+    || (queue?.steer?.length ?? 0) > 0
+    || (queue?.followUps?.length ?? 0) > 0;
   const [pinned, setPinned] = useState(true);
   const { toolRenderers, attachmentRenderers } = usePluginContributions();
+
+  useEffect(() => {
+    if (!hasContent) setPinned(true);
+  }, [hasContent]);
 
   useEffect(() => {
     const element = ref.current;
@@ -42,7 +49,7 @@ export function Conversation({ items, queue, empty, contributionContext }: {
         ))}
         {queue ? <PendingQueue queue={queue} /> : null}
       </div>
-      {!pinned ? (
+      {!pinned && hasContent ? (
         <Button type="button" className="jump" onClick={() => {
           setPinned(true);
           const element = ref.current;

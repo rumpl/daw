@@ -175,6 +175,27 @@ describe('Conversation', () => {
     expect(image).toHaveAttribute('alt', 'screen.png');
   });
 
+  it('hides jump to latest and resets scrolling when the conversation is cleared', () => {
+    const { container, rerender } = render(
+      <Conversation items={[assistantMessage({ text: 'Existing message' })]} empty={<p>Empty</p>} />,
+    );
+    const conversation = container.querySelector('.conversation') as HTMLDivElement;
+    Object.defineProperties(conversation, {
+      scrollHeight: { value: 1_000, configurable: true },
+      clientHeight: { value: 400, configurable: true },
+      scrollTop: { value: 0, writable: true, configurable: true },
+    });
+
+    fireEvent.scroll(conversation);
+    expect(screen.getByRole('button', { name: 'Jump to latest' })).toBeInTheDocument();
+
+    rerender(<Conversation items={[]} empty={<p>Empty</p>} />);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
+
+    rerender(<Conversation items={[assistantMessage({ id: 'new', text: 'New message' })]} empty={<p>Empty</p>} />);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).not.toBeInTheDocument();
+  });
+
   it('does not render user messages as Markdown', () => {
     const { container } = render(
       <Conversation
