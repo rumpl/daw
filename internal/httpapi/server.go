@@ -34,11 +34,13 @@ type Options struct {
 	Adapter    adapter.Adapter
 	Guard      *pathsec.Guard
 	AppVersion string
-	// Sandboxed reports that tool execution is isolated from the host. The
-	// standalone dashboard leaves this false; daw-runner sets it true.
-	Sandboxed      bool
-	TailscaleHosts []string
-	AllowedTSUsers []string
+	// Sandboxed reports that Docker Sandbox execution is available. A hybrid
+	// dashboard may also expose host execution for newly-created sessions.
+	Sandboxed              bool
+	ExecutionTargets       []protocol.ExecutionTargetOption
+	DefaultExecutionTarget protocol.ExecutionTarget
+	TailscaleHosts         []string
+	AllowedTSUsers         []string
 	// Static serves the built frontend; nil disables the UI (API-only tests).
 	Static http.Handler
 	Logger *slog.Logger
@@ -66,19 +68,21 @@ type Options struct {
 // Server is the HTTP transport and application composition root. Stateful
 // domain behavior lives in the focused services below.
 type Server struct {
-	mux             *http.ServeMux
-	adapter         adapter.Adapter
-	hosts           *hostPolicy
-	csrf            string
-	appVersion      string
-	sandboxed       bool
-	allowedTSUsers  map[string]bool
-	static          http.Handler
-	log             *slog.Logger
-	started         time.Time
-	pluginDir       string
-	pluginAPIOrigin string
-	pluginAPISocket string
+	mux                    *http.ServeMux
+	adapter                adapter.Adapter
+	hosts                  *hostPolicy
+	csrf                   string
+	appVersion             string
+	sandboxed              bool
+	executionTargets       []protocol.ExecutionTargetOption
+	defaultExecutionTarget protocol.ExecutionTarget
+	allowedTSUsers         map[string]bool
+	static                 http.Handler
+	log                    *slog.Logger
+	started                time.Time
+	pluginDir              string
+	pluginAPIOrigin        string
+	pluginAPISocket        string
 
 	guard              *pathsec.Guard
 	workspaces         *workspaces.Service
@@ -107,23 +111,44 @@ func New(opts Options) *Server {
 			users[u] = true
 		}
 	}
+	executionTargets := append([]protocol.ExecutionTargetOption(nil), opts.ExecutionTargets...)
+	if len(executionTargets) == 0 {
+		target := protocol.ExecutionTargetHost
+		label := "Host"
+		description := "Run tools directly on this host."
+		if opts.Sandboxed {
+			target, label = protocol.ExecutionTargetSandbox, "Docker Sandbox"
+			description = "Run tools in a dedicated Docker Sandbox."
+		}
+		executionTargets = []protocol.ExecutionTargetOption{{Value: target, Label: label, Description: description}}
+	}
+	defaultExecutionTarget := opts.DefaultExecutionTarget
+	defaultAvailable := false
+	for _, target := range executionTargets {
+		defaultAvailable = defaultAvailable || target.Value == defaultExecutionTarget
+	}
+	if !defaultAvailable {
+		defaultExecutionTarget = executionTargets[0].Value
+	}
 	s := &Server{
-		pluginDir:       strings.TrimSpace(opts.PluginDir),
-		pluginAPIOrigin: strings.TrimRight(opts.PluginAPIOrigin, "/"),
-		pluginAPISocket: strings.TrimSpace(opts.PluginAPISocket),
-		guard:           opts.Guard,
-		mux:             http.NewServeMux(),
-		adapter:         opts.Adapter,
-		hosts:           newHostPolicy(opts.TailscaleHosts),
-		csrf:            newToken(),
-		appVersion:      opts.AppVersion,
-		sandboxed:       opts.Sandboxed,
-		allowedTSUsers:  users,
-		static:          opts.Static,
-		log:             log,
-		started:         time.Now(),
-		events:          newDashboardEvents(),
-		pluginEvents:    newPluginEventHub(),
+		pluginDir:              strings.TrimSpace(opts.PluginDir),
+		pluginAPIOrigin:        strings.TrimRight(opts.PluginAPIOrigin, "/"),
+		pluginAPISocket:        strings.TrimSpace(opts.PluginAPISocket),
+		guard:                  opts.Guard,
+		mux:                    http.NewServeMux(),
+		adapter:                opts.Adapter,
+		hosts:                  newHostPolicy(opts.TailscaleHosts),
+		csrf:                   newToken(),
+		appVersion:             opts.AppVersion,
+		sandboxed:              opts.Sandboxed,
+		executionTargets:       executionTargets,
+		defaultExecutionTarget: defaultExecutionTarget,
+		allowedTSUsers:         users,
+		static:                 opts.Static,
+		log:                    log,
+		started:                time.Now(),
+		events:                 newDashboardEvents(),
+		pluginEvents:           newPluginEventHub(),
 	}
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
@@ -173,6 +198,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/chat-options", s.handleGetChatOptions)
 	m.HandleFunc("PATCH /api/chat-options", s.handleUpdateChatOptions)
 	m.HandleFunc("PATCH /api/chat-options/tools/{tool}", s.handleUpdateDefaultTool)
+	m.HandleFunc("PATCH /api/chat-options/execution-target", s.handleUpdateExecutionTarget)
 	m.HandleFunc("POST /api/chats", s.handleCreateChat)
 	m.HandleFunc("POST /api/chats/resume", s.handleResumeChat)
 	m.HandleFunc("GET /api/chats/{id}", s.handleGetChat)

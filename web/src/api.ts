@@ -6,6 +6,8 @@ import type {
   APIError,
   Attachment,
   Bootstrap,
+  ExecutionTarget,
+  ExecutionTargetPreference,
   ChatOptions,
   ChatRef,
   CommandInfo,
@@ -145,8 +147,15 @@ export const api = {
   updateDefaultTool(name: string, enabled: boolean): Promise<ToolOption> {
     return request<ToolOption>('PATCH', `/api/chat-options/tools/${encodeURIComponent(name)}`, { enabled });
   },
-  createChat(workspaceId: string, executionLocationId?: string): Promise<ChatRef> {
-    return request<ChatRef>('POST', '/api/chats', { workspaceId, ...(executionLocationId ? { executionLocationId } : {}) });
+  updateExecutionTarget(executionTarget: ExecutionTarget): Promise<ExecutionTargetPreference> {
+    return request<ExecutionTargetPreference>('PATCH', '/api/chat-options/execution-target', { executionTarget });
+  },
+  createChat(workspaceId: string, executionLocationId?: string, executionTarget?: ExecutionTarget): Promise<ChatRef> {
+    return request<ChatRef>('POST', '/api/chats', {
+      workspaceId,
+      ...(executionLocationId ? { executionLocationId } : {}),
+      ...(executionTarget ? { executionTarget } : {}),
+    });
   },
   resumeChat(workspaceId: string, sessionId: string): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, sessionId });

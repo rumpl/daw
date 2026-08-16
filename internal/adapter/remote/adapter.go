@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,6 +26,7 @@ type Config struct {
 	Token          string
 	CallbackOrigin string
 	CallbackToken  string
+	DialContext    func(context.Context, string, string) (net.Conn, error)
 }
 
 type Adapter struct {
@@ -33,6 +35,7 @@ type Adapter struct {
 	callbackOrigin string
 	callbackToken  string
 	client         *http.Client
+	transport      *http.Transport
 }
 
 func New(config Config) (*Adapter, error) {
@@ -46,11 +49,14 @@ func New(config Config) (*Adapter, error) {
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	if config.DialContext != nil {
+		transport.DialContext = config.DialContext
+	}
 	return &Adapter{
 		endpoint: endpoint, token: config.Token,
 		callbackOrigin: strings.TrimRight(config.CallbackOrigin, "/"),
 		callbackToken:  config.CallbackToken,
-		client:         &http.Client{Transport: transport},
+		client:         &http.Client{Transport: transport}, transport: transport,
 	}, nil
 }
 
@@ -96,7 +102,10 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 	go chat.stream(streamCtx)
 	return chat, nil
 }
-func (a *Adapter) Close() error { return nil }
+func (a *Adapter) Check(ctx context.Context) error {
+	return a.do(ctx, http.MethodGet, "/v1/health", nil, nil)
+}
+func (a *Adapter) Close() error { a.transport.CloseIdleConnections(); return nil }
 
 func (a *Adapter) prepareServers(servers []adapter.MCPServer) []adapter.MCPServer {
 	prepared := make([]adapter.MCPServer, len(servers))

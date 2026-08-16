@@ -2,6 +2,7 @@ package remote_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/runnerapi"
 	"github.com/rumpl/daw/internal/sessionlineage"
+	"github.com/rumpl/daw/internal/stdiomux"
 )
 
 func TestAdapterRoundTripAndMCPCallbackRewrite(t *testing.T) {
@@ -98,6 +100,52 @@ func TestAdapterRoundTripAndMCPCallbackRewrite(t *testing.T) {
 		case <-deadline:
 			t.Fatal("timed out waiting for an event through the runner transport")
 		}
+	}
+}
+
+func TestAdapterOverStdioMux(t *testing.T) {
+	hostRead, runnerWrite := io.Pipe()
+	runnerRead, hostWrite := io.Pipe()
+	host, err := stdiomux.New(hostRead, hostWrite, stdiomux.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := stdiomux.New(runnerRead, runnerWrite, stdiomux.Runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = host.Close(); _ = runner.Close() })
+	api := runnerapi.New(fake.New(), "secret")
+	server := &http.Server{Handler: api}
+	go func() { _ = server.Serve(runner) }()
+	t.Cleanup(func() { _ = server.Close(); api.Shutdown(context.Background()) })
+	client, err := remote.New(remote.Config{Endpoint: "http://runner", Token: "secret", DialContext: host.DialContext})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	info, err := client.Info(t.Context())
+	if err != nil || info.AgentVersion != "fake" {
+		t.Fatalf("Info() = %#v, %v", info, err)
+	}
+	chat, err := client.OpenChat(t.Context(), adapter.OpenRequest{ChatID: "stdio-chat", WorkingDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer chat.Close(context.Background())
+	if _, _, _, err := chat.Send(t.Context(), "hello", nil, protocol.DeliveryNormal); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-chat.Events():
+		if event.Type == "" {
+			t.Fatal("empty streamed event")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stdio event stream")
 	}
 }
 

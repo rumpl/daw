@@ -21,7 +21,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"))
+	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"), req.ExecutionTarget)
 }
 
 func (s *Server) pluginMCPServers() []adapter.MCPServer {
@@ -108,10 +108,10 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "")
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]))
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget) {
 	ws, ok := s.workspaces.Get(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
@@ -141,7 +141,11 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 			s.fail(w, http.StatusBadRequest, "invalid_session_context", "the session creation context is invalid or expired")
 			return
 		}
-		parentOrigin := sessionlineage.FromAttributes(parent.chat.Meta().Attributes)
+		parentMeta := parent.chat.Meta()
+		parentOrigin := sessionlineage.FromAttributes(parentMeta.Attributes)
+		if inherited := protocol.ExecutionTarget(parentMeta.Attributes[adapter.ExecutionTargetAttribute]); inherited != "" {
+			executionTarget = inherited
+		}
 		rootSessionID := parentOrigin.RootSessionID
 		if rootSessionID == "" {
 			rootSessionID = parent.chat.SessionID()
@@ -178,11 +182,24 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		persistImmediately = true
 	}
 
+	if executionTarget == "" {
+		executionTarget = s.preferredExecutionTarget()
+	}
+	available := false
+	for _, target := range s.executionTargets {
+		available = available || target.Value == executionTarget
+	}
+	if !available {
+		s.fail(w, http.StatusBadRequest, "invalid_execution_target", "the selected execution target is unavailable")
+		return
+	}
+
 	chatID := newOpaqueID("chat")
 	creationContext := s.sessionContexts.Issue(sessioncontext.Context{ParentChatID: chatID})
 	preference := s.preferences.Get(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
 		ChatID: chatID, SessionContext: creationContext, WorkingDir: workingDir, ResumeSessionID: resumeID,
+		ExecutionTarget:    executionTarget,
 		SessionAttributes:  attributes,
 		PersistImmediately: persistImmediately,
 		Model:              preference.Model,

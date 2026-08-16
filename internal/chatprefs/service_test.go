@@ -27,6 +27,20 @@ func TestDisabledToolsAreGlobal(t *testing.T) {
 	}
 }
 
+func TestExecutionTargetIsGlobalAndPersistent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "preferences.json")
+	service := New(path, slog.Default())
+	if _, err := service.SetExecutionTarget("host"); err != nil {
+		t.Fatal(err)
+	}
+	if got := service.Get("new-session").ExecutionTarget; got != "host" {
+		t.Fatalf("session execution target = %q", got)
+	}
+	if got := New(path, slog.Default()).Get("").ExecutionTarget; got != "host" {
+		t.Fatalf("reloaded execution target = %q", got)
+	}
+}
+
 func TestPerSessionDisabledToolsMigrateToGlobal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	contents := `{"version":1,"default":{"disabledTools":["shell"]},"sessions":{"one":{"disabledTools":["read_file"]}}}`

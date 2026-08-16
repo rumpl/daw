@@ -1,11 +1,11 @@
 package sandbox
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/rumpl/daw/internal/protocol"
-	"github.com/rumpl/daw/internal/sessionlineage"
 	sbx "github.com/rumpl/go-sbx"
 )
 
@@ -38,7 +38,7 @@ func TestSessionSandboxNameSeparatesSessions(t *testing.T) {
 	}
 }
 
-func TestIndexPreservesExecutionPathAndLineage(t *testing.T) {
+func TestIndexContainsLifecycleMetadataOnly(t *testing.T) {
 	workspace := t.TempDir()
 	kit := t.TempDir()
 	index := filepath.Join(t.TempDir(), "sessions.json")
@@ -46,17 +46,7 @@ func TestIndexPreservesExecutionPathAndLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attributes := sessionlineage.Origin{
-		ParentSessionID: "parent", RootSessionID: "root",
-		Kind: sessionlineage.KindAgent, PluginID: "agent-gossip",
-	}.Attributes()
-	a.records["session"] = &record{
-		SessionID: "session", Sandbox: "daw-session-test", WorkingDir: "/worktrees/child",
-		Summary: protocol.SessionSummary{
-			SessionID: "session", WorkingDir: "/worktrees/child", CreatedAt: "2026-01-01T00:00:00Z",
-		},
-		Attributes: attributes,
-	}
+	a.records["session"] = &record{SessionID: "session", Sandbox: "daw-session-test", WorkingDir: "/worktrees/child"}
 	if err := a.saveLocked(); err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +59,12 @@ func TestIndexPreservesExecutionPathAndLineage(t *testing.T) {
 	if got == nil || got.WorkingDir != "/worktrees/child" {
 		t.Fatalf("reloaded record = %#v", got)
 	}
-	if got.Attributes[sessionlineage.AttributeParentSessionID] != "parent" ||
-		got.Summary.Attributes[sessionlineage.AttributeRootSessionID] != "root" {
-		t.Fatalf("reloaded lineage = %q / %q", got.Attributes, got.Summary.Attributes)
+	data, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "summary") || strings.Contains(string(data), "attributes") {
+		t.Fatalf("lifecycle index contains catalog data: %s", data)
 	}
 }
 

@@ -20,6 +20,7 @@ const liveSession: SessionSummary = {
   workingDir: '/code/other-project',
   createdAt: '2025-01-01T00:00:00Z',
   messages: 4,
+  executionTarget: 'host',
   live: true,
   chatId: 'chat-live',
   runState: 'running',
@@ -163,6 +164,8 @@ describe('Sidebar', () => {
 
     const activeSession = screen.getByRole('button', { name: /Fix the worker/ });
     expect(activeSession).toHaveAttribute('aria-current', 'page');
+    expect(activeSession).toHaveAttribute('title', expect.stringContaining('Host'));
+    expect(activeSession.querySelector('.lucide-laptop')).toBeInTheDocument();
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
 
     delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;

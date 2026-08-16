@@ -64,7 +64,7 @@ make dev-fake  # same, with a deterministic fake agent (no model calls)
 ### Run agent execution in a Docker Sandbox (experimental)
 
 Install Docker Sandboxes (`sbx`), then start the normal host dashboard with
-one sandbox runner per persistent session:
+both host and per-session sandbox execution available:
 
 ```bash
 make start-sandbox                         # current directory
@@ -73,10 +73,19 @@ WORKSPACE=/absolute/project make start-sandbox
 
 Open the usual <http://127.0.0.1:4788> URL. The browser, dashboard API, workspace
 history, preferences, plugin catalog, and plugin backends remain on the host.
-The code-defined `dashboard-coder`, model runtime, shell/filesystem tools, and
+Before creating a session, the composer shows an **Execution target** select.
+**Docker Sandbox** is the default; **Host** runs the same code-defined
+`dashboard-coder` directly in the dashboard process. Changing the select saves
+the choice in the backend and uses it as the default for subsequent new-chat
+tabs, including after a dashboard restart. The select remains visible but
+becomes read-only as soon as the session is created. Session rows show a box or
+laptop icon for their execution target, and that target is retained on resume. Gossip-created child sessions inherit their parent's target.
+
+For sandbox-targeted sessions, the model runtime, shell/filesystem tools, and
 plugin MCP processes run in the sandbox. The selected workspace and global
 plugin directory are mounted at their original absolute paths, so tool edits
-are reflected on the host.
+are reflected on the host. Both targets persist into the same host-owned Docker
+Agent session store; host-targeted sessions simply do not create a sandbox.
 
 On the first launch for a new runner build, DAW creates one seed sandbox and
 saves it with `sbx template save` as a content-addressed template. This one-time
@@ -84,11 +93,13 @@ bake currently takes about 40 seconds. The 96 MB runner then lives in the
 sandbox image instead of being uploaded for every session. Measured session
 sandbox startup from the baked template is about 4 seconds.
 
-DAW does not prewarm ownerless sandboxes. Creating a chat—including a
-gossip-created child—starts its dedicated sandbox directly from the template.
-Closing the live chat stops its sandbox without removing it. Resuming the
-session restarts the same sandbox and rediscovers its ephemeral port. The host
-persists the session-to-sandbox index under `~/.cagent/dawui/`.
+DAW does not prewarm ownerless sandboxes. **New chat** and the **+** button open
+an unpersisted empty tab; the session is created only when its first message is
+sent. Sending from a sandbox-targeted tab starts its dedicated sandbox directly
+from the template. Closing the live chat stops its sandbox without removing it. Resuming the
+session restarts the same sandbox and opens a new interactive `sbx exec`
+connection. The host persists only the lifecycle session-to-sandbox mapping
+under `~/.cagent/dawui/`; complete history stays in host SQLite.
 
 The logical workspace is mounted into every session sandbox. A plugin execution
 location may select another directory (for example a sibling Git worktree); DAW
@@ -96,11 +107,14 @@ mounts that path into only the selected session sandbox while keeping the
 session indexed under the original workspace. Filesystem edits are still shared
 through the host mounts.
 
-The host and each runner communicate over authenticated, loopback-published
-ports. Local plugin MCP processes call their host plugin backends through a
-separate authenticated `host.docker.internal` bridge. That bridge accepts only
-the calling plugin's `/backend` route; dashboard CSRF and internal backend
-tokens never enter the sandbox. The main host API remains bound to loopback.
+The host and each runner communicate through a framed, bidirectional protocol
+over the runner's `sbx exec` stdin/stdout pipes. No runner or callback port is
+published, and this remains usable when the sandbox backend is remote. Runner
+control, event streams, reverse session-store calls, and plugin callbacks are
+multiplexed as independent HTTP connections. Plugin MCP processes call a
+sandbox-local loopback proxy, which forwards only the authenticated backend
+bridge over stdio; dashboard CSRF and internal backend tokens never enter the
+sandbox. The browser-facing host API remains bound to loopback.
 
 Docker Sandboxes keeps model credentials in its host-side secret store. Import
 the providers you use before starting DAW. Provider HTTP clients honor the
@@ -273,6 +287,10 @@ electron/                  desktop host: backend lifecycle and UDS protocol brid
 internal/protocol         wire types shared with the browser (+ TS generator)
 internal/adapter          the typed docker-agent seam
 internal/adapter/dagent   the real adapter: embeds the docker-agent SDK
+internal/adapter/hybrid   execution-target router (host-backed catalog only)
+internal/sessionstorebridge authenticated host store callback handler
+internal/sessionstoreremote complete sandbox-side session.Store client
+internal/stdiomux          bidirectional net.Conn mux over sbx exec stdin/stdout
 internal/adapter/fake     deterministic fake agent used by the tests
 internal/httpapi          routing, security, chat ownership, SSE, reducer
 internal/pathsec          filesystem containment for working directories
@@ -281,13 +299,15 @@ web/                      React + Vite + strict TypeScript
 e2e/                      Playwright
 ```
 
-Each live chat owns one `runtime.Runtime` and one `session.Session`, sharing a
-single process-wide session store. A turn ends when the runtime's event channel
+Each live chat owns one `runtime.Runtime` and one `session.Session`. Host and
+Docker Sandbox runtimes share one authoritative host-owned SQLite session
+store; sandbox runners use authenticated reverse HTTP streams over stdio and
+never create a local session database. A turn ends when the runtime's event channel
 closes and both queues are drained. Runtime events are normalised into a small
 discriminated union and streamed over SSE with monotonic event IDs, a replay
 buffer and `Last-Event-ID` resume, so reconnecting never duplicates content.
-Only one runtime ever drives a session inside this process; a second browser
-attaches to the same live chat.
+Only one runtime ever drives a session; a second browser attaches to the same
+live chat on whichever execution backend owns it.
 
 The browser submits a working directory once, then uses its opaque ID for later
 calls. Mutations carry a per-process CSRF token in a custom header, the
