@@ -21,16 +21,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/dagent"
 	"github.com/rumpl/daw/internal/adapter/fake"
-	remoteadapter "github.com/rumpl/daw/internal/adapter/remote"
+	hybridadapter "github.com/rumpl/daw/internal/adapter/hybrid"
 	sandboxadapter "github.com/rumpl/daw/internal/adapter/sandbox"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
+	"github.com/rumpl/daw/internal/protocol"
+	"github.com/rumpl/daw/internal/sessionstorebridge"
 	"github.com/rumpl/daw/internal/webassets"
 )
 
@@ -92,8 +95,10 @@ func run() error {
 	defer stop()
 
 	var ad adapter.Adapter
-	var mcpBridgeListener net.Listener
+	var executionTargets []protocol.ExecutionTargetOption
+	var defaultExecutionTarget protocol.ExecutionTarget
 	var mcpBridgeToken string
+	var sandboxCallbacks *sandboxCallbackHandler
 	fakeAdapter := os.Getenv("DAWUI_FAKE_ADAPTER") == "1"
 	runnerEndpoint := strings.TrimSpace(os.Getenv("DAWUI_RUNNER_URL"))
 	perSessionSandbox := os.Getenv("DAWUI_SANDBOX_PER_SESSION") == "1"
@@ -103,6 +108,9 @@ func run() error {
 	}
 	if runnerEndpoint != "" && perSessionSandbox {
 		return errors.New("DAWUI_RUNNER_URL and DAWUI_SANDBOX_PER_SESSION cannot be combined")
+	}
+	if runnerEndpoint != "" {
+		return errors.New("DAWUI_RUNNER_URL shared-runner mode is no longer supported; use DAWUI_SANDBOX_PER_SESSION=1 so sessions use the host store")
 	}
 	if fakeAdapter {
 		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
@@ -114,21 +122,32 @@ func run() error {
 		}
 		f.Seed("seeded-session-1", "Earlier conversation", os.Getenv("DAWUI_FAKE_WORKSPACE"), nil)
 		ad = f
+		executionTargets = []protocol.ExecutionTargetOption{{Value: protocol.ExecutionTargetHost, Label: "Host", Description: "Run tools directly on this host."}}
+		defaultExecutionTarget = protocol.ExecutionTargetHost
 	} else if sandboxed {
-		if socketPath != "" {
-			return errors.New("sandbox runner mode does not yet support the Electron Unix-socket transport")
-		}
-		mcpBridgeListener, err = (&net.ListenConfig{}).Listen(ctx, "tcp4", "127.0.0.1:0")
-		if err != nil {
-			return fmt.Errorf("start sandbox MCP callback bridge: %w", err)
-		}
-		defer mcpBridgeListener.Close()
 		mcpBridgeToken, err = randomToken()
 		if err != nil {
 			return fmt.Errorf("create sandbox MCP callback token: %w", err)
 		}
-		bridgePort := mcpBridgeListener.Addr().(*net.TCPAddr).Port
-		callbackOrigin := "http://host.docker.internal:" + strconv.Itoa(bridgePort)
+		callbackOrigin := "http://127.0.0.1:8081"
+
+		hostAdapter, hostErr := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
+		if hostErr != nil {
+			return fmt.Errorf("host docker-agent could not be initialized: %w", hostErr)
+		}
+		storeBridgeToken, tokenErr := randomToken()
+		if tokenErr != nil {
+			_ = hostAdapter.Close()
+			return fmt.Errorf("create sandbox session store token: %w", tokenErr)
+		}
+		storeHandler, storeErr := sessionstorebridge.New(sessionstorebridge.Config{
+			Store: hostAdapter.Store(), Token: storeBridgeToken, Target: string(protocol.ExecutionTargetSandbox),
+		})
+		if storeErr != nil {
+			_ = hostAdapter.Close()
+			return storeErr
+		}
+		sandboxCallbacks = &sandboxCallbackHandler{store: storeHandler}
 		if perSessionSandbox {
 			home, homeErr := os.UserHomeDir()
 			if homeErr != nil {
@@ -157,29 +176,32 @@ func run() error {
 				PluginDir:      strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_PLUGIN_DIR")),
 				IndexFile:      filepath.Join(home, ".cagent", "dawui", "sandbox-sessions-"+hex.EncodeToString(indexSum[:6])+".json"),
 				CallbackOrigin: callbackOrigin, CallbackToken: mcpBridgeToken,
+				CallbackHandler: sandboxCallbacks, SessionStoreToken: storeBridgeToken,
 				CPUs: sandboxCPUs, Memory: strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_MEMORY")),
 				ReadyTimeout: readyTimeout, Logger: log,
 			})
 			if adapterErr != nil {
 				return adapterErr
 			}
-			ad = perSessionAdapter
-		} else {
-			remoteAdapter, adapterErr := remoteadapter.New(remoteadapter.Config{
-				Endpoint: runnerEndpoint, Token: os.Getenv("DAWUI_RUNNER_TOKEN"),
-				CallbackOrigin: callbackOrigin, CallbackToken: mcpBridgeToken,
-			})
-			if adapterErr != nil {
-				return adapterErr
+			hybridAdapter, hybridErr := hybridadapter.New(hostAdapter, perSessionAdapter, protocol.ExecutionTargetSandbox)
+			if hybridErr != nil {
+				return hybridErr
 			}
-			ad = remoteAdapter
+			ad = hybridAdapter
 		}
+		executionTargets = []protocol.ExecutionTargetOption{
+			{Value: protocol.ExecutionTargetSandbox, Label: "Docker Sandbox", Description: "Run tools in a dedicated Docker Sandbox."},
+			{Value: protocol.ExecutionTargetHost, Label: "Host", Description: "Run tools directly on this host."},
+		}
+		defaultExecutionTarget = protocol.ExecutionTargetSandbox
 	} else {
 		realAdapter, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
 		if err != nil {
 			return fmt.Errorf("docker-agent could not be initialized: %w", err)
 		}
 		ad = realAdapter
+		executionTargets = []protocol.ExecutionTargetOption{{Value: protocol.ExecutionTargetHost, Label: "Host", Description: "Run tools directly on this host."}}
+		defaultExecutionTarget = protocol.ExecutionTargetHost
 	}
 
 	// Control-plane state and plugins stay on the host even when the adapter is
@@ -257,20 +279,22 @@ func run() error {
 	tailscaleHosts := splitList(os.Getenv("TAILSCALE_HOSTNAMES"))
 
 	srv := httpapi.New(httpapi.Options{
-		Adapter:              ad,
-		Guard:                guard,
-		AppVersion:           appVersion,
-		Sandboxed:            sandboxed,
-		TailscaleHosts:       tailscaleHosts,
-		AllowedTSUsers:       splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
-		Static:               webassets.Handler(),
-		Logger:               log,
-		WorkspaceHistoryFile: workspaceHistoryFile,
-		ChatPreferencesFile:  chatPreferencesFile,
-		PluginDir:            pluginDir,
-		PluginAPIOrigin:      pluginAPIOrigin,
-		PluginAPISocket:      socketPath,
-		PluginDataDir:        pluginDataDir,
+		Adapter:                ad,
+		Guard:                  guard,
+		AppVersion:             appVersion,
+		Sandboxed:              sandboxed,
+		ExecutionTargets:       executionTargets,
+		DefaultExecutionTarget: defaultExecutionTarget,
+		TailscaleHosts:         tailscaleHosts,
+		AllowedTSUsers:         splitList(os.Getenv("ALLOWED_TAILSCALE_USERS")),
+		Static:                 webassets.Handler(),
+		Logger:                 log,
+		WorkspaceHistoryFile:   workspaceHistoryFile,
+		ChatPreferencesFile:    chatPreferencesFile,
+		PluginDir:              pluginDir,
+		PluginAPIOrigin:        pluginAPIOrigin,
+		PluginAPISocket:        socketPath,
+		PluginDataDir:          pluginDataDir,
 	})
 
 	var ln net.Listener
@@ -311,9 +335,9 @@ func run() error {
 	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
 	if perSessionSandbox {
-		fmt.Println("  sandbox runners: one stopped/resumable sandbox per session")
+		fmt.Println("  execution targets: host or one stopped/resumable Docker Sandbox per sandbox-targeted session")
 	} else if sandboxed {
-		fmt.Printf("  sandbox runner: %s\n", runnerEndpoint)
+		fmt.Printf("  execution targets: host or shared sandbox runner %s\n", runnerEndpoint)
 	} else {
 		fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
 	}
@@ -322,12 +346,8 @@ func run() error {
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- httpServer.Serve(ln) }()
-	var mcpBridgeServer *http.Server
-	if mcpBridgeListener != nil {
-		mcpBridgeServer = &http.Server{
-			Handler: srv.MCPBridge(mcpBridgeToken), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
-		}
-		go func() { errCh <- mcpBridgeServer.Serve(mcpBridgeListener) }()
+	if sandboxCallbacks != nil {
+		sandboxCallbacks.SetMCP(srv.MCPBridge(mcpBridgeToken))
 	}
 
 	select {
@@ -342,10 +362,33 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
-	if mcpBridgeServer != nil {
-		_ = mcpBridgeServer.Shutdown(shutdownCtx)
-	}
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+type sandboxCallbackHandler struct {
+	mu    sync.RWMutex
+	store http.Handler
+	mcp   http.Handler
+}
+
+func (h *sandboxCallbackHandler) SetMCP(handler http.Handler) {
+	h.mu.Lock()
+	h.mcp = handler
+	h.mu.Unlock()
+}
+func (h *sandboxCallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.EqualFold(strings.Split(r.Host, ":")[0], "mcp-callback") {
+		h.mu.RLock()
+		handler := h.mcp
+		h.mu.RUnlock()
+		if handler == nil {
+			http.Error(w, "MCP callback bridge is not ready", http.StatusServiceUnavailable)
+			return
+		}
+		handler.ServeHTTP(w, r)
+		return
+	}
+	h.store.ServeHTTP(w, r)
 }
 
 func randomToken() (string, error) {

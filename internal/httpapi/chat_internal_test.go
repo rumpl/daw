@@ -78,6 +78,17 @@ func TestLiveUsageIsAttachedToLatestAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestSessionMetadataEventsPreserveExecutionTarget(t *testing.T) {
+	c := testChat()
+	c.meta = protocol.SessionMeta{ExecutionTarget: protocol.ExecutionTargetSandbox}
+	c.publish(protocol.Event{Type: protocol.EventSessionMeta, Meta: &protocol.SessionMeta{Title: "Updated"}})
+
+	meta := c.snapshot().Meta
+	if meta.ExecutionTarget != protocol.ExecutionTargetSandbox || meta.Title != "Updated" {
+		t.Fatalf("session metadata = %#v", meta)
+	}
+}
+
 func TestReducerNeverDuplicatesByID(t *testing.T) {
 	c := testChat()
 	for range 3 {

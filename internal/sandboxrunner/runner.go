@@ -9,22 +9,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	sbx "github.com/rumpl/go-sbx"
 )
 
-const (
-	AgentName     = "daw-runner"
-	ContainerPort = 8080
-)
+const AgentName = "daw-runner"
 
 var invalidNameCharacter = regexp.MustCompile(`[^a-zA-Z0-9.+-]+`)
 
@@ -43,12 +36,17 @@ type Options struct {
 	Name      string
 	CPUs      int
 	Memory    string
+	// SessionStoreToken authenticates reverse store RPC carried over stdio.
+	SessionStoreToken string
+	// SkipRunner materializes the kit without starting the process. It is used
+	// only while baking a template, before the host store bridge exists.
+	SkipRunner bool
 }
 
 type Runner struct {
-	Name     string
-	Endpoint string
-	Token    string
+	Name    string
+	Token   string
+	Process *sbx.Process
 }
 
 // DefaultName returns a stable sandbox name without putting an absolute host
@@ -63,10 +61,10 @@ func DefaultName(workspace string) string {
 	return "daw-" + base + "-" + hex.EncodeToString(sum[:4])
 }
 
-// Start stages per-sandbox configuration, creates the sandbox, and returns its
-// loopback-only published API endpoint. The sbx run command remains the
-// authority for kit validation and composition, credential bindings, policy,
-// and sandbox creation.
+// Start stages per-sandbox configuration, creates or resumes the sandbox, and
+// opens the runner's long-lived sbx-exec stdio process. The sbx run command
+// remains the authority for kit composition, credentials, policy, and sandbox
+// lifecycle; no runner port is published.
 func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, error) {
 	if client == nil {
 		return Runner{}, errors.New("sandbox runner: nil sbx client")
@@ -78,6 +76,9 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	kit, err := existingDirectory(options.Kit)
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: kit: %w", err)
+	}
+	if !options.SkipRunner && strings.TrimSpace(options.SessionStoreToken) == "" {
+		return Runner{}, errors.New("sandbox runner: host session store token is required")
 	}
 	workspaces := []string{workspace}
 	for _, candidate := range options.AdditionalWorkspaces {
@@ -127,7 +128,6 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 		SandboxOptions: sbx.SandboxOptions{
 			Agent: AgentName, Workspaces: workspaces, Name: name,
 			Kits: []string{stagedKit}, Template: strings.TrimSpace(options.Template),
-			Publish: []string{strconv.Itoa(ContainerPort)},
 		},
 		Detached: true,
 	}
@@ -145,92 +145,46 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: start %q: %w", name, err)
 	}
-	// The sandbox startup hook can run before the credential proxy is fully
-	// attached to its process context. Start the runner once through the normal
-	// exec path after sbx run completes; this is not a credential request and
-	// avoids leaking proxy-managed placeholder keys on the first model call.
-	if err := restartRunner(ctx, client, name); err != nil {
-		return Runner{}, err
+	if options.SkipRunner {
+		return Runner{Name: name, Token: token}, nil
 	}
-	endpoint, err := Endpoint(ctx, client, name)
+	// Start the runner once through the normal exec path after sbx run completes.
+	// setup.startup is deliberately not used because that launch context can see
+	// proxy-managed placeholder keys before the credential proxy is attached.
+	process, err := startRunner(context.WithoutCancel(ctx), client, name, options.SessionStoreToken)
 	if err != nil {
 		return Runner{}, err
 	}
-	return Runner{Name: name, Endpoint: endpoint, Token: token}, nil
+	return Runner{Name: name, Token: token, Process: process}, nil
 }
 
-func restartRunner(ctx context.Context, client *sbx.Client, name string) error {
-	const command = `
+func startRunner(ctx context.Context, client *sbx.Client, name, storeToken string) (*sbx.Process, error) {
+	command := `
 set -eu
 pid_file=/home/agent/.cagent/daw-runner/runner.pid
-tries=0
-while [ ! -s "$pid_file" ] && [ "$tries" -lt 40 ]; do
-  sleep 0.05
-  tries=$((tries + 1))
-done
 if [ -s "$pid_file" ]; then
   pid=$(cat "$pid_file")
-  kill "$pid" 2>/dev/null || true
-  tries=0
-  while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 40 ]; do
-    sleep 0.05
-    tries=$((tries + 1))
-  done
-  kill -9 "$pid" 2>/dev/null || true
+  if kill -0 "$pid" 2>/dev/null; then
+    # Existing sandboxes made by older kits may still auto-start the runner.
+    # Replace that process so it also receives the post-initialization exec
+    # credential context, but do not wait at all on new sandboxes.
+    kill "$pid" 2>/dev/null || true
+    tries=0
+    while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 40 ]; do
+      sleep 0.05
+      tries=$((tries + 1))
+    done
+    kill -9 "$pid" 2>/dev/null || true
+  fi
 fi
 rm -f "$pid_file"
-nohup /home/agent/.local/bin/start-daw-runner >/dev/null 2>&1 </dev/null &
+exec env DAW_SESSION_STORE_TOKEN=` + shellQuote(storeToken) + ` /home/agent/.local/bin/start-daw-runner
 `
-	if _, err := client.Command(ctx, "exec", name, "--", "sh", "-c", command); err != nil {
-		return fmt.Errorf("sandbox runner: restart %q after sandbox initialization: %w", name, err)
-	}
-	return nil
-}
-
-// Endpoint asks sbx for the current host-side port allocation. Host ports are
-// intentionally ephemeral, so they must never be inferred from the kit.
-func Endpoint(ctx context.Context, client *sbx.Client, name string) (string, error) {
-	if client == nil {
-		return "", errors.New("sandbox runner: nil sbx client")
-	}
-	ports, err := client.Ports(ctx, name)
+	process, err := client.ExecPipe(ctx, name, "sh", "-c", command)
 	if err != nil {
-		return "", fmt.Errorf("sandbox runner: inspect ports for %q: %w", name, err)
+		return nil, fmt.Errorf("sandbox runner: start %q after sandbox initialization: %w", name, err)
 	}
-	for _, port := range ports {
-		if port.SandboxPort == ContainerPort && port.Protocol == "tcp" && port.HostIP == "127.0.0.1" {
-			return "http://" + net.JoinHostPort(port.HostIP, strconv.Itoa(port.HostPort)), nil
-		}
-	}
-	return "", fmt.Errorf("sandbox runner: %q has no loopback publication for tcp/%d", name, ContainerPort)
-}
-
-// WaitReady waits for the runner process to accept API requests.
-func WaitReady(ctx context.Context, endpoint, token string) error {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/health", nil)
-		if err != nil {
-			return fmt.Errorf("sandbox runner: health request: %w", err)
-		}
-		request.Header.Set("Authorization", "Bearer "+token)
-		response, err := client.Do(request)
-		if err == nil {
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("sandbox runner: waiting for %s: %w", endpoint, ctx.Err())
-		case <-ticker.C:
-		}
-	}
+	return process, nil
 }
 
 func stageKit(source, token string, includeRunner bool) (string, func(), error) {
@@ -336,6 +290,10 @@ func persistentToken(name string) (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func within(root, candidate string) bool {

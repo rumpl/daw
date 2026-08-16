@@ -93,9 +93,10 @@ selection or agent-resolution API.
   - A normalized persisted timeline page. `offset` defaults to 0; `limit`
     defaults to 200 and is capped at 1000.
 - `POST /api/chats`
-  - Body: `{workspaceId: string, executionLocationId?: string}`. A trusted
-    plugin backend can issue the opaque location ID to run the session in a
-    different directory while keeping it grouped under the logical workspace.
+  - Body: `{workspaceId: string, executionLocationId?: string, executionTarget?: "host"|"sandbox"}`.
+    A trusted plugin backend can issue the opaque location ID to run the session
+    in a different directory while keeping it grouped under the logical
+    workspace. An omitted execution target uses the persisted backend default.
     Returns `201 ChatRef`.
 - `POST /api/chats/resume`
   - Body: `{workspaceId: string, sessionId: string}`.
@@ -111,6 +112,9 @@ selection or agent-resolution API.
 - `PATCH /api/chat-options/tools/{tool}` → `200 ToolOption`
   - Body: `{enabled: boolean}`. Updates whether the named tool is offered by
     chats opened or resumed after the change.
+- `PATCH /api/chat-options/execution-target` → `200 ExecutionTargetPreference`
+  - Body: `{executionTarget: "host"|"sandbox"}`. Persists the backend default
+    used by subsequent session creation and returned by bootstrap.
 - `GET /api/chats/{id}` → `200 Snapshot`
   - Complete authoritative chat state for resnapshot/reconciliation.
 - `GET /api/chats/{id}/events[?lastEventId=N]` → SSE stream
@@ -166,15 +170,22 @@ type ToolState = "pending" | "awaiting_confirmation" | "running" |
   "success" | "error" | "rejected";
 type ToolDecision = "approve" | "approveAlways" | "reject";
 type ElicitationAction = "accept" | "decline" | "cancel";
+type ExecutionTarget = "host" | "sandbox";
 
 interface Health { status: string; uptimeSeconds: number }
 interface APIError { error: string; code: string; details?: string }
 interface Notice { id: string; level: "info"|"warning"|"error"; message: string; code: string }
+interface ExecutionTargetOption {
+  value: ExecutionTarget; label: string; description: string;
+}
+interface ExecutionTargetPreference { executionTarget: ExecutionTarget }
 interface WorkspaceHint { path: string; label: string }
 interface Bootstrap {
   appVersion: string; agentVersion: string; agentCommit: string;
   configDir: string; dataDir: string; cacheDir: string; sessionDb: string;
   pluginDir: string; csrfToken: string; sandboxed: boolean;
+  executionTargets: ExecutionTargetOption[] | null;
+  defaultExecutionTarget: ExecutionTarget;
   modelsAvailable: boolean; modelsHint: string;
   workspaceHints: WorkspaceHint[] | null; notices: Notice[] | null;
 }
@@ -188,13 +199,15 @@ interface PermissionsView {
 }
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
-  messages: number; cost?: number; live: boolean; chatId?: string; runState?: RunState;
+  messages: number; cost?: number; executionTarget?: ExecutionTarget;
+  live: boolean; chatId?: string; runState?: RunState;
   parentSessionId?: string; rootSessionId?: string; originKind?: string;
   originPluginId?: string;
 }
 interface StoredSessionMeta {
   sessionId:string; title:string; workspaceId:string; workingDir:string;
-  agentName:string; model:string; createdAt:string; parentSessionId?:string;
+  agentName:string; model:string; executionTarget?:ExecutionTarget;
+  createdAt:string; parentSessionId?:string;
   rootSessionId?:string; originKind?:string; originPluginId?:string;
 }
 interface StoredSession {
@@ -217,7 +230,8 @@ interface Usage {
 interface SessionMeta {
   chatId: string; sessionId: string; title: string; workspaceId: string;
   workingDir: string; agentName: string; model: string; thinkingLevel: string;
-  thinkingLevels: string[] | null; permissions: PermissionsView; createdAt: string;
+  thinkingLevels: string[] | null; executionTarget?: ExecutionTarget;
+  permissions: PermissionsView; createdAt: string;
   parentSessionId?: string; rootSessionId?: string; originKind?: string;
   originPluginId?: string;
 }
@@ -586,7 +600,9 @@ interface DashboardAPI {
   chatOptions(): Promise<ChatOptions>;
   updateChatOptions(patch:{model?:string;thinkingLevel?:string}):Promise<ChatOptions>;
   updateDefaultTool(name:string, enabled:boolean):Promise<ToolOption>;
-  createChat(workspaceId:string, executionLocationId?:string): Promise<ChatRef>;
+  updateExecutionTarget(target:ExecutionTarget):Promise<ExecutionTargetPreference>;
+  createChat(workspaceId:string, executionLocationId?:string,
+    executionTarget?:ExecutionTarget): Promise<ChatRef>;
   resumeChat(workspaceId:string, sessionId:string): Promise<ChatRef>;
   snapshot(chatId:string): Promise<Snapshot>;
   uploadAttachment(chatId:string, file:File,

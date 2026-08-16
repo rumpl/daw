@@ -56,6 +56,7 @@ func (s *Service) Get(sessionID string) Preference {
 	}
 	preference := clonePreference(s.state.Sessions[sessionID])
 	preference.DisabledTools = append([]string(nil), s.state.Default.DisabledTools...)
+	preference.ExecutionTarget = s.state.Default.ExecutionTarget
 	return preference
 }
 
@@ -82,6 +83,22 @@ func (s *Service) UpdateDefault(model, thinkingLevel *string) (Preference, error
 		return Preference{}, err
 	}
 	return current, nil
+}
+
+// SetExecutionTarget changes the backend-owned default inherited by new chats.
+func (s *Service) SetExecutionTarget(target string) (Preference, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.state.Default
+	current.ExecutionTarget = sanitizeExecutionTarget(target)
+	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	s.state.Default = current
+	if s.file != "" {
+		if err := write(s.file, s.state); err != nil {
+			return Preference{}, err
+		}
+	}
+	return clonePreference(current), nil
 }
 
 func (s *Service) Remember(sessionID string, patch Preference) error {
@@ -160,13 +177,14 @@ const (
 )
 
 // Preference is deliberately small and non-secret. Model and ThinkingLevel
-// can have per-session values; DisabledTools is meaningful only on Default and
-// is inherited process-wide by every chat.
+// can have per-session values; DisabledTools and ExecutionTarget are meaningful
+// only on Default and are inherited process-wide by every chat.
 type Preference struct {
-	Model         string   `json:"model,omitempty"`
-	ThinkingLevel string   `json:"thinkingLevel,omitempty"`
-	DisabledTools []string `json:"disabledTools,omitempty"`
-	UpdatedAt     string   `json:"updatedAt,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	ThinkingLevel   string   `json:"thinkingLevel,omitempty"`
+	DisabledTools   []string `json:"disabledTools,omitempty"`
+	ExecutionTarget string   `json:"executionTarget,omitempty"`
+	UpdatedAt       string   `json:"updatedAt,omitempty"`
 }
 
 type preferences struct {
@@ -229,7 +247,19 @@ func sanitizeChatPreference(preference Preference) Preference {
 		preference.ThinkingLevel = ""
 	}
 	preference.DisabledTools = sanitizeToolNames(preference.DisabledTools)
+	preference.ExecutionTarget = sanitizeExecutionTarget(preference.ExecutionTarget)
 	return preference
+}
+
+func sanitizeExecutionTarget(target string) string {
+	switch strings.TrimSpace(target) {
+	case "host":
+		return "host"
+	case "sandbox":
+		return "sandbox"
+	default:
+		return ""
+	}
 }
 
 func sanitizeToolNames(names []string) []string {

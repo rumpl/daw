@@ -43,7 +43,7 @@ func TestWithinDetectsAlreadyMountedExecutionDirectories(t *testing.T) {
 	}
 }
 
-func TestRestartRunnerUsesPostRunExecContext(t *testing.T) {
+func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
 	binary := filepath.Join(dir, "sbx")
@@ -51,7 +51,11 @@ func TestRestartRunnerUsesPostRunExecContext(t *testing.T) {
 	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := restartRunner(context.Background(), sbx.New(sbx.WithBinary(binary)), "session-one"); err != nil {
+	process, err := startRunner(context.Background(), sbx.New(sbx.WithBinary(binary)), "session-one", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	args, err := os.ReadFile(argsFile)
@@ -59,9 +63,9 @@ func TestRestartRunnerUsesPostRunExecContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(args)
-	for _, want := range []string{"exec\n", "session-one\n", "start-daw-runner"} {
+	for _, want := range []string{"exec\n", "session-one\n", "DAW_SESSION_STORE_TOKEN", "start-daw-runner"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("restart command %q does not contain %q", got, want)
+			t.Fatalf("start command %q does not contain %q", got, want)
 		}
 	}
 }

@@ -23,6 +23,15 @@ const (
 // DeliveryMode selects how a submitted message reaches the runtime.
 type DeliveryMode string
 
+// ExecutionTarget selects where a newly-created agent runtime executes.
+// Resumed sessions retain the target chosen when they were created.
+type ExecutionTarget string
+
+const (
+	ExecutionTargetHost    ExecutionTarget = "host"
+	ExecutionTargetSandbox ExecutionTarget = "sandbox"
+)
+
 const (
 	// DeliveryNormal starts a new run; only valid while idle.
 	DeliveryNormal DeliveryMode = "normal"
@@ -289,6 +298,7 @@ type SessionMeta struct {
 	Model           string            `json:"model"`
 	ThinkingLevel   string            `json:"thinkingLevel"`
 	ThinkingLevels  []string          `json:"thinkingLevels"`
+	ExecutionTarget ExecutionTarget   `json:"executionTarget,omitempty"`
 	Permissions     PermissionsView   `json:"permissions"`
 	CreatedAt       string            `json:"createdAt"`
 	ParentSessionID string            `json:"parentSessionId,omitempty"`
@@ -438,6 +448,13 @@ type Health struct {
 	Uptime int64  `json:"uptimeSeconds"`
 }
 
+// ExecutionTargetOption is one runtime location available for new sessions.
+type ExecutionTargetOption struct {
+	Value       ExecutionTarget `json:"value"`
+	Label       string          `json:"label"`
+	Description string          `json:"description"`
+}
+
 // WorkspaceHint is a previously-validated workspace offered in bootstrap.
 type WorkspaceHint struct {
 	Path  string `json:"path"`
@@ -446,20 +463,22 @@ type WorkspaceHint struct {
 
 // Bootstrap is GET /api/bootstrap: non-secret app and docker-agent status.
 type Bootstrap struct {
-	AppVersion      string          `json:"appVersion"`
-	AgentVersion    string          `json:"agentVersion"`
-	AgentCommit     string          `json:"agentCommit"`
-	ConfigDir       string          `json:"configDir"`
-	DataDir         string          `json:"dataDir"`
-	CacheDir        string          `json:"cacheDir"`
-	SessionDB       string          `json:"sessionDb"`
-	PluginDir       string          `json:"pluginDir"`
-	CSRFToken       string          `json:"csrfToken"`
-	Sandboxed       bool            `json:"sandboxed"`
-	ModelsAvailable bool            `json:"modelsAvailable"`
-	ModelsHint      string          `json:"modelsHint"`
-	WorkspaceHints  []WorkspaceHint `json:"workspaceHints"`
-	Notices         []Notice        `json:"notices"`
+	AppVersion             string                  `json:"appVersion"`
+	AgentVersion           string                  `json:"agentVersion"`
+	AgentCommit            string                  `json:"agentCommit"`
+	ConfigDir              string                  `json:"configDir"`
+	DataDir                string                  `json:"dataDir"`
+	CacheDir               string                  `json:"cacheDir"`
+	SessionDB              string                  `json:"sessionDb"`
+	PluginDir              string                  `json:"pluginDir"`
+	CSRFToken              string                  `json:"csrfToken"`
+	Sandboxed              bool                    `json:"sandboxed"`
+	ExecutionTargets       []ExecutionTargetOption `json:"executionTargets"`
+	DefaultExecutionTarget ExecutionTarget         `json:"defaultExecutionTarget"`
+	ModelsAvailable        bool                    `json:"modelsAvailable"`
+	ModelsHint             string                  `json:"modelsHint"`
+	WorkspaceHints         []WorkspaceHint         `json:"workspaceHints"`
+	Notices                []Notice                `json:"notices"`
 }
 
 // PluginPage is one route contributed by a global dashboard plugin.
@@ -549,17 +568,18 @@ type Workspace struct {
 // SessionMeta it has no process-local chat ID, runtime configuration, or
 // interactive state.
 type StoredSessionMeta struct {
-	SessionID       string `json:"sessionId"`
-	Title           string `json:"title"`
-	WorkspaceID     string `json:"workspaceId"`
-	WorkingDir      string `json:"workingDir"`
-	AgentName       string `json:"agentName"`
-	Model           string `json:"model"`
-	CreatedAt       string `json:"createdAt"`
-	ParentSessionID string `json:"parentSessionId,omitempty"`
-	RootSessionID   string `json:"rootSessionId,omitempty"`
-	OriginKind      string `json:"originKind,omitempty"`
-	OriginPluginID  string `json:"originPluginId,omitempty"`
+	SessionID       string          `json:"sessionId"`
+	Title           string          `json:"title"`
+	WorkspaceID     string          `json:"workspaceId"`
+	WorkingDir      string          `json:"workingDir"`
+	AgentName       string          `json:"agentName"`
+	Model           string          `json:"model"`
+	ExecutionTarget ExecutionTarget `json:"executionTarget,omitempty"`
+	CreatedAt       string          `json:"createdAt"`
+	ParentSessionID string          `json:"parentSessionId,omitempty"`
+	RootSessionID   string          `json:"rootSessionId,omitempty"`
+	OriginKind      string          `json:"originKind,omitempty"`
+	OriginPluginID  string          `json:"originPluginId,omitempty"`
 }
 
 // StoredSession is the read-only persisted-session resource. It deliberately
@@ -589,6 +609,7 @@ type SessionSummary struct {
 	CreatedAt       string            `json:"createdAt"`
 	Messages        int               `json:"messages"`
 	Cost            float64           `json:"cost,omitempty"`
+	ExecutionTarget ExecutionTarget   `json:"executionTarget,omitempty"`
 	Live            bool              `json:"live"`
 	ChatID          string            `json:"chatId,omitempty"`
 	RunState        *RunState         `json:"runState,omitempty"`
@@ -615,8 +636,9 @@ type ExecutionLocationRef struct {
 // CreateChatRequest is POST /api/chats. Every chat uses the dashboard's
 // single SDK-built coding agent.
 type CreateChatRequest struct {
-	WorkspaceID         string `json:"workspaceId"`
-	ExecutionLocationID string `json:"executionLocationId,omitempty"`
+	WorkspaceID         string          `json:"workspaceId"`
+	ExecutionLocationID string          `json:"executionLocationId,omitempty"`
+	ExecutionTarget     ExecutionTarget `json:"executionTarget,omitempty"`
 }
 
 // ResumeChatRequest is POST /api/chats/resume.
@@ -684,6 +706,11 @@ type UpdateToolRequest struct {
 type UpdateConfigRequest struct {
 	Model         *string `json:"model,omitempty"`
 	ThinkingLevel *string `json:"thinkingLevel,omitempty"`
+}
+
+// ExecutionTargetPreference is the backend-owned default for future sessions.
+type ExecutionTargetPreference struct {
+	ExecutionTarget ExecutionTarget `json:"executionTarget"`
 }
 
 // ChatOptions is the process-wide model and tool catalog and the defaults

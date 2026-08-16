@@ -101,6 +101,41 @@ describe('Composer', () => {
     expect(onAddAttachments).toHaveBeenCalledWith([file]);
   });
 
+  it('selects the execution target before a session is created', () => {
+    const onSelectExecutionTarget = vi.fn();
+    render(
+      <Composer draft="" onDraftChange={vi.fn()} run={idle} disabled={false} commands={[]}
+        attachments={[]} uploading={false} executionTarget="sandbox"
+        executionTargets={[
+          { value: 'sandbox', label: 'Docker Sandbox', description: 'Isolated' },
+          { value: 'host', label: 'Host', description: 'Direct' },
+        ]}
+        onSelectExecutionTarget={onSelectExecutionTarget} onAddAttachments={vi.fn()} onRemoveAttachment={vi.fn()}
+        onSend={vi.fn()} onStop={vi.fn()} />,
+    );
+    const target = screen.getByRole('combobox', { name: 'Execution target' });
+    expect(target).toHaveTextContent('Docker Sandbox');
+    expect(target.querySelector('.lucide-box')).toBeInTheDocument();
+    expect(target).toBeEnabled();
+    expect(onSelectExecutionTarget).not.toHaveBeenCalled();
+  });
+
+  it('keeps the execution target visible but disabled after session creation', () => {
+    render(
+      <Composer draft="" onDraftChange={vi.fn()} run={idle} disabled={false} commands={[]}
+        attachments={[]} uploading={false} executionTarget="host" executionTargetDisabled
+        executionTargets={[
+          { value: 'sandbox', label: 'Docker Sandbox', description: 'Isolated' },
+          { value: 'host', label: 'Host', description: 'Direct' },
+        ]}
+        onAddAttachments={vi.fn()} onRemoveAttachment={vi.fn()} onSend={vi.fn()} onStop={vi.fn()} />,
+    );
+    const target = screen.getByRole('combobox', { name: 'Execution target' });
+    expect(target).toHaveTextContent('Host');
+    expect(target.querySelector('.lucide-laptop')).toBeInTheDocument();
+    expect(target).toBeDisabled();
+  });
+
   it('lets users enable and disable the current agent tools', async () => {
     const user = userEvent.setup();
     const onToolChange = vi.fn();

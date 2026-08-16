@@ -1,7 +1,8 @@
 # DAW sandbox runner kit and template
 
 The schema-v2 kit extends Docker Sandboxes' built-in `docker-agent` kit and
-configures a small authenticated DAW execution service on sandbox port 8080. It
+configures a small authenticated DAW execution service reached through an
+interactive `sbx exec` stdin/stdout stream. It publishes no sandbox port and
 does not serve the dashboard UI or host DAW's plugin-management control plane.
 
 The runner constructs `dashboard-coder` through
@@ -12,8 +13,8 @@ agent definition.
 
 Docker Sandboxes treats these as separate primitives:
 
-- the **kit** declares credentials, ports, startup hooks, instructions, and
-  files to apply to a sandbox;
+- the **kit** declares credentials, ports, the no-op agent entrypoint,
+  instructions, and files to apply to a sandbox;
 - a **template** is a saved sandbox container image used as the root filesystem
   for later sandboxes.
 
@@ -52,8 +53,9 @@ content hash performs the expensive seed bake once; later launches reuse the
 saved template. On the current development machine the measured times were:
 
 - one-time template bake: about 43 seconds;
-- new session sandbox from the template, including runner health: about 4.2
-  seconds.
+- new session sandbox from the template, including runner health: about 4.6
+  seconds with `sbx` v0.38.0. Roughly 3.7 seconds of that is the underlying
+  `sbx run --template` operation.
 
 You can inspect or remove local templates with:
 
@@ -62,58 +64,72 @@ sbx template ls
 sbx template rm daw-runner:<content-hash>
 ```
 
-The host session-sandbox adapter then:
+The host dashboard exposes **Docker Sandbox** and **Host** in an unpersisted
+empty composer tab. The backend persists the latest selection as the default
+for later tabs and dashboard restarts. The session is created on its first send;
+its target is immutable after creation, and agent-made child sessions inherit
+their parent's target. For a sandbox-targeted session,
+the session-sandbox adapter:
 
-1. creates a dedicated sandbox only when a user or gossip child session opens;
+1. creates a dedicated sandbox only when the session opens;
 2. mounts the logical workspace, plugin directory, and any plugin-selected
    execution directory at their original absolute paths;
-3. discovers each runner's ephemeral loopback port and authenticates with a
-   per-sandbox token;
+3. starts a long-running `sbx exec`, authenticates with a per-sandbox token,
+   and multiplexes control and reverse RPC over its stdin/stdout pipes;
 4. stops a sandbox when no live chat owns its session; and
-5. restarts that same sandbox and rediscovers its port on resume.
+5. restarts that same sandbox and opens a fresh stdio connection on resume.
 
-Bootstrap and global settings do not start a sandbox. Before the first chat,
-DAW reports the standard thinking levels but leaves model and tool catalogs
-empty; the opened chat resolves its real model and exposes its model catalog.
+Bootstrap and global settings do not start a sandbox. Their model and tool
+catalogs are resolved by the host Docker Agent adapter and the selected
+preferences are applied when either kind of session opens.
 
-The host stores the session-to-sandbox index in
-`~/.cagent/dawui/sandbox-sessions-<workspace-hash>.json`.
-
-A pre-existing workspace-level `daw-<workspace>-<hash>` sandbox is imported as
-a legacy mapping so its existing sessions remain visible and resumable. New
-sessions always receive dedicated `daw-session-<hash>` sandboxes.
+The host stores only lifecycle mappings (session ID, sandbox name, and mounted
+working directory) in
+`~/.cagent/dawui/sandbox-sessions-<workspace-hash>.json`. It does not duplicate
+titles, message counts, attributes, lineage, or other catalog data. Legacy
+sandbox-local catalogs are intentionally not imported. New sandbox-targeted
+sessions receive dedicated `daw-session-<hash>` sandboxes.
 
 ## Runtime boundary
 
 On the host:
 
 - browser assets and `/api` control plane;
-- workspace history, chat preferences, and session-to-sandbox index;
-- plugin discovery, lifecycle, frontend assets, and Node backends.
+- workspace history, chat preferences, and the lifecycle-only session-to-sandbox index;
+- plugin discovery, lifecycle, frontend assets, and Node backends;
+- Docker Agent runtime and the authoritative session store for every execution target;
+- authenticated session-store and plugin callback handlers served over each
+  runner's reverse stdio streams.
 
 In each session sandbox:
 
-- exactly one newly-created Docker Agent session;
+- exactly one live Docker Agent session runtime;
 - code-defined Docker Agent runtime;
 - model calls and shell/filesystem tools;
 - local plugin MCP child processes;
-- the session's Docker Agent database.
+- a complete remote `session.Store` client; there is no sandbox-local session database.
+
+The host passes `DAW_SESSION_STORE_TOKEN` only to the runner process. The
+runner performs a versioned store handshake before serving its side of the
+stdio mux. Store mutations are serialized, carry idempotency IDs, and are
+written synchronously to the host database.
 
 MCP declarations are discovered on the host and sent with each open-chat
 request. Local MCP commands execute from the mounted plugin directory. Their
-`DAW_API_ORIGIN` is rewritten to a random-port `host.docker.internal` bridge.
-The sandbox receives a bridge-only token, while the bridge permits only the
-calling plugin's backend-proxy route and adds the real host credentials after
-validation.
+`DAW_API_ORIGIN` points to a fixed sandbox-local loopback proxy. That proxy
+opens reverse streams over stdio; the host bridge still permits only the
+calling plugin's backend route and adds real host credentials after validation.
 
-The runner port is loopback-published and requires a random bearer token. The
-token is stored owner-only under `~/.cagent/dawui/sandbox-tokens` and applied by
-the lightweight per-sandbox kit; it is not baked into the reusable template.
+The runner API also travels over stdio and retains its random bearer token as
+defense in depth. The token is stored owner-only under
+`~/.cagent/dawui/sandbox-tokens` and applied by the lightweight per-sandbox kit;
+it is not baked into the reusable template.
 
 Actual model keys remain in the host-side `sbx secret` store. The sandbox sees
 only `proxy-managed`, and the host proxy replaces provider authorization headers
-according to the kit declarations. After `sbx run` completes, DAW relaunches the
-startup-hook runner once through `sbx exec`, placing it in the fully initialized
+according to the kit declarations. The kit intentionally has no
+`setup.startup` runner hook: after `sbx run` completes, DAW starts the runner
+exactly once through `sbx exec`, placing it in the fully initialized
 credential-proxy process context before it accepts model requests. The Docker
 Agent HTTP transport gives the sandbox-provided `HTTP_PROXY` and `HTTPS_PROXY`
 environment precedence over Docker Desktop's host-service socket. Its OpenAI

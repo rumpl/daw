@@ -26,15 +26,23 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	wsHints := s.workspaces.Hints()
 
 	notices := append([]protocol.Notice(nil), info.Notices...)
+	hasHost, hasSandbox := false, false
+	for _, target := range s.executionTargets {
+		hasHost = hasHost || target.Value == protocol.ExecutionTargetHost
+		hasSandbox = hasSandbox || target.Value == protocol.ExecutionTargetSandbox
+	}
 	autoApprovedMessage := "Every tool call, including shell commands, is auto-approved and runs on this host as your user."
-	if s.sandboxed {
+	switch {
+	case hasHost && hasSandbox:
+		autoApprovedMessage = "Every tool call is auto-approved and runs on the host or in a dedicated Docker Sandbox, according to the target selected before creating the session."
+	case hasSandbox:
 		autoApprovedMessage = "Every tool call is auto-approved, but executes inside the Docker Sandbox rather than on the host."
 	}
 	notices = append(notices, protocol.Notice{
 		ID: "tools-auto-approved", Level: protocol.NoticeWarning, Code: "tools_auto_approved",
 		Message: autoApprovedMessage,
 	})
-	if !s.sandboxed {
+	if !hasSandbox {
 		notices = append(notices, protocol.Notice{
 			ID: "sandbox", Level: protocol.NoticeInfo, Code: "no_sandbox",
 			Message: "This dashboard embeds docker-agent in-process: tools run directly on this host " +
@@ -48,6 +56,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		ConfigDir: info.ConfigDir, DataDir: info.DataDir, CacheDir: info.CacheDir,
 		SessionDB: info.SessionDB, PluginDir: s.pluginDir,
 		CSRFToken: s.csrf, Sandboxed: s.sandboxed,
+		ExecutionTargets: s.executionTargets, DefaultExecutionTarget: s.preferredExecutionTarget(),
 		ModelsAvailable: info.ModelsAvailable, ModelsHint: info.ModelsHint,
 		WorkspaceHints: wsHints, Notices: notices,
 	})

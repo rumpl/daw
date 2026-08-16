@@ -204,9 +204,11 @@ body {
 .session-title {
   display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; overflow: hidden;
 }
-.session-title > span:first-child {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.session-title-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.session-execution-target { display: inline-flex; flex: none; color: var(--fg-faint); }
+.session-execution-icon { width: 14px; height: 14px; stroke-width: 1.8; }
 .session-title [data-slot="badge"] {
   margin-left: auto; padding: 0; flex: none; border: 0; background: transparent; box-shadow: none;
 }
@@ -703,6 +705,7 @@ body {
 }
 .composer-config { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; }
 .composer-config > * { flex: none; }
+.composer-execution-target { min-width: 142px; max-width: 170px; }
 .composer-thinking { max-width: 130px; }
 .tool-picker-trigger svg { width: 14px; height: 14px; }
 .tool-picker-dialog { gap: 10px; }

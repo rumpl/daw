@@ -42,6 +42,7 @@ var exported = []any{
 	Event{},
 	DashboardEvent{},
 	Health{},
+	ExecutionTargetOption{},
 	WorkspaceHint{},
 	Bootstrap{},
 	PluginPage{},
@@ -68,6 +69,7 @@ var exported = []any{
 	ToolOption{},
 	UpdateToolRequest{},
 	UpdateConfigRequest{},
+	ExecutionTargetPreference{},
 	ChatOptions{},
 	ToolConfirmationReply{},
 	ElicitationReply{},
@@ -81,6 +83,7 @@ var exported = []any{
 var enums = map[string][]string{
 	"RunState":          {string(RunStateIdle), string(RunStateRunning), string(RunStateStopping)},
 	"DeliveryMode":      {string(DeliveryNormal), string(DeliverySteer), string(DeliveryFollowUp)},
+	"ExecutionTarget":   {string(ExecutionTargetHost), string(ExecutionTargetSandbox)},
 	"ToolState":         {string(ToolStatePending), string(ToolStateAwaiting), string(ToolStateRunning), string(ToolStateSuccess), string(ToolStateError), string(ToolStateRejected)},
 	"NoticeLevel":       {string(NoticeInfo), string(NoticeWarning), string(NoticeError)},
 	"ToolDecision":      {string(DecisionApprove), string(DecisionApproveAlways), string(DecisionReject)},

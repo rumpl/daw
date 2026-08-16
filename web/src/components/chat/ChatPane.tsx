@@ -126,6 +126,9 @@ function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
     commands={[...dashboard.commands, ...pluginCommands.map((command) => ({ name: command.name, description: command.description, kind: 'plugin' }))]}
     attachments={dashboard.attachments}
     uploading={dashboard.uploading}
+    executionTargets={dashboard.executionTargets}
+    executionTarget={dashboard.state.meta?.executionTarget ?? dashboard.executionTarget}
+    executionTargetDisabled={Boolean(dashboard.chatId) || dashboard.busyAction}
     models={dashboard.models}
     currentModel={dashboard.state.meta?.model ?? dashboard.defaultModel}
     thinkingLevel={dashboard.state.meta?.thinkingLevel ?? dashboard.defaultThinkingLevel}
@@ -136,6 +139,7 @@ function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
     compactDisabled={!dashboard.chatId || dashboard.busyAction || dashboard.state.run.state !== 'idle'}
     usageTokens={dashboard.state.usage.inputTokens + dashboard.state.usage.outputTokens}
     usageCost={dashboard.state.usage.cost}
+    onSelectExecutionTarget={dashboard.setExecutionTarget}
     onSelectModel={(model) => dashboard.patchConfig({ model })}
     onSelectThinking={(thinkingLevel) => dashboard.patchConfig({ thinkingLevel })}
     onToolChange={dashboard.setToolEnabled}

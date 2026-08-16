@@ -24,6 +24,10 @@ var (
 	ErrClosed       = errors.New("chat is closed")
 )
 
+// ExecutionTargetAttribute is adapter-only session metadata used to route
+// resumed sessions. Attributes are deliberately excluded from browser JSON.
+const ExecutionTargetAttribute = "daw.execution.target"
+
 // Info is the non-secret status shown in the bootstrap payload.
 type Info struct {
 	AgentVersion    string
@@ -60,6 +64,9 @@ type OpenRequest struct {
 	SessionContext  string
 	WorkingDir      string
 	ResumeSessionID string
+	// ExecutionTarget is used only while creating a session. Resumes are routed
+	// to the session's original target and cannot migrate between runtimes.
+	ExecutionTarget protocol.ExecutionTarget
 	// SessionAttributes are persisted by docker-agent on newly-created sessions.
 	SessionAttributes map[string]string
 	// PersistImmediately creates the session row during open instead of waiting

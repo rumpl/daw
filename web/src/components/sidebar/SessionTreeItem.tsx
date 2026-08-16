@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ExecutionTargetIcon, executionTargetLabel } from '@/components/chat/ExecutionTargetIcon';
 import { clip } from '@/safety';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
@@ -41,9 +42,16 @@ export function SessionTreeItem({ node, busy, activeSessionId, onResumeChat }: {
           ) : <span className="session-tree-spacer" />}
           <Button ref={buttonRef} type="button" variant="ghost" className="session-tree-open"
             aria-current={active ? 'page' : undefined}
-            title={session.title || 'Untitled'} onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
+            title={`${session.title || 'Untitled'} — ${executionTargetLabel(session.executionTarget)}`}
+            onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
             <span className="session-title">
-              <span>{clip(session.title || 'Untitled', 80)}</span>
+              {session.executionTarget ? (
+                <span className="session-execution-target" title={executionTargetLabel(session.executionTarget)}>
+                  <ExecutionTargetIcon target={session.executionTarget} className="session-execution-icon" />
+                  <span className="sr-only">{executionTargetLabel(session.executionTarget)}</span>
+                </span>
+              ) : null}
+              <span className="session-title-text">{clip(session.title || 'Untitled', 80)}</span>
               {session.runState === 'running' ? (
                 <Badge variant="secondary" aria-label="Running"><span className="run-dot run-running" aria-hidden="true" /></Badge>
               ) : null}

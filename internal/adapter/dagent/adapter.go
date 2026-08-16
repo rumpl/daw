@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,7 @@ type Adapter struct {
 	log       *slog.Logger
 	store     session.Store
 	storePath string
+	ownStore  bool
 
 	globalPerms *permissions.Checker
 }
@@ -61,10 +63,16 @@ type Config struct {
 	// SessionDB overrides the session database path. Empty means
 	// <paths.GetDataDir()>/session.db, i.e. docker-agent's own default.
 	SessionDB string
+	// SessionStore injects a caller-selected store. When set, no SQLite
+	// database is opened. OwnStore explicitly transfers Close ownership to the
+	// adapter (sandbox runners use this to close their remote HTTP client).
+	SessionStore session.Store
+	OwnStore     bool
+	StoreLabel   string
 }
 
-// New opens docker-agent's native SQLite session store exactly once and reads
-// the user's global configuration through the normal loading path.
+// New uses the injected session store or opens docker-agent's native SQLite
+// store, then reads the user's global configuration through the normal path.
 func New(ctx context.Context, cfg Config) (*Adapter, error) {
 	log := cfg.Logger
 	if log == nil {
@@ -75,20 +83,29 @@ func New(ctx context.Context, cfg Config) (*Adapter, error) {
 		jscommands.Register()
 	})
 
-	dbPath := cfg.SessionDB
-	if dbPath == "" {
-		dbPath = filepath.Join(paths.GetDataDir(), "session.db")
+	store := cfg.SessionStore
+	storePath := strings.TrimSpace(cfg.StoreLabel)
+	ownStore := cfg.OwnStore
+	if store == nil {
+		storePath = cfg.SessionDB
+		if storePath == "" {
+			storePath = filepath.Join(paths.GetDataDir(), "session.db")
+		}
+		if err := os.MkdirAll(filepath.Dir(storePath), 0o700); err != nil {
+			return nil, fmt.Errorf("creating data dir: %w", err)
+		}
+		var err error
+		store, err = sqlitestore.New(context.WithoutCancel(ctx), storePath)
+		if err != nil {
+			return nil, fmt.Errorf("opening session store: %w", err)
+		}
+		ownStore = true
+		log.Info("session store opened", "path", storePath)
+	} else if storePath == "" {
+		storePath = "injected"
 	}
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
-		return nil, fmt.Errorf("creating data dir: %w", err)
-	}
-	store, err := sqlitestore.New(context.WithoutCancel(ctx), dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("opening session store: %w", err)
-	}
-	log.Info("session store opened", "path", dbPath)
 
-	a := &Adapter{log: log, store: store, storePath: dbPath}
+	a := &Adapter{log: log, store: store, storePath: storePath, ownStore: ownStore}
 	// The user's global permission configuration (~/.config/cagent/config.yaml)
 	// is merged into every team, exactly as the CLI does.
 	if settings := userconfig.Get(); settings != nil && settings.Permissions != nil {
@@ -423,13 +440,20 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 			}
 		}
 	} else {
+		attributes := make(map[string]string, len(req.SessionAttributes)+1)
+		for key, value := range req.SessionAttributes {
+			attributes[key] = value
+		}
+		if attributes[adapter.ExecutionTargetAttribute] == "" {
+			attributes[adapter.ExecutionTargetAttribute] = string(protocol.ExecutionTargetHost)
+		}
 		sess = session.New(
 			session.WithMaxIterations(ag.MaxIterations()),
 			session.WithMaxConsecutiveToolCalls(ag.MaxConsecutiveToolCalls()),
 			session.WithMaxOldToolCallTokens(ag.MaxOldToolCallTokens()),
 			session.WithMaxToolResultTokens(ag.MaxToolResultTokens()),
 			session.WithWorkingDir(req.WorkingDir),
-			session.WithAttributes(req.SessionAttributes),
+			session.WithAttributes(attributes),
 			session.WithTitle(placeholderTitle),
 		)
 		// Like the CLI, the session row is created lazily on the first real
@@ -512,5 +536,15 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 	return c, nil
 }
 
-// Close closes the shared session store. Individual chats own their runtimes.
-func (a *Adapter) Close() error { return a.store.Close() }
+// Store returns the injected/native store so the host callback bridge can use
+// the exact same authoritative instance as host runtimes.
+func (a *Adapter) Store() session.Store { return a.store }
+
+// Close closes the store only when ownership was explicitly assigned to this
+// adapter. Individual chats own their runtimes.
+func (a *Adapter) Close() error {
+	if !a.ownStore {
+		return nil
+	}
+	return a.store.Close()
+}

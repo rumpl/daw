@@ -5,6 +5,7 @@ import type {
   Bootstrap,
   ChatOptions,
   CommandInfo,
+  ExecutionTarget,
   ModelOption,
   SessionSummary,
   UpdateConfigRequest,
@@ -35,6 +36,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   const [defaultOptions, setDefaultOptions] = useState<ChatOptions>({
     model: '', thinkingLevel: '', thinkingLevels: [], models: [], tools: [],
   });
+  const [executionTarget, setExecutionTargetState] = useState<ExecutionTarget>('host');
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -48,6 +50,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   useEffect(() => {
     void api.bootstrap().then(async (result) => {
       setBoot(result);
+      setExecutionTargetState(result.defaultExecutionTarget);
       setWorkspacePath(prefs.recentWorkspaces[0] ?? result.workspaceHints?.[0]?.path ?? '');
       try {
         setDefaultOptions(await api.chatOptions());
@@ -164,10 +167,20 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
   );
 
   const newChat = (initialMessage?: string) => {
+    // New-chat controls open an unpersisted composer tab. The backend session
+    // is created only when that tab sends its first message, after the user has
+    // had a chance to choose its execution target.
+    if (initialMessage === undefined) {
+      clearChat();
+      setDrawerOpen(false);
+      route.leaveSession();
+      return Promise.resolve(true);
+    }
+
     let created = false;
     return guard(async () => {
       if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
-      const ref = await api.createChat(workspace.workspaceId);
+      const ref = await api.createChat(workspace.workspaceId, undefined, executionTarget);
       setChatId(ref.chatId);
       setActiveSessionId(ref.sessionId);
       setLiveSessions((current) => [
@@ -178,6 +191,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
           workingDir: workspace.path,
           createdAt: new Date().toISOString(),
           messages: 0,
+          executionTarget,
           live: true,
           chatId: ref.chatId,
           runState: 'idle',
@@ -324,6 +338,12 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     }).then(() => sent);
   };
 
+  const selectExecutionTarget = (target: ExecutionTarget) =>
+    void guard(async () => {
+      const saved = await api.updateExecutionTarget(target);
+      setExecutionTargetState(saved.executionTarget);
+    });
+
   const patchConfig = (patch: { model?: string; thinkingLevel?: string }) =>
     void guard(async () => {
       const body: UpdateConfigRequest = {};
@@ -383,6 +403,7 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
         workingDir: workspace.path,
         createdAt: stored?.createdAt || '',
         messages: stored?.messages ?? 0,
+        executionTarget: stored?.executionTarget ?? state.meta?.executionTarget,
         live: true,
         chatId,
         runState: state.run.state,
@@ -405,6 +426,9 @@ export function useDashboard(route: DashboardRoute, sessionsRevision = 0) {
     defaultModel: defaultOptions.model,
     defaultThinkingLevel: defaultOptions.thinkingLevel,
     defaultThinkingLevels: defaultOptions.thinkingLevels ?? [],
+    executionTargets: boot?.executionTargets ?? [],
+    executionTarget,
+    setExecutionTarget: selectExecutionTarget,
     commands,
     tools: defaultOptions.tools ?? [],
     attachments,

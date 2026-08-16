@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,67 +25,71 @@ import (
 	"github.com/rumpl/daw/internal/adapter/remote"
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/sandboxrunner"
+	"github.com/rumpl/daw/internal/stdiomux"
 	sbx "github.com/rumpl/go-sbx"
 )
 
 type Config struct {
-	Client         *sbx.Client
-	Workspace      string
-	Kit            string
-	Template       string
-	PluginDir      string
-	IndexFile      string
-	CallbackOrigin string
-	CallbackToken  string
-	CPUs           int
-	Memory         string
-	ReadyTimeout   time.Duration
-	Logger         *slog.Logger
+	Client            *sbx.Client
+	Workspace         string
+	Kit               string
+	Template          string
+	PluginDir         string
+	IndexFile         string
+	CallbackOrigin    string
+	CallbackToken     string
+	CallbackHandler   http.Handler
+	SessionStoreToken string
+	CPUs              int
+	Memory            string
+	ReadyTimeout      time.Duration
+	Logger            *slog.Logger
 }
 
 type Adapter struct {
-	client         *sbx.Client
-	workspace      string
-	kit            string
-	template       string
-	pluginDir      string
-	indexFile      string
-	callbackOrigin string
-	callbackToken  string
-	cpus           int
-	memory         string
-	readyTimeout   time.Duration
-	log            *slog.Logger
+	client            *sbx.Client
+	workspace         string
+	kit               string
+	template          string
+	pluginDir         string
+	indexFile         string
+	callbackOrigin    string
+	callbackToken     string
+	callbackHandler   http.Handler
+	sessionStoreToken string
+	cpus              int
+	memory            string
+	readyTimeout      time.Duration
+	log               *slog.Logger
 
-	provisionMu    sync.Mutex
-	sessionOps     sync.Mutex
-	legacyOnce     sync.Once
-	legacyErr      error
-	mu             sync.Mutex
-	records        map[string]*record
-	legacyImported bool
-	connections    map[string]*connection
-	active         map[string]int
-	closed         bool
+	provisionMu sync.Mutex
+	sessionOps  sync.Mutex
+	mu          sync.Mutex
+	records     map[string]*record
+	connections map[string]*connection
+	active      map[string]int
+	closed      bool
 }
 
+const currentTransport = "stdio-v1"
+
 type record struct {
-	SessionID  string                  `json:"sessionId"`
-	Sandbox    string                  `json:"sandbox"`
-	WorkingDir string                  `json:"workingDir"`
-	Summary    protocol.SessionSummary `json:"summary"`
-	Attributes map[string]string       `json:"attributes,omitempty"`
+	SessionID  string `json:"sessionId"`
+	Sandbox    string `json:"sandbox"`
+	WorkingDir string `json:"workingDir"`
+	Transport  string `json:"transport"`
 }
 
 type indexFile struct {
-	Version        int       `json:"version"`
-	LegacyImported bool      `json:"legacyImported,omitempty"`
-	Sessions       []*record `json:"sessions"`
+	Version  int       `json:"version"`
+	Sessions []*record `json:"sessions"`
 }
 
 type connection struct {
 	runner sandboxrunner.Runner
 	remote *remote.Adapter
+	peer   *stdiomux.Mux
+	server *http.Server
 }
 
 func New(config Config) (*Adapter, error) {
@@ -126,7 +132,8 @@ func New(config Config) (*Adapter, error) {
 	a := &Adapter{
 		client: config.Client, workspace: workspace, kit: kit, template: strings.TrimSpace(config.Template), pluginDir: pluginDir,
 		indexFile: config.IndexFile, callbackOrigin: config.CallbackOrigin,
-		callbackToken: config.CallbackToken, cpus: config.CPUs, memory: config.Memory,
+		callbackToken: config.CallbackToken, callbackHandler: config.CallbackHandler,
+		sessionStoreToken: config.SessionStoreToken, cpus: config.CPUs, memory: config.Memory,
 		readyTimeout: config.ReadyTimeout, log: config.Logger,
 		records: map[string]*record{}, connections: map[string]*connection{}, active: map[string]int{},
 	}
@@ -166,6 +173,18 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 		if rec == nil {
 			return nil, adapter.ErrNotFound
 		}
+		if rec.Transport != currentTransport {
+			// Sandboxes created by the removed port/callback transport contain an
+			// incompatible runner binary. History is host-owned, so recreate only
+			// the execution VM and retain the session lifecycle mapping.
+			if _, removeErr := a.client.Command(ctx, "rm", "-f", rec.Sandbox); removeErr != nil {
+				return nil, fmt.Errorf("replace legacy session sandbox: %w", removeErr)
+			}
+			a.mu.Lock()
+			rec.Transport = currentTransport
+			_ = a.saveLocked()
+			a.mu.Unlock()
+		}
 		conn, err = a.ensureRecord(ctx, rec)
 	} else {
 		conn, err = a.provision(ctx, sessionSandboxName(a.workspace, request.ChatID), request.WorkingDir)
@@ -176,29 +195,20 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 	chat, err := conn.remote.OpenChat(ctx, request)
 	if err != nil {
 		if request.ResumeSessionID == "" {
-			a.discardConnection(context.WithoutCancel(ctx), conn.runner.Name)
+			a.discardConnection(context.WithoutCancel(ctx), conn)
 		} else {
 			a.releaseConnection(context.WithoutCancel(ctx), conn.runner.Name, false)
 		}
 		return nil, err
 	}
 
-	meta := chat.Meta()
-	rec := &record{
-		SessionID: chat.SessionID(), Sandbox: conn.runner.Name, WorkingDir: request.WorkingDir,
-		Summary: protocol.SessionSummary{
-			SessionID: chat.SessionID(), Title: meta.Title, WorkingDir: request.WorkingDir,
-			CreatedAt: meta.CreatedAt, Attributes: cloneMap(meta.Attributes),
-		},
-		Attributes: cloneMap(meta.Attributes),
-	}
+	rec := &record{SessionID: chat.SessionID(), Sandbox: conn.runner.Name, WorkingDir: request.WorkingDir, Transport: currentTransport}
 	a.mu.Lock()
 	if existing := a.records[chat.SessionID()]; existing != nil {
 		rec = existing
 		rec.Sandbox = conn.runner.Name
 		rec.WorkingDir = request.WorkingDir
-		rec.Summary.Attributes = cloneMap(meta.Attributes)
-		rec.Attributes = cloneMap(meta.Attributes)
+		rec.Transport = currentTransport
 	}
 	a.records[chat.SessionID()] = rec
 	a.connections[conn.runner.Name] = conn
@@ -210,45 +220,17 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 		a.releaseConnection(context.WithoutCancel(ctx), conn.runner.Name, true)
 		return nil, err
 	}
-	return &managedChat{Chat: chat, manager: a, conn: conn, sessionID: chat.SessionID()}, nil
+	return &managedChat{Chat: chat, manager: a, conn: conn}, nil
 }
 
-func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error) {
-	a.legacyOnce.Do(func() { a.legacyErr = a.importLegacy(ctx) })
-	if a.legacyErr != nil {
-		return nil, a.legacyErr
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	out := make([]protocol.SessionSummary, 0, len(a.records))
-	for _, rec := range a.records {
-		summary := rec.Summary
-		summary.Attributes = cloneMap(rec.Attributes)
-		if workingDir != "" && summary.WorkingDir != "" && summary.WorkingDir != workingDir {
-			continue
-		}
-		out = append(out, summary)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
-	return out, nil
+// Session history is intentionally not a capability of the lifecycle
+// backend. The target router serves both operations from the host catalog.
+func (a *Adapter) ListSessions(context.Context, string) ([]protocol.SessionSummary, error) {
+	return nil, adapter.ErrUnsupported
 }
 
-func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
-	a.sessionOps.Lock()
-	defer a.sessionOps.Unlock()
-	a.mu.Lock()
-	rec := a.records[sessionID]
-	a.mu.Unlock()
-	if rec == nil {
-		return adapter.StoredSession{}, adapter.ErrNotFound
-	}
-	conn, err := a.ensureRecord(ctx, rec)
-	if err != nil {
-		return adapter.StoredSession{}, err
-	}
-	stored, err := conn.remote.ReadSession(ctx, sessionID)
-	a.releaseIfInactive(context.WithoutCancel(ctx), conn.runner.Name)
-	return stored, err
+func (a *Adapter) ReadSession(context.Context, string) (adapter.StoredSession, error) {
+	return adapter.StoredSession{}, adapter.ErrUnsupported
 }
 
 func (a *Adapter) Close() error {
@@ -266,53 +248,9 @@ func (a *Adapter) Close() error {
 	a.mu.Unlock()
 	ctx := context.Background()
 	for _, conn := range connections {
-		_, _ = a.client.Command(ctx, "stop", conn.runner.Name)
+		a.closeConnection(ctx, conn)
 	}
 	return nil
-}
-
-func (a *Adapter) importLegacy(ctx context.Context) error {
-	a.mu.Lock()
-	alreadyImported := a.legacyImported
-	a.mu.Unlock()
-	if alreadyImported {
-		return nil
-	}
-	name := sandboxrunner.DefaultName(a.workspace)
-	if _, err := a.client.Ports(ctx, name); err != nil {
-		a.mu.Lock()
-		a.legacyImported = true
-		err = a.saveLocked()
-		a.mu.Unlock()
-		return err
-	}
-	conn, err := a.provision(ctx, name, a.workspace)
-	if err != nil {
-		return fmt.Errorf("connect legacy workspace sandbox: %w", err)
-	}
-	list, err := conn.remote.ListSessions(ctx, "")
-	if err != nil {
-		a.releaseConnection(context.WithoutCancel(ctx), name, false)
-		return err
-	}
-	a.mu.Lock()
-	for i := range list {
-		if a.records[list[i].SessionID] != nil {
-			continue
-		}
-		a.records[list[i].SessionID] = &record{
-			SessionID: list[i].SessionID, Sandbox: name, WorkingDir: list[i].WorkingDir,
-			Summary: list[i], Attributes: cloneMap(list[i].Attributes),
-		}
-	}
-	a.legacyImported = true
-	saveErr := a.saveLocked()
-	a.mu.Unlock()
-	a.releaseConnection(context.WithoutCancel(ctx), name, false)
-	if len(list) != 0 {
-		a.log.Info("imported legacy workspace sandbox sessions", "sandbox", name, "sessions", len(list))
-	}
-	return saveErr
 }
 
 func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, error) {
@@ -335,6 +273,9 @@ func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, e
 }
 
 func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*connection, error) {
+	if a.callbackHandler == nil || strings.TrimSpace(a.sessionStoreToken) == "" {
+		return nil, errors.New("sandbox adapter: stdio callback handler and store token are required")
+	}
 	a.mu.Lock()
 	closed := a.closed
 	a.mu.Unlock()
@@ -348,45 +289,54 @@ func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*conn
 	runner, err := sandboxrunner.Start(ctx, a.client, sandboxrunner.Options{
 		Workspace: a.workspace, AdditionalWorkspaces: extra, Kit: a.kit,
 		PluginDir: a.pluginDir, Name: name, Template: a.template, CPUs: a.cpus, Memory: a.memory,
+		SessionStoreToken: a.sessionStoreToken,
 	})
 	if err != nil {
 		return nil, err
 	}
-	readyCtx, cancel := context.WithTimeout(ctx, a.readyTimeout)
-	defer cancel()
-	if err := sandboxrunner.WaitReady(readyCtx, runner.Endpoint, runner.Token); err != nil {
+	if runner.Process == nil {
+		return nil, errors.New("sandbox runner returned no stdio process")
+	}
+	peer, err := stdiomux.New(runner.Process.Stdout, runner.Process.Stdin, stdiomux.Host)
+	if err != nil {
+		_ = runner.Process.Close()
 		return nil, err
 	}
+	conn := &connection{runner: runner, peer: peer, server: &http.Server{Handler: a.callbackHandler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}}
+	go func() { _, _ = io.Copy(os.Stderr, runner.Process.Stderr) }()
+	go func() { _ = runner.Process.Wait(); _ = peer.Close() }()
+	go func() { _ = conn.server.Serve(peer) }()
 	remoteAdapter, err := remote.New(remote.Config{
-		Endpoint: runner.Endpoint, Token: runner.Token,
+		Endpoint: "http://runner", Token: runner.Token, DialContext: peer.DialContext,
 		CallbackOrigin: a.callbackOrigin, CallbackToken: a.callbackToken,
 	})
 	if err != nil {
+		a.closeConnection(context.Background(), conn)
 		return nil, err
 	}
-	a.log.Info("session sandbox ready", "sandbox", name, "working_directory", workingDir)
-	return &connection{runner: runner, remote: remoteAdapter}, nil
+	conn.remote = remoteAdapter
+	readyCtx, cancel := context.WithTimeout(ctx, a.readyTimeout)
+	defer cancel()
+	if err := waitReady(readyCtx, remoteAdapter); err != nil {
+		a.closeConnection(context.Background(), conn)
+		return nil, err
+	}
+	a.log.Info("session sandbox ready", "sandbox", name, "working_directory", workingDir, "transport", "stdio")
+	return conn, nil
 }
 
-func (a *Adapter) discardConnection(ctx context.Context, name string) {
+func (a *Adapter) discardConnection(ctx context.Context, conn *connection) {
+	name := conn.runner.Name
 	a.mu.Lock()
 	delete(a.connections, name)
 	a.mu.Unlock()
+	a.closeTransport(conn)
 	if _, err := a.client.Command(ctx, "rm", "-f", name); err != nil {
 		a.log.Warn("remove unused session sandbox", "sandbox", name, "error", err)
 		return
 	}
 	if err := sandboxrunner.RemoveToken(name); err != nil {
 		a.log.Warn("remove unused session sandbox token", "sandbox", name, "error", err)
-	}
-}
-
-func (a *Adapter) releaseIfInactive(ctx context.Context, name string) {
-	a.mu.Lock()
-	inactive := a.active[name] == 0
-	a.mu.Unlock()
-	if inactive {
-		a.releaseConnection(ctx, name, false)
 	}
 }
 
@@ -399,31 +349,56 @@ func (a *Adapter) releaseConnection(ctx context.Context, name string, decrement 
 		a.mu.Unlock()
 		return
 	}
+	conn := a.connections[name]
 	delete(a.connections, name)
 	a.mu.Unlock()
-	if _, err := a.client.Command(ctx, "stop", name); err != nil {
+	if conn != nil {
+		a.closeConnection(ctx, conn)
+	} else if _, err := a.client.Command(ctx, "stop", name); err != nil {
 		a.log.Warn("stop session sandbox", "sandbox", name, "error", err)
 	}
 }
 
-func (a *Adapter) updateSummary(ctx context.Context, conn *connection, sessionID string) {
-	list, err := conn.remote.ListSessions(ctx, "")
-	if err != nil {
-		a.log.Warn("refresh sandbox session summary", "session", sessionID, "error", err)
+func (a *Adapter) closeTransport(conn *connection) {
+	if conn == nil {
 		return
 	}
-	for i := range list {
-		if list[i].SessionID != sessionID {
-			continue
-		}
-		a.mu.Lock()
-		if rec := a.records[sessionID]; rec != nil {
-			rec.Summary = list[i]
-			rec.Attributes = cloneMap(list[i].Attributes)
-			_ = a.saveLocked()
-		}
-		a.mu.Unlock()
+	if conn.remote != nil {
+		_ = conn.remote.Close()
+	}
+	if conn.server != nil {
+		_ = conn.server.Close()
+	}
+	if conn.peer != nil {
+		_ = conn.peer.Close()
+	}
+	if conn.runner.Process != nil {
+		_ = conn.runner.Process.Close()
+	}
+}
+
+func (a *Adapter) closeConnection(ctx context.Context, conn *connection) {
+	if conn == nil {
 		return
+	}
+	a.closeTransport(conn)
+	if _, err := a.client.Command(ctx, "stop", conn.runner.Name); err != nil {
+		a.log.Warn("stop session sandbox", "sandbox", conn.runner.Name, "error", err)
+	}
+}
+
+func waitReady(ctx context.Context, value *remote.Adapter) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := value.Check(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sandbox runner: waiting for stdio readiness: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -442,12 +417,10 @@ func (a *Adapter) load() error {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return err
 	}
-	a.legacyImported = file.LegacyImported
 	for _, rec := range file.Sessions {
 		if rec == nil || rec.SessionID == "" || rec.Sandbox == "" {
 			continue
 		}
-		rec.Summary.Attributes = cloneMap(rec.Attributes)
 		a.records[rec.SessionID] = rec
 	}
 	return nil
@@ -457,11 +430,9 @@ func (a *Adapter) saveLocked() error {
 	if strings.TrimSpace(a.indexFile) == "" {
 		return nil
 	}
-	file := indexFile{Version: 1, LegacyImported: a.legacyImported, Sessions: make([]*record, 0, len(a.records))}
+	file := indexFile{Version: 3, Sessions: make([]*record, 0, len(a.records))}
 	for _, rec := range a.records {
 		copyRecord := *rec
-		copyRecord.Attributes = cloneMap(rec.Attributes)
-		copyRecord.Summary.Attributes = nil
 		file.Sessions = append(file.Sessions, &copyRecord)
 	}
 	sort.Slice(file.Sessions, func(i, j int) bool { return file.Sessions[i].SessionID < file.Sessions[j].SessionID })
@@ -481,18 +452,16 @@ func (a *Adapter) saveLocked() error {
 
 type managedChat struct {
 	adapter.Chat
-	manager   *Adapter
-	conn      *connection
-	sessionID string
-	once      sync.Once
-	err       error
+	manager *Adapter
+	conn    *connection
+	once    sync.Once
+	err     error
 }
 
 func (c *managedChat) Close(ctx context.Context) error {
 	c.once.Do(func() {
 		c.err = c.Chat.Close(ctx)
 		refreshCtx := context.WithoutCancel(ctx)
-		c.manager.updateSummary(refreshCtx, c.conn, c.sessionID)
 		c.manager.releaseConnection(refreshCtx, c.conn.runner.Name, true)
 	})
 	return c.err
@@ -511,17 +480,6 @@ func within(root, candidate string) bool {
 	}
 	rel, err := filepath.Rel(root, candidate)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func cloneMap(input map[string]string) map[string]string {
-	if input == nil {
-		return nil
-	}
-	output := make(map[string]string, len(input))
-	for key, value := range input {
-		output[key] = value
-	}
-	return output
 }
 
 var _ adapter.Adapter = (*Adapter)(nil)

@@ -73,20 +73,13 @@ func EnsureTemplate(ctx context.Context, client *sbx.Client, options TemplateOpt
 		_ = RemoveToken(seedName)
 	}()
 
-	runner, err := Start(ctx, client, Options{
+	_, err = Start(ctx, client, Options{
 		Workspace: workspace, Kit: kit, Name: seedName,
-		CPUs: options.CPUs, Memory: options.Memory,
+		CPUs: options.CPUs, Memory: options.Memory, SkipRunner: true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("sandbox runner template: create seed: %w", err)
 	}
-	readyCtx, cancel := context.WithTimeout(ctx, options.Wait)
-	err = WaitReady(readyCtx, runner.Endpoint, runner.Token)
-	cancel()
-	if err != nil {
-		return "", fmt.Errorf("sandbox runner template: seed readiness: %w", err)
-	}
-
 	// Do not snapshot process state, a session database, or the throwaway seed
 	// token. The executable and startup script remain in the filesystem image.
 	const clean = `
