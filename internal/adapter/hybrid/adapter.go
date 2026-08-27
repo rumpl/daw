@@ -32,6 +32,26 @@ func (a *Adapter) ChatOptions(ctx context.Context, model string, servers []adapt
 	return a.host.ChatOptions(ctx, model, servers)
 }
 
+// ModelsGateway reports the host's value. The host owns this process-wide
+// docker-agent user setting and is the catalog both runtimes share, so reading
+// it there keeps the two from ever appearing to disagree.
+func (a *Adapter) ModelsGateway(ctx context.Context) (string, error) {
+	return a.host.ModelsGateway(ctx)
+}
+
+// SetModelsGateway writes the host setting, then mirrors it into running
+// sandboxes. A sandbox's docker-agent keeps its own user configuration and
+// would otherwise ignore the gateway entirely.
+func (a *Adapter) SetModelsGateway(ctx context.Context, gatewayURL string) error {
+	if err := a.host.SetModelsGateway(ctx, gatewayURL); err != nil {
+		return err
+	}
+	if err := a.sandbox.SetModelsGateway(ctx, gatewayURL); err != nil && !errors.Is(err, adapter.ErrUnsupported) {
+		return fmt.Errorf("models gateway saved on the host but not applied to every running sandbox: %w", err)
+	}
+	return nil
+}
+
 func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error) {
 	result, err := a.host.ListSessions(ctx, workingDir)
 	if err != nil {

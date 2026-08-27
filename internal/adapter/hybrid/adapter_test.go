@@ -85,3 +85,54 @@ func TestResumeRetainsOriginalTarget(t *testing.T) {
 		t.Fatalf("resume routed to wrong adapter: host=%q sandbox=%q", host.LastOpenRequest.ResumeSessionID, sandbox.LastOpenRequest.ResumeSessionID)
 	}
 }
+
+// The host is the authority for the gateway, but a sandbox's docker-agent has
+// its own user configuration, so a write must reach both runtimes.
+func TestSetModelsGatewayReachesHostAndSandbox(t *testing.T) {
+	host := fake.New()
+	sandbox := fake.New()
+	router, err := New(host, sandbox, protocol.ExecutionTargetSandbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := router.SetModelsGateway(t.Context(), "https://gateway.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	hostValue, err := host.ModelsGateway(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxValue, err := sandbox.ModelsGateway(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hostValue != "https://gateway.example.com" {
+		t.Fatalf("host gateway = %q", hostValue)
+	}
+	if sandboxValue != "https://gateway.example.com" {
+		t.Fatalf("sandbox gateway = %q; the runner would ignore the gateway", sandboxValue)
+	}
+}
+
+// Reads come from the host so the two runtimes can never appear to disagree.
+func TestModelsGatewayReadsTheHost(t *testing.T) {
+	host := fake.New()
+	sandbox := fake.New()
+	router, err := New(host, sandbox, protocol.ExecutionTargetSandbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := host.SetModelsGateway(t.Context(), "https://host.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sandbox.SetModelsGateway(t.Context(), "https://drifted.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := router.ModelsGateway(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://host.example.com" {
+		t.Fatalf("ModelsGateway() = %q; want the host value", got)
+	}
+}

@@ -43,7 +43,11 @@ type Config struct {
 	CPUs              int
 	Memory            string
 	ReadyTimeout      time.Duration
-	Logger            *slog.Logger
+	// ModelsGateway reads the host's current gateway setting. The host owns the
+	// value; the sandbox backend only mirrors it into each runner so the
+	// docker-agent inside the sandbox resolves models the same way.
+	ModelsGateway func(context.Context) (string, error)
+	Logger        *slog.Logger
 }
 
 type Adapter struct {
@@ -60,6 +64,7 @@ type Adapter struct {
 	cpus              int
 	memory            string
 	readyTimeout      time.Duration
+	modelsGateway     func(context.Context) (string, error)
 	log               *slog.Logger
 
 	provisionMu sync.Mutex
@@ -135,7 +140,8 @@ func New(config Config) (*Adapter, error) {
 		callbackToken: config.CallbackToken, callbackHandler: config.CallbackHandler,
 		sessionStoreToken: config.SessionStoreToken, cpus: config.CPUs, memory: config.Memory,
 		readyTimeout: config.ReadyTimeout, log: config.Logger,
-		records: map[string]*record{}, connections: map[string]*connection{}, active: map[string]int{},
+		modelsGateway: config.ModelsGateway,
+		records:       map[string]*record{}, connections: map[string]*connection{}, active: map[string]int{},
 	}
 	if err := a.load(); err != nil {
 		return nil, fmt.Errorf("load sandbox session index: %w", err)
@@ -233,6 +239,41 @@ func (a *Adapter) ReadSession(context.Context, string) (adapter.StoredSession, e
 	return adapter.StoredSession{}, adapter.ErrUnsupported
 }
 
+// ModelsGateway reports the host's value. The host owns the setting; the
+// lifecycle backend only mirrors it so the two never disagree.
+func (a *Adapter) ModelsGateway(ctx context.Context) (string, error) {
+	if a.modelsGateway == nil {
+		return "", adapter.ErrUnsupported
+	}
+	return a.modelsGateway(ctx)
+}
+
+// SetModelsGateway mirrors the gateway into every live runner so the
+// docker-agent inside each sandbox resolves models the same way as the host.
+func (a *Adapter) SetModelsGateway(ctx context.Context, gatewayURL string) error {
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return adapter.ErrClosed
+	}
+	live := make([]*connection, 0, len(a.connections))
+	for _, conn := range a.connections {
+		live = append(live, conn)
+	}
+	a.mu.Unlock()
+
+	var failures []error
+	for _, conn := range live {
+		if conn.remote == nil {
+			continue
+		}
+		if err := conn.remote.SetModelsGateway(ctx, gatewayURL); err != nil {
+			failures = append(failures, fmt.Errorf("sandbox %s: %w", conn.runner.Name, err))
+		}
+	}
+	return errors.Join(failures...)
+}
+
 func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
@@ -322,7 +363,26 @@ func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*conn
 		return nil, err
 	}
 	a.log.Info("session sandbox ready", "sandbox", name, "working_directory", workingDir, "transport", "stdio")
+	a.mirrorModelsGateway(ctx, remoteAdapter, name)
 	return conn, nil
+}
+
+// mirrorModelsGateway seeds a freshly started runner with the host's current
+// gateway. A sandbox keeps its own docker-agent user configuration, so without
+// this it would resolve models as if no gateway were set. Failure is not fatal:
+// the sandbox is usable, so warn rather than tear down a working runner.
+func (a *Adapter) mirrorModelsGateway(ctx context.Context, target *remote.Adapter, name string) {
+	if a.modelsGateway == nil {
+		return
+	}
+	gatewayURL, err := a.modelsGateway(ctx)
+	if err != nil {
+		a.log.Warn("read host models gateway for sandbox", "sandbox", name, "error", err)
+		return
+	}
+	if err := target.SetModelsGateway(ctx, gatewayURL); err != nil {
+		a.log.Warn("apply models gateway to sandbox", "sandbox", name, "error", err)
+	}
 }
 
 func (a *Adapter) discardConnection(ctx context.Context, conn *connection) {

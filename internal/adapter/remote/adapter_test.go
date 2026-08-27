@@ -158,3 +158,37 @@ func TestRunnerRejectsMissingToken(t *testing.T) {
 		t.Fatalf("status = %d", response.Code)
 	}
 }
+
+// The runner keeps its own docker-agent user configuration, so the host must be
+// able to read and write the sandbox's gateway over the runner API.
+func TestModelsGatewayRoundTripsToTheRunner(t *testing.T) {
+	const token = "test-runner-token"
+	local := fake.New()
+	api := runnerapi.New(local, token)
+	server := httptest.NewServer(api)
+	t.Cleanup(func() { server.Close(); api.Shutdown(context.Background()) })
+
+	client, err := remote.New(remote.Config{Endpoint: server.URL, Token: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, gatewayErr := client.ModelsGateway(t.Context()); gatewayErr != nil || got != "" {
+		t.Fatalf("ModelsGateway() = %q, %v; want empty", got, gatewayErr)
+	}
+	if err := client.SetModelsGateway(t.Context(), "https://gateway.example.com/"); err != nil {
+		t.Fatal(err)
+	}
+	// The runner-side adapter canonicalizes the value, and the host must observe
+	// what the sandbox actually stored rather than what it sent.
+	got, err := client.ModelsGateway(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://gateway.example.com" {
+		t.Fatalf("ModelsGateway() = %q after set", got)
+	}
+	direct, err := local.ModelsGateway(t.Context())
+	if err != nil || direct != got {
+		t.Fatalf("runner adapter holds %q, remote reported %q (err %v)", direct, got, err)
+	}
+}

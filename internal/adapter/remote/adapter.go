@@ -105,6 +105,23 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 func (a *Adapter) Check(ctx context.Context) error {
 	return a.do(ctx, http.MethodGet, "/v1/health", nil, nil)
 }
+
+// ModelsGateway reads the gateway from the sandbox's own docker-agent, which
+// keeps its user configuration separate from the host's.
+func (a *Adapter) ModelsGateway(ctx context.Context) (string, error) {
+	var value protocol.ModelsGatewayConfig
+	if err := a.do(ctx, http.MethodGet, "/v1/settings/models-gateway", nil, &value); err != nil {
+		return "", err
+	}
+	return value.URL, nil
+}
+
+// SetModelsGateway mirrors the host's gateway into the sandbox so the runner's
+// docker-agent resolves models through the same gateway as the host.
+func (a *Adapter) SetModelsGateway(ctx context.Context, gatewayURL string) error {
+	return a.do(ctx, http.MethodPut, "/v1/settings/models-gateway", protocol.UpdateModelsGatewayRequest{URL: gatewayURL}, nil)
+}
+
 func (a *Adapter) Close() error { a.transport.CloseIdleConnections(); return nil }
 
 func (a *Adapter) prepareServers(servers []adapter.MCPServer) []adapter.MCPServer {

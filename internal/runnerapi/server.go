@@ -120,6 +120,8 @@ func (s *Server) routes() {
 		s.json(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	m.HandleFunc("GET /v1/info", s.info)
+	m.HandleFunc("GET /v1/settings/models-gateway", s.modelsGateway)
+	m.HandleFunc("PUT /v1/settings/models-gateway", s.setModelsGateway)
 	m.HandleFunc("GET /v1/sessions", s.sessions)
 	m.HandleFunc("GET /v1/sessions/{id}", s.readSession)
 	m.HandleFunc("POST /v1/options", s.options)
@@ -145,6 +147,23 @@ func (s *Server) routes() {
 func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 	value, err := s.adapter.Info(r.Context())
 	s.respond(w, value, err)
+}
+
+// The sandbox runs its own docker-agent with its own user configuration, so
+// the models gateway must be mirrored into it: the host is the authority and
+// pushes the current value on provisioning and on every change.
+func (s *Server) modelsGateway(w http.ResponseWriter, r *http.Request) {
+	value, err := s.adapter.ModelsGateway(r.Context())
+	s.respond(w, protocol.ModelsGatewayConfig{URL: value}, err)
+}
+
+func (s *Server) setModelsGateway(w http.ResponseWriter, r *http.Request) {
+	request, ok := decode[protocol.UpdateModelsGatewayRequest](w, r)
+	if !ok {
+		return
+	}
+	err := s.adapter.SetModelsGateway(r.Context(), request.URL)
+	s.respond(w, protocol.ModelsGatewayConfig(request), err)
 }
 
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {

@@ -179,6 +179,9 @@ func run() error {
 				CallbackHandler: sandboxCallbacks, SessionStoreToken: storeBridgeToken,
 				CPUs: sandboxCPUs, Memory: strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_MEMORY")),
 				ReadyTimeout: readyTimeout, Logger: log,
+				// The host is the single source of truth for the gateway; each new
+				// sandbox is seeded with its current value on startup.
+				ModelsGateway: hostAdapter.ModelsGateway,
 			})
 			if adapterErr != nil {
 				return adapterErr
