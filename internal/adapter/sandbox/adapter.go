@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	agentsandbox "github.com/docker/docker-agent/pkg/sandbox"
 	"github.com/docker/docker-agent/pkg/version"
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/remote"
@@ -79,10 +80,11 @@ type Adapter struct {
 const currentTransport = "stdio-v1"
 
 type record struct {
-	SessionID  string `json:"sessionId"`
-	Sandbox    string `json:"sandbox"`
-	WorkingDir string `json:"workingDir"`
-	Transport  string `json:"transport"`
+	SessionID       string `json:"sessionId"`
+	Sandbox         string `json:"sandbox"`
+	WorkingDir      string `json:"workingDir"`
+	Transport       string `json:"transport"`
+	GatewayAuthHost string `json:"gatewayAuthHost,omitempty"`
 }
 
 type indexFile struct {
@@ -208,13 +210,14 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 		return nil, err
 	}
 
-	rec := &record{SessionID: chat.SessionID(), Sandbox: conn.runner.Name, WorkingDir: request.WorkingDir, Transport: currentTransport}
+	rec := &record{SessionID: chat.SessionID(), Sandbox: conn.runner.Name, WorkingDir: request.WorkingDir, Transport: currentTransport, GatewayAuthHost: conn.runner.GatewayAuthHost}
 	a.mu.Lock()
 	if existing := a.records[chat.SessionID()]; existing != nil {
 		rec = existing
 		rec.Sandbox = conn.runner.Name
 		rec.WorkingDir = request.WorkingDir
 		rec.Transport = currentTransport
+		rec.GatewayAuthHost = conn.runner.GatewayAuthHost
 	}
 	a.records[chat.SessionID()] = rec
 	a.connections[conn.runner.Name] = conn
@@ -303,7 +306,19 @@ func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, e
 		return conn, nil
 	}
 	a.mu.Unlock()
-	conn, err := a.provision(ctx, rec.Sandbox, rec.WorkingDir)
+	gatewayURL, authHost, err := a.currentGateway(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if rec.GatewayAuthHost != authHost {
+		// Credential proxy declarations are fixed when a sandbox is created.
+		// Recreate a stopped sandbox when Docker gateway auth was added,
+		// removed, or moved; session history remains host-owned.
+		if _, removeErr := a.client.Command(ctx, "rm", "-f", rec.Sandbox); removeErr != nil {
+			return nil, fmt.Errorf("replace sandbox after models gateway change: %w", removeErr)
+		}
+	}
+	conn, err := a.provisionWithGateway(ctx, rec.Sandbox, rec.WorkingDir, gatewayURL)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +329,14 @@ func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, e
 }
 
 func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*connection, error) {
+	gatewayURL, _, err := a.currentGateway(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.provisionWithGateway(ctx, name, workingDir, gatewayURL)
+}
+
+func (a *Adapter) provisionWithGateway(ctx context.Context, name, workingDir, gatewayURL string) (*connection, error) {
 	if a.callbackHandler == nil || strings.TrimSpace(a.sessionStoreToken) == "" {
 		return nil, errors.New("sandbox adapter: stdio callback handler and store token are required")
 	}
@@ -330,7 +353,7 @@ func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*conn
 	runner, err := sandboxrunner.Start(ctx, a.client, sandboxrunner.Options{
 		Workspace: a.workspace, AdditionalWorkspaces: extra, Kit: a.kit,
 		PluginDir: a.pluginDir, Name: name, Template: a.template, CPUs: a.cpus, Memory: a.memory,
-		SessionStoreToken: a.sessionStoreToken,
+		SessionStoreToken: a.sessionStoreToken, ModelsGateway: gatewayURL,
 	})
 	if err != nil {
 		return nil, err
@@ -363,26 +386,30 @@ func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*conn
 		return nil, err
 	}
 	a.log.Info("session sandbox ready", "sandbox", name, "working_directory", workingDir, "transport", "stdio")
-	a.mirrorModelsGateway(ctx, remoteAdapter, name)
+	if err := remoteAdapter.SetModelsGateway(ctx, gatewayURL); err != nil {
+		a.log.Warn("apply models gateway to sandbox", "sandbox", name, "error", err)
+	}
 	return conn, nil
 }
 
-// mirrorModelsGateway seeds a freshly started runner with the host's current
-// gateway. A sandbox keeps its own docker-agent user configuration, so without
-// this it would resolve models as if no gateway were set. Failure is not fatal:
-// the sandbox is usable, so warn rather than tear down a working runner.
-func (a *Adapter) mirrorModelsGateway(ctx context.Context, target *remote.Adapter, name string) {
+// currentGateway reads the host setting before sandbox creation, when its
+// authentication mixin and network policy still can be configured.
+func (a *Adapter) currentGateway(ctx context.Context) (gatewayURL, authHost string, err error) {
 	if a.modelsGateway == nil {
-		return
+		return "", "", nil
 	}
-	gatewayURL, err := a.modelsGateway(ctx)
+	gatewayURL, err = a.modelsGateway(ctx)
 	if err != nil {
-		a.log.Warn("read host models gateway for sandbox", "sandbox", name, "error", err)
-		return
+		return "", "", fmt.Errorf("read host models gateway for sandbox: %w", err)
 	}
-	if err := target.SetModelsGateway(ctx, gatewayURL); err != nil {
-		a.log.Warn("apply models gateway to sandbox", "sandbox", name, "error", err)
+	loginKit, err := agentsandbox.LoginKit(gatewayURL)
+	if err != nil {
+		return "", "", fmt.Errorf("create Docker gateway login kit: %w", err)
 	}
+	if loginKit != "" {
+		authHost = filepath.Base(loginKit)
+	}
+	return gatewayURL, authHost, nil
 }
 
 func (a *Adapter) discardConnection(ctx context.Context, conn *connection) {

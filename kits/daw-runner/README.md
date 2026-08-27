@@ -127,7 +127,14 @@ it is not baked into the reusable template.
 
 Actual model keys remain in the host-side `sbx secret` store. The sandbox sees
 only `proxy-managed`, and the host proxy replaces provider authorization headers
-according to the kit declarations. The kit intentionally has no
+according to the kit declarations. When the configured models gateway is a
+Docker HTTPS endpoint, DAW composes Docker Agent's generated `sbx-login` mixin
+into each new session sandbox. That mixin exposes only a proxy sentinel and has
+the host proxy inject a fresh Docker login token for the exact gateway hostname;
+the token never enters the VM. DAW also allowlists the configured gateway in the
+sandbox network policy. Because credential policy is fixed at creation, a
+stopped session sandbox is recreated on resume if its Docker gateway hostname
+changed; host-owned session history is retained. The kit intentionally has no
 `setup.startup` runner hook: after `sbx run` completes, DAW starts the runner
 exactly once through `sbx exec`, placing it in the fully initialized
 credential-proxy process context before it accepts model requests. The Docker

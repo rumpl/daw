@@ -46,7 +46,7 @@ func TestIndexContainsLifecycleMetadataOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.records["session"] = &record{SessionID: "session", Sandbox: "daw-session-test", WorkingDir: "/worktrees/child"}
+	a.records["session"] = &record{SessionID: "session", Sandbox: "daw-session-test", WorkingDir: "/worktrees/child", GatewayAuthHost: "ai-gateway.docker.com"}
 	if err := a.saveLocked(); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestIndexContainsLifecycleMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := reloaded.records["session"]
-	if got == nil || got.WorkingDir != "/worktrees/child" {
+	if got == nil || got.WorkingDir != "/worktrees/child" || got.GatewayAuthHost != "ai-gateway.docker.com" {
 		t.Fatalf("reloaded record = %#v", got)
 	}
 	data, err := os.ReadFile(index)

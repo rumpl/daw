@@ -70,6 +70,51 @@ func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 	}
 }
 
+func TestStartAddsDockerGatewayLoginKitAndNetworkPolicy(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "args")
+	binary := filepath.Join(dir, "sbx")
+	script := `#!/bin/sh
+if [ "$1" = ports ]; then exit 1; fi
+printf '%s\n' "$*" >>"` + logFile + `"
+`
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kit := filepath.Join(dir, "kit")
+	runnerBinary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")
+	if err := os.MkdirAll(filepath.Dir(runnerBinary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runnerBinary, []byte("runner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kit, "spec.yaml"), []byte("schemaVersion: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	name := "gateway-test-" + filepath.Base(dir)
+	t.Cleanup(func() { _ = RemoveToken(name) })
+	got, err := Start(t.Context(), sbx.New(sbx.WithBinary(binary)), Options{
+		Workspace: dir, Kit: kit, Name: name, SkipRunner: true,
+		ModelsGateway: "https://ai-gateway.docker.com/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GatewayAuthHost != "ai-gateway.docker.com" {
+		t.Fatalf("gateway auth host = %q", got.GatewayAuthHost)
+	}
+	commands, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sandbox-login-kit/ai-gateway.docker.com", "policy allow network --sandbox " + name + " ai-gateway.docker.com"} {
+		if !strings.Contains(string(commands), want) {
+			t.Fatalf("sbx commands do not contain %q:\n%s", want, commands)
+		}
+	}
+}
+
 func TestStageKitOmitsRunnerWhenTemplateContainsIt(t *testing.T) {
 	kit := t.TempDir()
 	binary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")

@@ -9,11 +9,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	agentsandbox "github.com/docker/docker-agent/pkg/sandbox"
 	sbx "github.com/rumpl/go-sbx"
 )
 
@@ -38,15 +41,20 @@ type Options struct {
 	Memory    string
 	// SessionStoreToken authenticates reverse store RPC carried over stdio.
 	SessionStoreToken string
+	// ModelsGateway is the host's current models gateway. Docker gateways add
+	// docker-agent's login mixin kit when the sandbox is created; all gateways
+	// are added to the sandbox network policy before the runner starts.
+	ModelsGateway string
 	// SkipRunner materializes the kit without starting the process. It is used
 	// only while baking a template, before the host store bridge exists.
 	SkipRunner bool
 }
 
 type Runner struct {
-	Name    string
-	Token   string
-	Process *sbx.Process
+	Name            string
+	Token           string
+	GatewayAuthHost string
+	Process         *sbx.Process
 }
 
 // DefaultName returns a stable sandbox name without putting an absolute host
@@ -123,11 +131,21 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 		return Runner{}, err
 	}
 	defer cleanup()
+	loginKit, err := agentsandbox.LoginKit(strings.TrimSpace(options.ModelsGateway))
+	if err != nil {
+		return Runner{}, fmt.Errorf("sandbox runner: create Docker gateway login kit: %w", err)
+	}
+	gatewayAuthHost := ""
+	kits := []string{stagedKit}
+	if loginKit != "" {
+		kits = append(kits, loginKit)
+		gatewayAuthHost = filepath.Base(loginKit)
+	}
 
 	runOptions := sbx.RunOptions{
 		SandboxOptions: sbx.SandboxOptions{
 			Agent: AgentName, Workspaces: workspaces, Name: name,
-			Kits: []string{stagedKit}, Template: strings.TrimSpace(options.Template),
+			Kits: kits, Template: strings.TrimSpace(options.Template),
 		},
 		Detached: true,
 	}
@@ -145,8 +163,9 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: start %q: %w", name, err)
 	}
+	allowGatewayHost(ctx, client, name, options.ModelsGateway)
 	if options.SkipRunner {
-		return Runner{Name: name, Token: token}, nil
+		return Runner{Name: name, Token: token, GatewayAuthHost: gatewayAuthHost}, nil
 	}
 	// Start the runner once through the normal exec path after sbx run completes.
 	// setup.startup is deliberately not used because that launch context can see
@@ -155,7 +174,26 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	if err != nil {
 		return Runner{}, err
 	}
-	return Runner{Name: name, Token: token, Process: process}, nil
+	return Runner{Name: name, Token: token, GatewayAuthHost: gatewayAuthHost, Process: process}, nil
+}
+
+// allowGatewayHost opens only the configured gateway authority in the
+// sandbox's default-deny proxy. Credential injection remains restricted by the
+// login kit to the exact trusted Docker hostname.
+func allowGatewayHost(ctx context.Context, client *sbx.Client, name, rawURL string) {
+	if strings.TrimSpace(rawURL) == "" {
+		return
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || strings.ContainsAny(u.Host, ", \t") {
+		slog.WarnContext(ctx, "models gateway host cannot be allowed in sandbox", "sandbox", name, "gateway", rawURL)
+		return
+	}
+	if _, err := client.Command(ctx, "policy", "allow", "network", "--sandbox", name, u.Host); err != nil {
+		// Older sandbox backends may not expose mutable policy. Let the runner
+		// continue: its inherited policy may already allow this endpoint.
+		slog.WarnContext(ctx, "allow models gateway in sandbox", "sandbox", name, "host", u.Host, "error", err)
+	}
 }
 
 func startRunner(ctx context.Context, client *sbx.Client, name, storeToken string) (*sbx.Process, error) {
