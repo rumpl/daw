@@ -28,6 +28,14 @@
         "to": "backend/dawui"
       },
       {
+        "from": "../bin/daw-sandbox",
+        "to": "backend/daw-sandbox"
+      },
+      {
+        "from": "../kits/daw-runner",
+        "to": "kits/daw-runner"
+      },
+      {
         "from": "build/icon.png",
         "to": "icon.png"
       }
@@ -40,7 +48,8 @@
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "binaries": [
-        "Contents/Resources/backend/dawui"
+        "Contents/Resources/backend/dawui",
+        "Contents/Resources/backend/daw-sandbox"
       ],
       "target": [
         "dmg",

@@ -127,6 +127,16 @@ func (s *RemoteStore) GetSession(ctx context.Context, id string) (*session.Sessi
 	restoreParentLinks(value.Session, value.ParentID)
 	return value.Session, nil
 }
+func (s *RemoteStore) GetSessionByOrigin(ctx context.Context, id, origin string) (*session.Session, error) {
+	value, err := s.GetSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if value.Origin != origin {
+		return nil, session.ErrNotFound
+	}
+	return value, nil
+}
 func (s *RemoteStore) GetSessions(ctx context.Context) ([]*session.Session, error) {
 	var wire []sessionRequest
 	if err := s.query(ctx, http.MethodGet, "/v1/store/sessions", nil, &wire); err != nil {

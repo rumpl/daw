@@ -8,7 +8,9 @@ const { Readable } = require('node:stream');
 
 const APP_SCHEME = 'daw';
 const APP_HOST = 'localhost';
-const STARTUP_TIMEOUT_MS = 30_000;
+// The first sandbox-enabled launch may need to bake the reusable runner
+// template before the dashboard creates its socket.
+const STARTUP_TIMEOUT_MS = 180_000;
 const APP_ICON = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.png')
   : path.join(__dirname, 'build', 'icon.png');
@@ -34,9 +36,19 @@ let backend = null;
 let socketDirectory = null;
 let quitting = false;
 
-function backendPath() {
+function dashboardPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'backend', 'dawui');
   return path.resolve(__dirname, '..', 'bin', 'dawui');
+}
+
+function sandboxLauncherPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'backend', 'daw-sandbox');
+  return path.resolve(__dirname, '..', 'bin', 'daw-sandbox');
+}
+
+function runnerKitPath() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'kits', 'daw-runner');
+  return path.resolve(__dirname, '..', 'kits', 'daw-runner');
 }
 
 function makeSocketPath() {
@@ -92,12 +104,25 @@ function loginShellEnvironment() {
 }
 
 function startBackend(socketPath) {
-  const executable = backendPath();
-  if (!fs.existsSync(executable)) {
-    throw new Error(`Backend executable not found at ${executable}. Run \`make electron\` from the repository root.`);
+  const executable = sandboxLauncherPath();
+  const dashboard = dashboardPath();
+  const kit = runnerKitPath();
+  for (const required of [executable, dashboard, kit]) {
+    if (!fs.existsSync(required)) {
+      throw new Error(`Sandbox backend resource not found at ${required}. Run \`make electron\` from the repository root.`);
+    }
   }
 
-  backend = spawn(executable, [], {
+  // The desktop app exposes both execution targets, but provisions one Docker
+  // Sandbox per session and selects it as the default. Mounting the user's home
+  // as the sandbox workspace lets projects selected later in the UI remain
+  // available without restarting the Electron host.
+  backend = spawn(executable, [
+    '-per-session',
+    '-workspace', os.homedir(),
+    '-dashboard', dashboard,
+    '-kit', kit,
+  ], {
     env: {
       ...process.env,
       ...loginShellEnvironment(),

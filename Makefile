@@ -5,12 +5,13 @@
 
 SHELL := /bin/bash
 BIN := bin/dawui
+SANDBOX_BIN := bin/daw-sandbox
 RUNNER_KIT_BIN := kits/daw-runner/files/home/.local/lib/daw-runner
 PORT ?= 4788
 GO ?= go
 
 .PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
-        ci build build-web build-go build-runner-kit start start-sandbox electron package-electron clean smoke-real screenshots help
+        ci build build-web build-go build-sandbox-launcher build-runner-kit start start-sandbox electron package-electron clean smoke-real screenshots help
 
 all: build
 
@@ -114,6 +115,11 @@ build-go:
 	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
 	  -o $(BIN) ./cmd/dawui
 
+## build-sandbox-launcher: compile the host-side per-session sandbox launcher
+build-sandbox-launcher:
+	mkdir -p $(dir $(SANDBOX_BIN))
+	$(GO) build -trimpath -o $(SANDBOX_BIN) ./cmd/daw-sandbox
+
 ## build-runner-kit: cross-compile the code-defined Linux runner into the local sandbox kit
 build-runner-kit:
 	mkdir -p $(dir $(RUNNER_KIT_BIN))
@@ -133,12 +139,12 @@ start-sandbox: build build-runner-kit
 $(BIN):
 	$(MAKE) build
 
-## electron: build and launch the Electron desktop app (backend uses a UDS)
-electron: build electron-deps
+## electron: build and launch the sandbox-first Electron desktop app (backend uses a UDS)
+electron: build build-sandbox-launcher build-runner-kit electron-deps
 	cd electron && npm start
 
-## package-electron: create a native Electron artifact in electron/dist
-package-electron: build electron-deps
+## package-electron: create a sandbox-first native Electron artifact in electron/dist
+package-electron: build build-sandbox-launcher build-runner-kit electron-deps
 	cd electron && npm run dist
 
 ## screenshots: capture desktop + mobile UI screenshots against the fake adapter
@@ -154,7 +160,7 @@ smoke-real:
 
 clean:
 	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules electron/node_modules electron/dist
-	rm -f $(RUNNER_KIT_BIN)
+	rm -f $(SANDBOX_BIN) $(RUNNER_KIT_BIN)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'

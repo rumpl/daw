@@ -141,9 +141,13 @@ make electron          # build the UI/backend and launch Electron
 make package-electron  # write a DMG/ZIP or AppImage to electron/dist
 ```
 
-Electron starts the Go backend itself. It does **not** reserve a TCP port: the
-backend listens on an owner-only Unix domain socket, and Electron exposes that
-HTTP stream to the renderer through the private `daw://localhost` protocol.
+Electron starts the Go backend through the per-session sandbox launcher. Docker
+Sandbox is available and selected by default for new chats; the host target
+remains available in the composer. The packaged app includes the Linux runner
+kit and builds/reuses its content-addressed sandbox template on startup. It does
+**not** reserve a TCP port: the backend listens on an owner-only Unix domain
+socket, and Electron exposes that HTTP stream to the renderer through the
+private `daw://localhost` protocol.
 API calls, uploads, dynamic plugin modules and SSE all use that transport. The
 packaged app contains the Go backend and embedded frontend, so no separately
 installed server is needed. On macOS and Linux the desktop host imports your
