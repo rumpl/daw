@@ -5,6 +5,7 @@ go 1.26.5
 require (
 	github.com/docker/docker-agent v1.124.0
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/rumpl/go-sbx v0.0.0-20260827195633-6e5c60a09409
 )
 
 require (

@@ -80,7 +80,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 
 	first.workspaces.Add("ws", root)
 	recorder := httptest.NewRecorder()
-	first.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "", "", nil, "", "")
+	first.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "", "", nil, "", "", "")
 	if recorder.Code != 201 {
 		t.Fatalf("open new chat: %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestOpenChatRestoresPreferencesAndBindsDefaultsToSession(t *testing.T) {
 	secondFake.Seed(ref.SessionID, "Existing", root, nil)
 	second.workspaces.Add("ws", root)
 	recorder = httptest.NewRecorder()
-	second.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats/resume", http.NoBody), "ws", ref.SessionID, "", nil, "", "")
+	second.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats/resume", http.NoBody), "ws", ref.SessionID, "", nil, "", "", "")
 	if recorder.Code != 201 {
 		t.Fatalf("resume chat: %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -166,7 +166,7 @@ func TestGlobalToolFilterUpdatesLiveChats(t *testing.T) {
 	s := newPreferenceTestServer(t, root, "")
 	s.workspaces.Add("ws", root)
 	recorder := httptest.NewRecorder()
-	s.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "", "", nil, "", "")
+	s.openChat(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody), "ws", "", "", nil, "", "", "")
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("open chat: %d %s", recorder.Code, recorder.Body.String())
 	}

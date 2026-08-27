@@ -148,6 +148,29 @@ func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace) {
 	return decodeJSON[protocol.ChatRef](h.t, resp), ws
 }
 
+func TestCreateChatPassesAvailableExecutionTarget(t *testing.T) {
+	h := newHarness(t)
+	ws := h.openWorkspace()
+	response := h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{
+		WorkspaceID: ws.WorkspaceID, ExecutionTarget: protocol.ExecutionTargetHost,
+	})
+	t.Cleanup(func() { response.Body.Close() })
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("create host chat: %d", response.StatusCode)
+	}
+	if h.fake.LastOpenRequest.ExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("adapter execution target = %q", h.fake.LastOpenRequest.ExecutionTarget)
+	}
+
+	invalid := h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{
+		WorkspaceID: ws.WorkspaceID, ExecutionTarget: protocol.ExecutionTargetSandbox,
+	})
+	defer invalid.Body.Close()
+	if invalid.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unavailable target status = %d", invalid.StatusCode)
+	}
+}
+
 func TestStoredSessionReadDoesNotOpenChatAndPaginates(t *testing.T) {
 	h := newHarness(t)
 	items := []protocol.Item{
@@ -261,6 +284,9 @@ func TestHealthAndBootstrap(t *testing.T) {
 	if b.Sandboxed {
 		t.Fatal("bootstrap must never claim to be sandboxed")
 	}
+	if len(b.ExecutionTargets) != 1 || b.ExecutionTargets[0].Value != protocol.ExecutionTargetHost || b.DefaultExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("host execution targets = %#v, default %q", b.ExecutionTargets, b.DefaultExecutionTarget)
+	}
 	found := false
 	for _, n := range b.Notices {
 		if n.Code == "no_sandbox" {
@@ -269,6 +295,135 @@ func TestHealthAndBootstrap(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("bootstrap must carry the no-sandbox notice")
+	}
+}
+
+func TestSandboxedBootstrap(t *testing.T) {
+	root := t.TempDir()
+	guard, _, err := pathsec.NewGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := fake.New()
+	server := httpapi.New(httpapi.Options{
+		Adapter: adapter, Guard: guard, AppVersion: "test", Sandboxed: true,
+		ExecutionTargets: []protocol.ExecutionTargetOption{
+			{Value: protocol.ExecutionTargetSandbox, Label: "Docker Sandbox"},
+			{Value: protocol.ExecutionTargetHost, Label: "Host"},
+		},
+		DefaultExecutionTarget: protocol.ExecutionTargetSandbox,
+		ChatPreferencesFile:    filepath.Join(t.TempDir(), "preferences.json"),
+		PluginDir:              t.TempDir(), PluginDataDir: t.TempDir(),
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	request.Host = "127.0.0.1"
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("bootstrap: %d", response.Code)
+	}
+	var bootstrap protocol.Bootstrap
+	if err := json.Unmarshal(response.Body.Bytes(), &bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if !bootstrap.Sandboxed {
+		t.Fatal("sandbox runner bootstrap did not report isolation")
+	}
+	if len(bootstrap.ExecutionTargets) != 2 || bootstrap.DefaultExecutionTarget != protocol.ExecutionTargetSandbox {
+		t.Fatalf("hybrid execution targets = %#v, default %q", bootstrap.ExecutionTargets, bootstrap.DefaultExecutionTarget)
+	}
+	for _, notice := range bootstrap.Notices {
+		if notice.Code == "no_sandbox" {
+			t.Fatal("sandbox runner bootstrap included the host-only no-sandbox notice")
+		}
+	}
+
+	patch := httptest.NewRequest(http.MethodPatch, "/api/chat-options/execution-target", strings.NewReader(`{"executionTarget":"host"}`))
+	patch.Host = "127.0.0.1"
+	patch.Header.Set("Content-Type", "application/json")
+	patch.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
+	patch.Header.Set("Sec-Fetch-Site", "same-origin")
+	patched := httptest.NewRecorder()
+	server.ServeHTTP(patched, patch)
+	if patched.Code != http.StatusOK {
+		t.Fatalf("save execution target: %d %s", patched.Code, patched.Body.String())
+	}
+	var saved protocol.ExecutionTargetPreference
+	if err := json.Unmarshal(patched.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.ExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("saved execution target = %q", saved.ExecutionTarget)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	request.Host = "127.0.0.1"
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if err := json.Unmarshal(response.Body.Bytes(), &bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if bootstrap.DefaultExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("persisted bootstrap target = %q", bootstrap.DefaultExecutionTarget)
+	}
+
+	openBody, _ := json.Marshal(protocol.OpenWorkspaceRequest{Path: root})
+	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/open", bytes.NewReader(openBody))
+	request.Host = "127.0.0.1"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	var workspace protocol.Workspace
+	if err := json.Unmarshal(response.Body.Bytes(), &workspace); err != nil {
+		t.Fatal(err)
+	}
+	createBody, _ := json.Marshal(protocol.CreateChatRequest{WorkspaceID: workspace.WorkspaceID})
+	request = httptest.NewRequest(http.MethodPost, "/api/chats", bytes.NewReader(createBody))
+	request.Host = "127.0.0.1"
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create with persisted target: %d %s", response.Code, response.Body.String())
+	}
+	if adapter.LastOpenRequest.ExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("new chat inherited target %q", adapter.LastOpenRequest.ExecutionTarget)
+	}
+}
+
+func TestMCPBridgeIsAuthenticatedAndBackendScoped(t *testing.T) {
+	root := t.TempDir()
+	guard, _, err := pathsec.NewGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httpapi.New(httpapi.Options{
+		Adapter: fake.New(), Guard: guard, PluginDir: t.TempDir(), PluginDataDir: t.TempDir(),
+	})
+	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
+	bridge := server.MCPBridge("bridge-secret")
+
+	request := httptest.NewRequest(http.MethodPost, "/api/bootstrap", nil)
+	response := httptest.NewRecorder()
+	bridge.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token status = %d", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/chats", nil)
+	request.Header.Set(httpapi.CSRFHeader, "bridge-secret")
+	request.Header.Set("X-DAW-Plugin-Token", "bridge-secret")
+	request.Header.Set("X-DAW-Plugin-ID", "example")
+	response = httptest.NewRecorder()
+	bridge.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("out-of-scope path status = %d", response.Code)
 	}
 }
 

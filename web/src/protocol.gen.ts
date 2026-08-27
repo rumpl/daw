@@ -5,6 +5,7 @@ export type DashboardEventType = 'snapshot' | 'sessions_changed' | 'plugins_chan
 export type DeliveryMode = 'normal' | 'steer' | 'followUp';
 export type ElicitationAction = 'accept' | 'decline' | 'cancel';
 export type EventType = 'snapshot' | 'run_status' | 'message_item' | 'assistant_delta' | 'assistant_end' | 'reasoning_delta' | 'reasoning_end' | 'tool_start' | 'tool_update' | 'tool_end' | 'tool_confirmation' | 'tool_confirmation_resolved' | 'elicitation' | 'elicitation_resolved' | 'transfer' | 'usage' | 'notice' | 'summary' | 'session_meta' | 'gap' | 'chat_closed';
+export type ExecutionTarget = 'host' | 'sandbox';
 export type ItemKind = 'message' | 'tool' | 'transfer' | 'notice' | 'summary';
 export type NoticeLevel = 'info' | 'warning' | 'error';
 export type RunState = 'idle' | 'running' | 'stopping';
@@ -159,6 +160,7 @@ export interface SessionMeta {
   model: string;
   thinkingLevel: string;
   thinkingLevels: Array<string> | null;
+  executionTarget?: ExecutionTarget;
   permissions: PermissionsView;
   createdAt: string;
   parentSessionId?: string;
@@ -174,6 +176,7 @@ export interface StoredSessionMeta {
   workingDir: string;
   agentName: string;
   model: string;
+  executionTarget?: ExecutionTarget;
   createdAt: string;
   parentSessionId?: string;
   rootSessionId?: string;
@@ -264,6 +267,12 @@ export interface Health {
   uptimeSeconds: number;
 }
 
+export interface ExecutionTargetOption {
+  value: ExecutionTarget;
+  label: string;
+  description: string;
+}
+
 export interface WorkspaceHint {
   path: string;
   label: string;
@@ -280,6 +289,8 @@ export interface Bootstrap {
   pluginDir: string;
   csrfToken: string;
   sandboxed: boolean;
+  executionTargets: Array<ExecutionTargetOption> | null;
+  defaultExecutionTarget: ExecutionTarget;
   modelsAvailable: boolean;
   modelsHint: string;
   workspaceHints: Array<WorkspaceHint> | null;
@@ -375,6 +386,7 @@ export interface SessionSummary {
   createdAt: string;
   messages: number;
   cost?: number;
+  executionTarget?: ExecutionTarget;
   live: boolean;
   chatId?: string;
   runState?: RunState;
@@ -398,6 +410,7 @@ export interface ExecutionLocationRef {
 export interface CreateChatRequest {
   workspaceId: string;
   executionLocationId?: string;
+  executionTarget?: ExecutionTarget;
 }
 
 export interface ResumeChatRequest {
@@ -460,6 +473,10 @@ export interface UpdateModelsGatewayRequest {
 export interface UpdateConfigRequest {
   model?: string;
   thinkingLevel?: string;
+}
+
+export interface ExecutionTargetPreference {
+  executionTarget: ExecutionTarget;
 }
 
 export interface ChatOptions {

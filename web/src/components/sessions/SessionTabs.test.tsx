@@ -53,7 +53,7 @@ describe('SessionTabs', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('is always visible and starts a new chat from the plus button', async () => {
+  it('is always visible and opens an unpersisted new-chat tab from the plus button', async () => {
     const onNewChat = vi.fn();
     const { container } = render(
       <SessionTabs
@@ -69,7 +69,8 @@ describe('SessionTabs', () => {
     );
 
     expect(container.querySelector('.session-tabs')).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Create new chat' }));
+    expect(screen.getByRole('tab', { name: 'New chat' })).toHaveAttribute('aria-current', 'page');
+    await userEvent.click(screen.getByRole('button', { name: 'Open new chat tab' }));
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
@@ -87,7 +88,7 @@ describe('SessionTabs', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Create new chat' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open new chat tab' })).toBeDisabled();
   });
 
   it('offers vertical and horizontal splits for the active tab', async () => {

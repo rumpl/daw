@@ -60,7 +60,8 @@ export function SessionTabs({
     finishDrag();
   };
 
-  const activeValue = activePluginId ? `plugin:${activePluginId}` : activeSessionId ? `session:${activeSessionId}` : '';
+  const emptyChatActive = !activePluginId && !activeSessionId && canCreateChat;
+  const activeValue = activePluginId ? `plugin:${activePluginId}` : activeSessionId ? `session:${activeSessionId}` : emptyChatActive ? 'new-chat' : '';
   const iconTooltip = (label: string, button: ReactElement) => (
     <Tooltip>
       <TooltipTrigger render={button} />
@@ -131,6 +132,16 @@ export function SessionTabs({
           );
         })}
 
+        {emptyChatActive ? (
+          <div className="session-tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md border border-border bg-background p-1 shadow-sm" data-active>
+            <TabsTrigger value="new-chat"
+              className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden border-transparent bg-transparent px-2 shadow-none data-active:border-transparent data-active:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent"
+              aria-current="page" aria-label="New chat">
+              <span>New chat</span>
+            </TabsTrigger>
+          </div>
+        ) : null}
+
         {plugins.map(({ plugin, path }) => {
           const active = plugin.id === activePluginId;
           return (
@@ -153,9 +164,9 @@ export function SessionTabs({
           );
         })}
 
-        {iconTooltip('New chat',
+        {iconTooltip('New chat tab',
           <Button type="button" size="icon-sm" variant="ghost" className="session-tab-new sticky right-1 z-20 bg-muted"
-            aria-label="Create new chat" onClick={onNewChat} disabled={busy || !canCreateChat}>
+            aria-label="Open new chat tab" onClick={onNewChat} disabled={busy || !canCreateChat}>
             <Plus size={15} aria-hidden="true" />
           </Button>,
         )}

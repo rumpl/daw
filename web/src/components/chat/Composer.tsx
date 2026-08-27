@@ -3,8 +3,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Minimize2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import type { Attachment, CommandInfo, ModelOption, RunStatus, ToolOption } from '@/protocol.gen';
+import type { Attachment, CommandInfo, ExecutionTarget, ExecutionTargetOption, ModelOption, RunStatus, ToolOption } from '@/protocol.gen';
 import { clip, formatCost, formatTokens } from '@/safety';
+import { ExecutionTargetIcon } from './ExecutionTargetIcon';
 import { ModelPicker } from './ModelPicker';
 import { PromptInput } from './PromptInput';
 import { ToolPicker } from './ToolPicker';
@@ -22,16 +23,20 @@ export function Composer({
   uploading,
   placeholder,
   focusKey,
+  executionTargets = [],
+  executionTarget = 'host',
   models = [],
   currentModel = '',
   thinkingLevel = '',
   thinkingLevels = [],
   tools = [],
   configDisabled = false,
+  executionTargetDisabled = configDisabled,
   toolsDisabled = configDisabled,
   compactDisabled = configDisabled,
   usageTokens = 0,
   usageCost = 0,
+  onSelectExecutionTarget = () => undefined,
   onSelectModel = () => undefined,
   onSelectThinking = () => undefined,
   onToolChange = () => undefined,
@@ -51,16 +56,20 @@ export function Composer({
   uploading: boolean;
   placeholder?: string;
   focusKey?: string | null;
+  executionTargets?: ExecutionTargetOption[];
+  executionTarget?: ExecutionTarget;
   models?: ModelOption[];
   currentModel?: string;
   thinkingLevel?: string;
   thinkingLevels?: string[];
   tools?: ToolOption[];
   configDisabled?: boolean;
+  executionTargetDisabled?: boolean;
   toolsDisabled?: boolean;
   compactDisabled?: boolean;
   usageTokens?: number;
   usageCost?: number;
+  onSelectExecutionTarget?: (target: ExecutionTarget) => void;
   onSelectModel?: (model: string) => void;
   onSelectThinking?: (thinkingLevel: string) => void;
   onToolChange?: (name: string, enabled: boolean) => void;
@@ -141,6 +150,24 @@ export function Composer({
         }}
         toolbar={
           <>
+            {executionTargets.length > 1 ? (
+              <Select value={executionTarget} disabled={executionTargetDisabled}
+                onValueChange={(value) => onSelectExecutionTarget(value as ExecutionTarget)}>
+                <SelectTrigger className="composer-execution-target" aria-label="Execution target">
+                  <SelectValue placeholder="Run on…">
+                    <ExecutionTargetIcon target={executionTarget} />
+                    <span>{executionTargets.find((target) => target.value === executionTarget)?.label ?? executionTarget}</span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {executionTargets.map((target) => (
+                    <SelectItem key={target.value} value={target.value}>
+                      <ExecutionTargetIcon target={target.value} /> {target.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             {models.length > 0 || currentModel ? (
               <ModelPicker models={models} current={currentModel} disabled={configDisabled || models.length === 0}
                 onSelect={onSelectModel} />

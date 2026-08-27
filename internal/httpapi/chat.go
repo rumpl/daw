@@ -288,6 +288,9 @@ func (l *liveChat) applyLocked(ev *protocol.Event) {
 	case protocol.EventSessionMeta:
 		if ev.Meta != nil {
 			m := *ev.Meta
+			if m.ExecutionTarget == "" {
+				m.ExecutionTarget = l.meta.ExecutionTarget
+			}
 			m.ChatID = l.id
 			m.WorkspaceID = l.workspaceID
 			l.meta = m

@@ -68,6 +68,39 @@ func (s *Server) handleUpdateChatOptions(w http.ResponseWriter, r *http.Request)
 	s.json(w, http.StatusOK, options)
 }
 
+func (s *Server) handleUpdateExecutionTarget(w http.ResponseWriter, r *http.Request) {
+	req, ok := decode[protocol.ExecutionTargetPreference](w, r, s)
+	if !ok {
+		return
+	}
+	available := slices.ContainsFunc(s.executionTargets, func(option protocol.ExecutionTargetOption) bool {
+		return option.Value == req.ExecutionTarget
+	})
+	if !available {
+		s.fail(w, http.StatusBadRequest, "invalid_execution_target", "the selected execution target is unavailable")
+		return
+	}
+	preference, err := s.preferences.SetExecutionTarget(string(req.ExecutionTarget))
+	if err != nil {
+		s.log.Error("update default execution target", "error", err)
+		s.fail(w, http.StatusInternalServerError, "preference_save_failed", "the execution target could not be saved")
+		return
+	}
+	s.json(w, http.StatusOK, protocol.ExecutionTargetPreference{
+		ExecutionTarget: protocol.ExecutionTarget(preference.ExecutionTarget),
+	})
+}
+
+func (s *Server) preferredExecutionTarget() protocol.ExecutionTarget {
+	preferred := protocol.ExecutionTarget(s.preferences.Get("").ExecutionTarget)
+	if slices.ContainsFunc(s.executionTargets, func(option protocol.ExecutionTargetOption) bool {
+		return option.Value == preferred
+	}) {
+		return preferred
+	}
+	return s.defaultExecutionTarget
+}
+
 func (s *Server) handleUpdateDefaultTool(w http.ResponseWriter, r *http.Request) {
 	req, ok := decode[protocol.UpdateToolRequest](w, r, s)
 	if !ok {

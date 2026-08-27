@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +14,21 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSandboxCallbackHandlerRoutesVirtualHosts(t *testing.T) {
+	called := ""
+	handler := &sandboxCallbackHandler{store: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = "store"; w.WriteHeader(http.StatusNoContent) })}
+	handler.SetMCP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = "mcp"; w.WriteHeader(http.StatusNoContent) }))
+	for _, test := range []struct{ host, want string }{{"session-store", "store"}, {"mcp-callback", "mcp"}} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+test.host+"/", nil)
+		req.Host = test.host
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		if called != test.want || response.Code != http.StatusNoContent {
+			t.Fatalf("host %q routed to %q status %d", test.host, called, response.Code)
+		}
+	}
+}
 
 func TestListenUnixCreatesOwnerOnlySocket(t *testing.T) {
 	if runtime.GOOS == "windows" {

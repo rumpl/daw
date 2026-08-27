@@ -62,12 +62,15 @@ func (s *Server) failPath(w http.ResponseWriter, err error) {
 // to open the chat rather than trusting stale session-store metadata; the
 // browser can therefore safely use it to switch projects and attach.
 
-func exposeSessionOrigin(summary *protocol.SessionSummary) {
+func (s *Server) exposeSession(summary *protocol.SessionSummary) {
 	origin := sessionlineage.FromAttributes(summary.Attributes)
 	summary.ParentSessionID = origin.ParentSessionID
 	summary.RootSessionID = origin.RootSessionID
 	summary.OriginKind = origin.Kind
 	summary.OriginPluginID = origin.PluginID
+	if summary.ExecutionTarget == "" {
+		summary.ExecutionTarget = s.defaultExecutionTarget
+	}
 }
 
 func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +96,7 @@ func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) 
 
 	live := make([]protocol.SessionSummary, 0, len(liveChats))
 	for _, summary := range list {
-		exposeSessionOrigin(&summary)
+		s.exposeSession(&summary)
 		info, ok := liveChats[summary.SessionID]
 		if !ok {
 			continue
@@ -230,7 +233,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	liveChats := s.chats.bySessionSnapshot()
 	filtered := make([]protocol.SessionSummary, 0, len(list))
 	for i := range list {
-		exposeSessionOrigin(&list[i])
+		s.exposeSession(&list[i])
 		logicalPath := list[i].WorkingDir
 		if list[i].Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
 			logicalPath = list[i].Attributes[executionlocations.AttributeWorkspacePath]
