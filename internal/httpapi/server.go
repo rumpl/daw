@@ -163,6 +163,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions", s.handleListSessions)
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions/{sessionId}", s.handleGetStoredSession)
 	m.HandleFunc("GET /api/workspaces/{workspaceId}/sessions/{sessionId}/items", s.handleGetStoredSessionItems)
+	m.HandleFunc("GET /api/settings/models-gateway", s.handleGetModelsGateway)
+	m.HandleFunc("PUT /api/settings/models-gateway", s.handlePutModelsGateway)
 	m.HandleFunc("GET /api/chat-options", s.handleGetChatOptions)
 	m.HandleFunc("PATCH /api/chat-options", s.handleUpdateChatOptions)
 	m.HandleFunc("PATCH /api/chat-options/tools/{tool}", s.handleUpdateDefaultTool)

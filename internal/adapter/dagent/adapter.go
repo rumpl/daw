@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -248,6 +249,27 @@ func runtimeThinkingLevels(ctx context.Context, rt daruntime.Runtime) []string {
 		out = append(out, level.String())
 	}
 	return out
+}
+
+// ModelsGateway returns docker-agent's native user setting. Loading on every
+// call keeps the dashboard in sync with changes made by the CLI while it runs.
+func (a *Adapter) ModelsGateway(context.Context) (string, error) {
+	config, err := userconfig.Load()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(strings.TrimSpace(config.ModelsGateway), "/"), nil
+}
+
+// SetModelsGateway updates only the native models_gateway field while
+// preserving the rest of docker-agent's user configuration. userconfig.Update
+// serializes this load-mutate-save cycle with other docker-agent processes.
+func (a *Adapter) SetModelsGateway(_ context.Context, gatewayURL string) error {
+	gatewayURL = strings.TrimSuffix(strings.TrimSpace(gatewayURL), "/")
+	return userconfig.Update(func(config *userconfig.Config) error {
+		config.ModelsGateway = gatewayURL
+		return nil
+	})
 }
 
 func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {

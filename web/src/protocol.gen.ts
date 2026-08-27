@@ -449,6 +449,14 @@ export interface UpdateToolRequest {
   enabled: boolean;
 }
 
+export interface ModelsGatewayConfig {
+  url: string;
+}
+
+export interface UpdateModelsGatewayRequest {
+  url: string;
+}
+
 export interface UpdateConfigRequest {
   model?: string;
   thinkingLevel?: string;

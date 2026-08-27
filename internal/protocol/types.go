@@ -679,6 +679,18 @@ type UpdateToolRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// ModelsGatewayConfig is docker-agent's process-wide LLM gateway setting.
+// The URL is configuration, not a credential.
+type ModelsGatewayConfig struct {
+	URL string `json:"url"`
+}
+
+// UpdateModelsGatewayRequest changes docker-agent's models gateway. An empty
+// URL disables gateway mode.
+type UpdateModelsGatewayRequest struct {
+	URL string `json:"url"`
+}
+
 // UpdateConfigRequest changes model preferences. Nil fields are unchanged;
 // an explicit empty string clears that preference.
 type UpdateConfigRequest struct {

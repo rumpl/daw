@@ -380,6 +380,8 @@ body {
 .settings-section p { margin: 3px 0 0; color: var(--fg-dim); font-size: 12.5px; }
 .settings-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .settings-section > button, .settings-section > [data-slot='select-trigger'], .settings-controls { flex: none; }
+.models-gateway-controls { width: min(100%, 430px); flex-wrap: nowrap; }
+.models-gateway-input { min-width: 220px; }
 .plugin-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); }
 .plugin-settings-heading h2 { margin: 0; font-size: 20px; }
 .plugin-settings-heading p { margin: 3px 0 0; color: var(--fg-dim); }
@@ -407,6 +409,8 @@ body {
 @media (max-width: 700px) {
   .settings-section { align-items: flex-start; flex-direction: column; gap: 12px; }
   .settings-controls { justify-content: flex-start; }
+  .models-gateway-controls { width: 100%; }
+  .models-gateway-input { min-width: 0; }
   .plugin-management-list > li { flex-direction: column; gap: 12px; }
   .plugin-management-actions { flex-wrap: wrap; }
 }

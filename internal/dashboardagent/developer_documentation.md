@@ -30,6 +30,12 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - `GET /api/bootstrap` → `200 Bootstrap`
   - Initializes the API client CSRF token and returns paths, defaults, notices,
     workspace hints, and model availability.
+- `GET /api/settings/models-gateway` → `200 ModelsGatewayConfig`
+  - Reads Docker Agent's native, process-wide models gateway URL.
+- `PUT /api/settings/models-gateway` → `200 ModelsGatewayConfig`
+  - Body: `{url: string}`. Saves an absolute HTTP(S) gateway URL to Docker
+    Agent's user config; an empty URL disables gateway mode. New chats use the
+    change. For Docker gateways, Docker Agent authenticates with Docker Desktop.
 - `GET /api/plugins` → `200 PluginCatalog`
   - Lists plugins that are currently running plus validation diagnostics.
 - `GET /api/plugin-management` → `200 PluginManagementCatalog`
@@ -169,6 +175,7 @@ type ElicitationAction = "accept" | "decline" | "cancel";
 
 interface Health { status: string; uptimeSeconds: number }
 interface APIError { error: string; code: string; details?: string }
+interface ModelsGatewayConfig { url: string }
 interface Notice { id: string; level: "info"|"warning"|"error"; message: string; code: string }
 interface WorkspaceHint { path: string; label: string }
 interface Bootstrap {
@@ -583,6 +590,8 @@ interface DashboardAPI {
     options?:{signal?:AbortSignal}):Promise<StoredSession>;
   sessionItems(workspaceId:string, sessionId:string,
     options?:{offset?:number;limit?:number;signal?:AbortSignal}):Promise<StoredSessionItems>;
+  modelsGateway(): Promise<ModelsGatewayConfig>;
+  updateModelsGateway(url:string): Promise<ModelsGatewayConfig>;
   chatOptions(): Promise<ChatOptions>;
   updateChatOptions(patch:{model?:string;thinkingLevel?:string}):Promise<ChatOptions>;
   updateDefaultTool(name:string, enabled:boolean):Promise<ToolOption>;

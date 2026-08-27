@@ -34,6 +34,7 @@ type Adapter struct {
 	Delay             time.Duration
 	LastOpenRequest   adapter.OpenRequest
 	LastDisabledTools []string
+	modelsGateway     string
 }
 
 type storedSession struct {
@@ -151,6 +152,20 @@ func (a *Adapter) ReadSession(_ context.Context, sessionID string) (adapter.Stor
 		},
 		Items: items, Usage: st.usage, Stats: stats,
 	}, nil
+}
+
+// ModelsGateway mirrors docker-agent's process-wide user setting in memory.
+func (a *Adapter) ModelsGateway(context.Context) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.modelsGateway, nil
+}
+
+func (a *Adapter) SetModelsGateway(_ context.Context, gatewayURL string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.modelsGateway = strings.TrimSuffix(strings.TrimSpace(gatewayURL), "/")
+	return nil
 }
 
 // ChatOptions returns process-wide choices without opening a session.

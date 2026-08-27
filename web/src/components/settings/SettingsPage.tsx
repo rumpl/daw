@@ -1,5 +1,6 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { ToolPicker } from '@/components/chat/ToolPicker';
@@ -7,7 +8,7 @@ import { api, CHAT_OPTIONS_CHANGE_EVENT } from '@/api';
 import { loadPrefs, updateThemePreference, type ThemeMode } from '@/preferences';
 import { THEME_CHANGE_EVENT } from '@/components/shell/AppTheme';
 import type { ChatOptions } from '@/protocol.gen';
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useState, type FormEvent, type RefObject } from 'react';
 
 interface SettingsPageProps {
   menuButton: RefObject<HTMLButtonElement | null>;
@@ -21,12 +22,43 @@ export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlu
   const [theme, setTheme] = useState<ThemeMode>(() => loadPrefs().theme);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [gatewayURL, setGatewayURL] = useState('');
+  const [savedGatewayURL, setSavedGatewayURL] = useState('');
+  const [gatewayLoaded, setGatewayLoaded] = useState(false);
+  const [gatewayBusy, setGatewayBusy] = useState(false);
 
   useEffect(() => {
     void api.chatOptions().then(setOptions).catch((cause: unknown) =>
       setError(cause instanceof Error ? cause.message : 'Settings could not be loaded.'),
     );
+    void api.modelsGateway().then((config) => {
+      setGatewayURL(config.url);
+      setSavedGatewayURL(config.url);
+    }).catch((cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : 'The LLM gateway setting could not be loaded.'),
+    ).finally(() => setGatewayLoaded(true));
   }, []);
+
+  const updateGateway = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setGatewayBusy(true);
+    setError('');
+    try {
+      const config = await api.updateModelsGateway(gatewayURL);
+      setGatewayURL(config.url);
+      setSavedGatewayURL(config.url);
+      try {
+        setOptions(await api.chatOptions());
+        window.dispatchEvent(new Event(CHAT_OPTIONS_CHANGE_EVENT));
+      } catch {
+        setError('The gateway was saved, but model options could not be refreshed. New chats will use the updated setting.');
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The LLM gateway setting could not be saved.');
+    } finally {
+      setGatewayBusy(false);
+    }
+  };
 
   const updateChat = async (patch: { model?: string; thinkingLevel?: string }) => {
     setBusy(true);
@@ -91,6 +123,22 @@ export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlu
               <SelectItem value="system">System</SelectItem>
             </SelectContent>
           </Select>
+        </section>
+
+        <section className="settings-section" aria-labelledby="gateway-settings">
+          <div>
+            <h3 id="gateway-settings">LLM gateway</h3>
+            <p id="gateway-settings-description">Used by new chats. For Docker gateways, Docker Agent authenticates with your signed-in Docker Desktop token, so provider API keys are not needed. Clear the URL to disable gateway mode.</p>
+          </div>
+          <form className="settings-controls models-gateway-controls" onSubmit={(event) => void updateGateway(event)}>
+            <Input className="models-gateway-input" type="url" aria-label="LLM gateway URL" aria-describedby="gateway-settings-description"
+              placeholder="https://gateway.example.com" maxLength={2048} autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              value={gatewayURL} disabled={gatewayBusy} onChange={(event) => setGatewayURL(event.target.value)} />
+            <Button type="submit" variant="secondary"
+              disabled={gatewayBusy || !gatewayLoaded || gatewayURL.trim() === savedGatewayURL}>
+              {gatewayBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </form>
         </section>
 
         <section className="settings-section" aria-labelledby="model-settings">

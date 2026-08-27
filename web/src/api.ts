@@ -12,6 +12,7 @@ import type {
   ElicitationReply,
   ManagedPlugin,
   ModelOption,
+  ModelsGatewayConfig,
   PluginCatalog,
   PluginConfiguration,
   PluginManagementCatalog,
@@ -128,6 +129,12 @@ export const api = {
     if (options.limit !== undefined) query.set('limit', String(options.limit));
     const suffix = query.size ? `?${query}` : '';
     return request<StoredSessionItems>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/items${suffix}`, undefined, { signal: options.signal });
+  },
+  modelsGateway(): Promise<ModelsGatewayConfig> {
+    return request<ModelsGatewayConfig>('GET', '/api/settings/models-gateway');
+  },
+  updateModelsGateway(url: string): Promise<ModelsGatewayConfig> {
+    return request<ModelsGatewayConfig>('PUT', '/api/settings/models-gateway', { url });
   },
   chatOptions(): Promise<ChatOptions> {
     return request<ChatOptions>('GET', '/api/chat-options');

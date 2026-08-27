@@ -88,6 +88,12 @@ type Adapter interface {
 	// ReadSession reads persisted session history without constructing a live
 	// runtime, loading toolsets, or claiming the session in the chat registry.
 	ReadSession(ctx context.Context, sessionID string) (StoredSession, error)
+	// ModelsGateway reads and updates docker-agent's native, process-wide models
+	// gateway setting. The URL is not a credential; for Docker gateways,
+	// docker-agent obtains authentication from Docker Desktop through its normal
+	// environment provider.
+	ModelsGateway(ctx context.Context) (string, error)
+	SetModelsGateway(ctx context.Context, gatewayURL string) error
 	// ChatOptions resolves the process-wide model and tool catalogs without
 	// creating a workspace chat or session. MCPServers is the same global
 	// configuration passed to every runtime; discovery creates its own transport.

@@ -124,7 +124,10 @@ typing.
 desktop, and behind **Settings** on mobile. Model and thinking change only while
 the agent is idle. Those choices are saved on the server: they are restored per
 session after a restart, and the most recent choices become the defaults for new
-chats.
+chats. The Settings page can also save an LLM gateway URL to Docker Agent's
+native user configuration. New chats use gateway mode; for Docker gateways,
+Docker Agent obtains your signed-in Docker Desktop token automatically, so no
+provider API keys are needed.
 
 The model button opens a searchable list: the models your agent config names
 come first, then any used earlier in the session, then the provider catalog
@@ -247,6 +250,7 @@ Everything stays in docker-agent's own directories, resolved through its
 | | |
 | --- | --- |
 | Config | `~/.config/cagent` |
+| LLM gateway setting | `~/.config/cagent/config.yaml` (`models_gateway`) |
 | Data | `~/.cagent` |
 | Sessions | `~/.cagent/session.db` |
 | Opened projects | `~/.cagent/dawui-workspaces.json` |

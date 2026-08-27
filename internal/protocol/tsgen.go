@@ -67,6 +67,8 @@ var exported = []any{
 	ModelOption{},
 	ToolOption{},
 	UpdateToolRequest{},
+	ModelsGatewayConfig{},
+	UpdateModelsGatewayRequest{},
 	UpdateConfigRequest{},
 	ChatOptions{},
 	ToolConfirmationReply{},
