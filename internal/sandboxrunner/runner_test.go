@@ -1,7 +1,6 @@
 package sandboxrunner
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -51,7 +50,7 @@ func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	process, err := startRunner(context.Background(), sbx.New(sbx.WithBinary(binary)), "session-one", "secret")
+	process, err := startRunner(t.Context(), sbx.New(sbx.WithBinary(binary)), "session-one", "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +62,7 @@ func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(args)
-	for _, want := range []string{"exec\n", "session-one\n", "DAW_SESSION_STORE_TOKEN", "start-daw-runner"} {
+	for _, want := range []string{"exec\n", "session-one\n", "DAW_SESSION_STORE_TOKEN", "chmod 0755 /home/agent/.local/lib/daw-runner", "start-daw-runner"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("start command %q does not contain %q", got, want)
 		}
@@ -112,6 +111,34 @@ printf '%s\n' "$*" >>"` + logFile + `"
 		if !strings.Contains(string(commands), want) {
 			t.Fatalf("sbx commands do not contain %q:\n%s", want, commands)
 		}
+	}
+}
+
+func TestTemplateDigestIncludesRunnerMode(t *testing.T) {
+	kit := t.TempDir()
+	binary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")
+	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary, []byte("runner"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kit, "spec.yaml"), []byte("schemaVersion: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withoutExec, err := templateDigest(kit, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withExec, err := templateDigest(kit, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutExec == withExec {
+		t.Fatal("template digest did not change when runner execute bits changed")
 	}
 }
 

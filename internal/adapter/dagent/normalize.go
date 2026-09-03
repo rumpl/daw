@@ -269,14 +269,16 @@ func (c *chat) normalize(ev daruntime.Event) {
 	case *daruntime.ModelFallbackEvent:
 		c.notice(protocol.NoticeWarning, fmt.Sprintf(
 			"Model %s failed (%s); retrying with %s (attempt %d/%d).",
-			e.FailedModel, e.Reason, e.FallbackModel, e.Attempt, e.MaxAttempts), "retry")
+			e.FailedModel, e.Reason, e.FallbackModel, e.Attempt, e.MaxAttempts,
+		), "retry")
 
 	case *daruntime.MaxIterationsReachedEvent:
 		// The runtime blocks here waiting for a Resume. There is no user
 		// affordance for "keep looping" in this dashboard, so the documented
 		// safe fallback is applied and shown as a notice instead of hanging.
 		c.notice(protocol.NoticeWarning, fmt.Sprintf(
-			"The agent reached its %d-iteration limit and was stopped.", e.MaxIterations),
+			"The agent reached its %d-iteration limit and was stopped.", e.MaxIterations,
+		),
 			"max_iterations")
 		c.rt.Resume(context.Background(), daruntime.ResumeReject("iteration limit reached"))
 

@@ -22,7 +22,7 @@ func TestAdapterRoundTripAndMCPCallbackRewrite(t *testing.T) {
 	local := fake.New()
 	api := runnerapi.New(local, token)
 	server := httptest.NewServer(api)
-	t.Cleanup(func() { server.Close(); api.Shutdown(context.Background()) })
+	t.Cleanup(func() { server.Close(); api.Shutdown(context.WithoutCancel(t.Context())) })
 
 	client, err := remote.New(remote.Config{
 		Endpoint: server.URL, Token: token,
@@ -51,7 +51,7 @@ func TestAdapterRoundTripAndMCPCallbackRewrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = chat.Close(context.Background()) })
+	t.Cleanup(func() { _ = chat.Close(context.WithoutCancel(t.Context())) })
 	if got := chat.Meta().Attributes; got[sessionlineage.AttributeParentSessionID] != "parent-session" {
 		t.Fatalf("open-chat lineage attributes = %q", got)
 	}
@@ -118,7 +118,7 @@ func TestAdapterOverStdioMux(t *testing.T) {
 	api := runnerapi.New(fake.New(), "secret")
 	server := &http.Server{Handler: api}
 	go func() { _ = server.Serve(runner) }()
-	t.Cleanup(func() { _ = server.Close(); api.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = server.Close(); api.Shutdown(context.WithoutCancel(t.Context())) })
 	client, err := remote.New(remote.Config{Endpoint: "http://runner", Token: "secret", DialContext: host.DialContext})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestAdapterOverStdioMux(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer chat.Close(context.Background())
+	defer chat.Close(context.WithoutCancel(t.Context()))
 	if _, _, _, err := chat.Send(t.Context(), "hello", nil, protocol.DeliveryNormal); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestAdapterOverStdioMux(t *testing.T) {
 
 func TestRunnerRejectsMissingToken(t *testing.T) {
 	api := runnerapi.New(fake.New(), "secret")
-	request := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/health", http.NoBody)
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
@@ -166,7 +166,7 @@ func TestModelsGatewayRoundTripsToTheRunner(t *testing.T) {
 	local := fake.New()
 	api := runnerapi.New(local, token)
 	server := httptest.NewServer(api)
-	t.Cleanup(func() { server.Close(); api.Shutdown(context.Background()) })
+	t.Cleanup(func() { server.Close(); api.Shutdown(context.WithoutCancel(t.Context())) })
 
 	client, err := remote.New(remote.Config{Endpoint: server.URL, Token: token})
 	if err != nil {

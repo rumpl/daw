@@ -149,8 +149,37 @@ can use `api.pluginConfiguration(pluginId)` and
 
 `events.subscribeDashboard(listener, {types?})` provides process-local,
 at-most-once observation with reconnect/replay. `events.publish(type, data)`
-publishes to the plugin's frontend stream. Frontends subscribe with
-`context.events.subscribePlugin(pluginId, {types?}, listener)`.
+publishes to the plugin's frontend stream. The two positional arguments are
+required; passing `{type, data}` as one object makes the dashboard reject the
+publish request as an invalid body.
+
+Managed `context.events` subscriptions are available only to frontend
+`activate(context)`, not to page `mount(context)`. A mounted page can consume
+its plugin stream from `context.plugin.eventsUrl` with `EventSource`; plugin
+frames are ordinary SSE `message` events whose JSON data is the complete
+`{type, seq, data?}` envelope:
+
+```js
+export function mount(context) {
+  const source = new EventSource(context.plugin.eventsUrl);
+  source.onmessage = event => {
+    const update = JSON.parse(event.data);
+    if (update.type === "state_changed" || update.type === "gap") {
+      // Refetch authoritative state through context.api.
+    }
+  };
+  const close = () => source.close();
+  context.signal.addEventListener("abort", close, { once: true });
+  return () => {
+    context.signal.removeEventListener("abort", close);
+    source.close();
+  };
+}
+```
+
+`EventSource` reconnects automatically and sends its last event ID. Treat a
+`gap` as an invalidation and refetch authoritative backend state rather than
+trying to reconstruct missed changes from event payloads.
 
 The backend may implement command work behind its existing namespaced HTTP
 handler; frontend contribution callbacks invoke it through `context.api`.
@@ -378,6 +407,12 @@ The context contains:
 | `api` | The complete dashboard API client |
 | `ui` | Host React, components, hooks, and managed rendering |
 
+Page mount context intentionally does **not** include `events` or
+`contributions`; those belong to global `activate(context)`. Page code that
+needs plugin-owned events should open `context.plugin.eventsUrl` with
+`EventSource` and close it on cleanup or `context.signal` abort, as shown in the
+backend events section above.
+
 `api.request(method, path, body?, options?)` is the generic escape hatch for all
 backend endpoints. It serializes JSON, adds the dashboard CSRF header to
 mutations, and throws the same `ApiError` used by core UI. Named methods such as
@@ -410,8 +445,35 @@ export function mount(context) {
 ```
 
 To embed a complete existing chat, render `components.Chat` with its opaque
-`chatId`. It includes streaming, the conversation, composer, slash commands,
-stop behavior, tool confirmation, and elicitation dialogs.
+`chatId`. It includes streaming, a scrollable conversation, the composer and
+user input, slash commands, stop behavior, tool confirmation, and elicitation
+dialogs. Obtain a current process-local chat ID with `api.createChat` or
+`api.resumeChat`; persist the stable session ID instead of a chat ID across
+dashboard restarts.
+
+The host chat uses a nested flex layout. Its ancestors must provide a bounded
+height and propagate `min-height: 0`, otherwise the conversation grows with its
+content and cannot scroll. A typical side pane is:
+
+```css
+.my-plugin-chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: 70vh;
+  min-height: 0;
+  overflow: hidden;
+}
+.my-plugin-chat-pane > .plugin-chat {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+```
+
+Do not rebuild a transcript-only view when users need to communicate with the
+agent; use `components.Chat` so the composer and pending dialogs remain
+available.
 
 A plugin can also define a component that uses host hooks:
 

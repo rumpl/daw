@@ -9,6 +9,7 @@ SANDBOX_BIN := bin/daw-sandbox
 RUNNER_KIT_BIN := kits/daw-runner/files/home/.local/lib/daw-runner
 PORT ?= 4788
 GO ?= go
+WEB_DEPS_STAMP := web/node_modules/.daw-installed
 
 .PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
         ci build build-web build-go build-sandbox-launcher build-runner-kit start start-sandbox electron package-electron clean smoke-real screenshots help
@@ -16,8 +17,11 @@ GO ?= go
 all: build
 
 ## deps: install frontend dependencies from the committed lockfile
-deps:
-	cd web && npm ci || npm install
+deps: $(WEB_DEPS_STAMP)
+
+$(WEB_DEPS_STAMP): web/package.json web/package-lock.json
+	cd web && npm ci
+	@touch $@
 
 ## electron-deps: install the desktop host and its native Electron runtime
 electron-deps:
@@ -100,7 +104,7 @@ ci: generate
 ## build: compile the Go binary with the frontend embedded
 build: generate build-web build-go
 
-build-web:
+build-web: deps
 	cd web && npm run build
 
 # Stamp the docker-agent module version the build actually resolved, so

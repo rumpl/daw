@@ -94,7 +94,7 @@ func (s *Server) handleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 }
 
 func attachmentMime(name string, data []byte) string {
-	detected := strings.SplitN(http.DetectContentType(data), ";", 2)[0]
+	detected, _, _ := strings.Cut(http.DetectContentType(data), ";")
 	switch detected {
 	case "image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf":
 		return detected

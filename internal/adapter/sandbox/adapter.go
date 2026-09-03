@@ -232,8 +232,8 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 	return &managedChat{Chat: chat, manager: a, conn: conn}, nil
 }
 
-// Session history is intentionally not a capability of the lifecycle
-// backend. The target router serves both operations from the host catalog.
+// ListSessions is intentionally unsupported by the lifecycle backend. The
+// target router serves session history from the host catalog.
 func (a *Adapter) ListSessions(context.Context, string) ([]protocol.SessionSummary, error) {
 	return nil, adapter.ErrUnsupported
 }
@@ -539,6 +539,7 @@ func (a *Adapter) saveLocked() error {
 
 type managedChat struct {
 	adapter.Chat
+
 	manager *Adapter
 	conn    *connection
 	once    sync.Once
@@ -569,5 +570,7 @@ func within(root, candidate string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-var _ adapter.Adapter = (*Adapter)(nil)
-var _ adapter.Chat = (*managedChat)(nil)
+var (
+	_ adapter.Adapter = (*Adapter)(nil)
+	_ adapter.Chat    = (*managedChat)(nil)
+)

@@ -315,7 +315,7 @@ func TestSandboxedBootstrap(t *testing.T) {
 		ChatPreferencesFile:    filepath.Join(t.TempDir(), "preferences.json"),
 		PluginDir:              t.TempDir(), PluginDataDir: t.TempDir(),
 	})
-	request := httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/bootstrap", http.NoBody)
 	request.Host = "127.0.0.1"
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
@@ -340,7 +340,7 @@ func TestSandboxedBootstrap(t *testing.T) {
 		}
 	}
 
-	patch := httptest.NewRequest(http.MethodPatch, "/api/chat-options/execution-target", strings.NewReader(`{"executionTarget":"host"}`))
+	patch := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/chat-options/execution-target", strings.NewReader(`{"executionTarget":"host"}`))
 	patch.Host = "127.0.0.1"
 	patch.Header.Set("Content-Type", "application/json")
 	patch.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
@@ -358,7 +358,7 @@ func TestSandboxedBootstrap(t *testing.T) {
 		t.Fatalf("saved execution target = %q", saved.ExecutionTarget)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/bootstrap", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/bootstrap", http.NoBody)
 	request.Host = "127.0.0.1"
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, request)
@@ -370,7 +370,7 @@ func TestSandboxedBootstrap(t *testing.T) {
 	}
 
 	openBody, _ := json.Marshal(protocol.OpenWorkspaceRequest{Path: root})
-	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/open", bytes.NewReader(openBody))
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/workspaces/open", bytes.NewReader(openBody))
 	request.Host = "127.0.0.1"
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
@@ -382,7 +382,7 @@ func TestSandboxedBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	createBody, _ := json.Marshal(protocol.CreateChatRequest{WorkspaceID: workspace.WorkspaceID})
-	request = httptest.NewRequest(http.MethodPost, "/api/chats", bytes.NewReader(createBody))
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", bytes.NewReader(createBody))
 	request.Host = "127.0.0.1"
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
@@ -409,14 +409,14 @@ func TestMCPBridgeIsAuthenticatedAndBackendScoped(t *testing.T) {
 	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
 	bridge := server.MCPBridge("bridge-secret")
 
-	request := httptest.NewRequest(http.MethodPost, "/api/bootstrap", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/bootstrap", http.NoBody)
 	response := httptest.NewRecorder()
 	bridge.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("missing token status = %d", response.Code)
 	}
 
-	request = httptest.NewRequest(http.MethodPost, "/api/chats", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/chats", http.NoBody)
 	request.Header.Set(httpapi.CSRFHeader, "bridge-secret")
 	request.Header.Set("X-DAW-Plugin-Token", "bridge-secret")
 	request.Header.Set("X-DAW-Plugin-ID", "example")

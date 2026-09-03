@@ -83,6 +83,13 @@ credentials:
       proxyManaged: true
 
 setup:
+  startup:
+    - command:
+        - "sh"
+        - "-c"
+        - "if [ -f /home/agent/.local/lib/daw-runner ]; then chmod 0755 /home/agent/.local/lib/daw-runner; fi"
+      user: "0"
+      description: Ensure the template-baked runner binary is executable.
   files:
     - path: /home/agent/.local/bin/start-daw-runner
       mode: "0755"
@@ -98,6 +105,7 @@ setup:
           exit 0
         fi
         echo $$ >"$pid_file"
+        chmod 0755 /home/agent/.local/lib/daw-runner 2>/dev/null || true
         # stdout is the framed DAW protocol; diagnostics must stay on stderr.
         exec /home/agent/.local/lib/daw-runner
       description: Start the code-defined dashboard runner for the mounted workspace.

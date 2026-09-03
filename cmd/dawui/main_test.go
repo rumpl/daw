@@ -20,7 +20,7 @@ func TestSandboxCallbackHandlerRoutesVirtualHosts(t *testing.T) {
 	handler := &sandboxCallbackHandler{store: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = "store"; w.WriteHeader(http.StatusNoContent) })}
 	handler.SetMCP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { called = "mcp"; w.WriteHeader(http.StatusNoContent) }))
 	for _, test := range []struct{ host, want string }{{"session-store", "store"}, {"mcp-callback", "mcp"}} {
-		req := httptest.NewRequest(http.MethodGet, "http://"+test.host+"/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+test.host+"/", http.NoBody)
 		req.Host = test.host
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, req)

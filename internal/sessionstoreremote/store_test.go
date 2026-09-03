@@ -139,6 +139,40 @@ func TestRemoteStoreContractAndFidelity(t *testing.T) {
 	}
 }
 
+func TestRemoteStorePersistsCompaction(t *testing.T) {
+	host := session.NewInMemorySessionStore()
+	bridge, err := sessionstorebridge.New(sessionstorebridge.Config{Store: host, Token: "secret", Target: "sandbox"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(bridge)
+	defer server.Close()
+	remote, err := New(Config{URL: server.URL, Token: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remote.Close()
+
+	value := session.New(session.WithTitle("compaction"))
+	if err := remote.AddSession(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	item := session.Item{Summary: "summary", FirstKeptEntry: 2, Cost: 0.25, Model: "provider/model"}
+	if err := remote.PersistCompaction(t.Context(), value, 7, 0, item); err != nil {
+		t.Fatal(err)
+	}
+	if value.InputTokens != 7 || value.Cost != 0.25 || len(value.Messages) != 1 {
+		t.Fatalf("live session was not compacted: %#v", value)
+	}
+	stored, err := host.GetSession(t.Context(), value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.InputTokens != 7 || stored.Cost != 0.25 || len(stored.Messages) != 1 || stored.Messages[0].Summary != "summary" {
+		t.Fatalf("stored compaction = %#v", stored)
+	}
+}
+
 func TestRemoteStoreOverReverseStdioMux(t *testing.T) {
 	hostRead, runnerWrite := io.Pipe()
 	runnerRead, hostWrite := io.Pipe()

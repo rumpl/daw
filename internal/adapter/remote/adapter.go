@@ -62,8 +62,10 @@ func New(config Config) (*Adapter, error) {
 
 func (a *Adapter) Info(ctx context.Context) (adapter.Info, error) {
 	var value adapter.Info
-	return value, a.do(ctx, http.MethodGet, "/v1/info", nil, &value)
+	err := a.do(ctx, http.MethodGet, "/v1/info", nil, &value)
+	return value, err
 }
+
 func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protocol.SessionSummary, error) {
 	var wire []runnerapi.SessionSummary
 	path := "/v1/sessions?workingDir=" + url.QueryEscape(workingDir)
@@ -77,16 +79,20 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 	}
 	return value, nil
 }
+
 func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
 	var value adapter.StoredSession
-	return value, a.do(ctx, http.MethodGet, "/v1/sessions/"+url.PathEscape(sessionID), nil, &value)
+	err := a.do(ctx, http.MethodGet, "/v1/sessions/"+url.PathEscape(sessionID), nil, &value)
+	return value, err
 }
+
 func (a *Adapter) ChatOptions(ctx context.Context, model string, servers []adapter.MCPServer) ([]protocol.ModelOption, []string, []protocol.ToolOption, error) {
 	request := runnerapi.ChatOptionsRequest{Model: model, MCPServers: a.prepareServers(servers)}
 	var value runnerapi.ChatOptionsResponse
 	err := a.do(ctx, http.MethodPost, "/v1/options", request, &value)
 	return value.Models, value.ThinkingLevels, value.Tools, err
 }
+
 func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (adapter.Chat, error) {
 	request.MCPServers = a.prepareServers(request.MCPServers)
 	var response runnerapi.OpenResponse
@@ -102,6 +108,7 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 	go chat.stream(streamCtx)
 	return chat, nil
 }
+
 func (a *Adapter) Check(ctx context.Context) error {
 	return a.do(ctx, http.MethodGet, "/v1/health", nil, nil)
 }
@@ -229,56 +236,70 @@ func (c *chat) Send(ctx context.Context, text string, attachments []adapter.Atta
 	err := c.a.do(ctx, http.MethodPost, c.path("send"), runnerapi.SendRequest{Text: text, Attachments: attachments, Mode: mode}, &value)
 	return value.Mode, value.RunID, value.Queued, err
 }
+
 func (c *chat) Abort() {
 	_ = c.a.do(context.Background(), http.MethodPost, c.path("abort"), map[string]any{}, nil)
 }
+
 func (c *chat) Confirm(ctx context.Context, id string, decision protocol.ToolDecision, reason string) error {
 	return c.a.do(ctx, http.MethodPost, c.path("confirm"), runnerapi.ConfirmRequest{ToolCallID: id, Decision: decision, Reason: reason}, nil)
 }
+
 func (c *chat) Elicit(ctx context.Context, id string, action protocol.ElicitationAction, content map[string]any) error {
 	return c.a.do(ctx, http.MethodPost, c.path("elicit"), runnerapi.ElicitRequest{ElicitationID: id, Action: action, Content: content}, nil)
 }
+
 func (c *chat) Models(ctx context.Context) []protocol.ModelOption {
 	var v []protocol.ModelOption
 	_ = c.a.do(ctx, http.MethodGet, c.path("models"), nil, &v)
 	return v
 }
+
 func (c *chat) Commands(ctx context.Context) []protocol.CommandInfo {
 	var v []protocol.CommandInfo
 	_ = c.a.do(ctx, http.MethodGet, c.path("commands"), nil, &v)
 	return v
 }
+
 func (c *chat) SetModel(ctx context.Context, value string) error { return c.value(ctx, "model", value) }
+
 func (c *chat) SetThinking(ctx context.Context, value string) error {
 	return c.value(ctx, "thinking", value)
 }
+
 func (c *chat) Retitle(ctx context.Context, value string) error {
 	return c.value(ctx, "retitle", value)
 }
+
 func (c *chat) value(ctx context.Context, action, value string) error {
 	return c.a.do(ctx, http.MethodPost, c.path(action), runnerapi.ValueRequest{Value: value}, nil)
 }
+
 func (c *chat) SetDisabledTools(names []string) {
 	_ = c.a.do(context.Background(), http.MethodPost, c.path("tools"), runnerapi.ToolsRequest{Names: names}, nil)
 }
+
 func (c *chat) Compact(ctx context.Context) error {
 	return c.a.do(ctx, http.MethodPost, c.path("compact"), map[string]any{}, nil)
 }
+
 func (c *chat) Stats(ctx context.Context) protocol.Stats {
 	var v protocol.Stats
 	_ = c.a.do(ctx, http.MethodGet, c.path("stats"), nil, &v)
 	return v
 }
+
 func (c *chat) Close(ctx context.Context) error {
 	var err error
 	c.closeOnce.Do(func() { err = c.a.do(ctx, http.MethodDelete, "/v1/chats/"+url.PathEscape(c.id), nil, nil); c.cancel() })
 	return err
 }
+
 func (c *chat) path(action string) string { return "/v1/chats/" + url.PathEscape(c.id) + "/" + action }
 
 func (c *chat) stream(ctx context.Context) {
 	defer close(c.events)
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.a.endpoint+c.path("events"), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.a.endpoint+c.path("events"), http.NoBody)
 	if err != nil {
 		return
 	}
@@ -319,6 +340,7 @@ func (c *chat) stream(ctx context.Context) {
 		c.streamNotice(err)
 	}
 }
+
 func (c *chat) streamNotice(err error) {
 	select {
 	case c.events <- protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{ID: "runner-stream", Level: protocol.NoticeError, Code: "runner_stream_lost", Message: "The sandbox runner event stream was lost: " + err.Error()}}:
@@ -326,5 +348,7 @@ func (c *chat) streamNotice(err error) {
 	}
 }
 
-var _ adapter.Adapter = (*Adapter)(nil)
-var _ adapter.Chat = (*chat)(nil)
+var (
+	_ adapter.Adapter = (*Adapter)(nil)
+	_ adapter.Chat    = (*chat)(nil)
+)

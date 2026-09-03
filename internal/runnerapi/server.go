@@ -39,6 +39,7 @@ type OpenResponse struct {
 // but the host control plane needs them to reconstruct gossip lineage.
 type SessionSummary struct {
 	protocol.SessionSummary
+
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
@@ -49,6 +50,7 @@ type MetaResponse struct {
 
 type StreamEvent struct {
 	protocol.Event
+
 	MetaAttributes map[string]string `json:"metaAttributes,omitempty"`
 }
 
@@ -232,6 +234,7 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 		s.json(w, http.StatusOK, MetaResponse{Meta: meta, Attributes: meta.Attributes})
 	}
 }
+
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -240,6 +243,7 @@ func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 	items, usage, err := c.Snapshot(r.Context())
 	s.respond(w, SnapshotResponse{Items: items, Usage: usage}, err)
 }
+
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -272,6 +276,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
 func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -284,12 +289,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request) {
 	mode, runID, queued, err := c.Send(r.Context(), request.Text, request.Attachments, request.Mode)
 	s.respond(w, SendResponse{Mode: mode, RunID: runID, Queued: queued}, err)
 }
+
 func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.chat(w, r); ok {
 		c.Abort()
 		s.json(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
+
 func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -301,6 +308,7 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	s.respond(w, map[string]bool{"ok": true}, c.Confirm(r.Context(), q.ToolCallID, q.Decision, q.Reason))
 }
+
 func (s *Server) elicit(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -312,25 +320,31 @@ func (s *Server) elicit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.respond(w, map[string]bool{"ok": true}, c.Elicit(r.Context(), q.ElicitationID, q.Action, q.Content))
 }
+
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.chat(w, r); ok {
 		s.json(w, http.StatusOK, c.Models(r.Context()))
 	}
 }
+
 func (s *Server) commands(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.chat(w, r); ok {
 		s.json(w, http.StatusOK, c.Commands(r.Context()))
 	}
 }
+
 func (s *Server) setModel(w http.ResponseWriter, r *http.Request) {
 	s.valueCall(w, r, func(c adapter.Chat, v string) error { return c.SetModel(r.Context(), v) })
 }
+
 func (s *Server) setThinking(w http.ResponseWriter, r *http.Request) {
 	s.valueCall(w, r, func(c adapter.Chat, v string) error { return c.SetThinking(r.Context(), v) })
 }
+
 func (s *Server) retitle(w http.ResponseWriter, r *http.Request) {
 	s.valueCall(w, r, func(c adapter.Chat, v string) error { return c.Retitle(r.Context(), v) })
 }
+
 func (s *Server) valueCall(w http.ResponseWriter, r *http.Request, call func(adapter.Chat, string) error) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -342,6 +356,7 @@ func (s *Server) valueCall(w http.ResponseWriter, r *http.Request, call func(ada
 	}
 	s.respond(w, map[string]bool{"ok": true}, call(c, q.Value))
 }
+
 func (s *Server) setTools(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.chat(w, r)
 	if !ok {
@@ -354,16 +369,19 @@ func (s *Server) setTools(w http.ResponseWriter, r *http.Request) {
 	c.SetDisabledTools(q.Names)
 	s.json(w, http.StatusOK, map[string]bool{"ok": true})
 }
+
 func (s *Server) compact(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.chat(w, r); ok {
 		s.respond(w, map[string]bool{"ok": true}, c.Compact(r.Context()))
 	}
 }
+
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.chat(w, r); ok {
 		s.json(w, http.StatusOK, c.Stats(r.Context()))
 	}
 }
+
 func (s *Server) closeChat(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	c := s.chats[r.PathValue("id")]
@@ -407,11 +425,13 @@ func (s *Server) respond(w http.ResponseWriter, value any, err error) {
 	}
 	http.Error(w, err.Error(), status)
 }
+
 func (s *Server) json(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
+
 func decode[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var value T
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)

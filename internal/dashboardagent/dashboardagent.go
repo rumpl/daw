@@ -20,6 +20,7 @@ import (
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/teamloader"
 	"github.com/docker/docker-agent/pkg/tools"
+	"github.com/docker/docker-agent/pkg/tools/builtin/file"
 	"github.com/docker/docker-agent/pkg/tools/builtin/filesystem"
 	"github.com/docker/docker-agent/pkg/tools/builtin/shell"
 	skillstool "github.com/docker/docker-agent/pkg/tools/builtin/skills"
@@ -93,7 +94,7 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...ad
 	}
 
 	toolsets := []tools.ToolSet{
-		filesystem.New(runConfig.WorkingDir),
+		file.New(filesystem.New(runConfig.WorkingDir)),
 		shell.New(os.Environ(), runConfig),
 		skillstool.New(skills.Load(ctx, []string{"local"}), runConfig.WorkingDir),
 	}

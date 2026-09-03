@@ -87,8 +87,10 @@ func run() error {
 	transport.Proxy = nil
 	transport.DialContext = peer.DialContext
 	proxy := httputil.NewSingleHostReverseProxy(target)
-	originalDirector := proxy.Director
-	proxy.Director = func(r *http.Request) { originalDirector(r); r.Host = target.Host }
+	proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		r.SetURL(target)
+		r.Out.Host = target.Host
+	}
 	proxy.Transport = transport
 	callbackListener, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", callbackAddress)
 	if err != nil {

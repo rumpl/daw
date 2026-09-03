@@ -108,9 +108,9 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 			workspaces = append(workspaces, extra)
 		}
 	}
-	pluginDir := ""
-	if strings.TrimSpace(options.PluginDir) != "" {
-		pluginDir, err = existingDirectory(options.PluginDir)
+	pluginDir := strings.TrimSpace(options.PluginDir)
+	if pluginDir != "" {
+		pluginDir, err = existingDirectory(pluginDir)
 		if err != nil {
 			return Runner{}, fmt.Errorf("sandbox runner: plugin directory: %w", err)
 		}
@@ -143,10 +143,8 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	}
 
 	runOptions := sbx.RunOptions{
-		SandboxOptions: sbx.SandboxOptions{
-			Agent: AgentName, Workspaces: workspaces, Name: name,
-			Kits: kits, Template: strings.TrimSpace(options.Template),
-		},
+		Agent: AgentName, Workspaces: workspaces, Name: name,
+		Kits: kits, Template: strings.TrimSpace(options.Template),
 		Detached: true,
 	}
 	if runOptions.Template == "" {
@@ -216,6 +214,9 @@ if [ -s "$pid_file" ]; then
   fi
 fi
 rm -f "$pid_file"
+if [ -f /home/agent/.local/lib/daw-runner ]; then
+  chmod 0755 /home/agent/.local/lib/daw-runner 2>/dev/null || sudo -n chmod 0755 /home/agent/.local/lib/daw-runner 2>/dev/null || true
+fi
 exec env DAW_SESSION_STORE_TOKEN=` + shellQuote(storeToken) + ` /home/agent/.local/bin/start-daw-runner
 `
 	process, err := client.ExecPipe(ctx, name, "sh", "-c", command)
@@ -230,12 +231,12 @@ func stageKit(source, token string, includeRunner bool) (string, func(), error) 
 	info, err := os.Stat(binary)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", func() {}, fmt.Errorf("sandbox runner: kit has no runner binary; run `make build-runner-kit`")
+			return "", func() {}, errors.New("sandbox runner: kit has no runner binary; run `make build-runner-kit`")
 		}
 		return "", func() {}, fmt.Errorf("sandbox runner: inspect kit runner binary: %w", err)
 	}
 	if info.IsDir() || info.Mode()&0o111 == 0 {
-		return "", func() {}, fmt.Errorf("sandbox runner: kit runner binary is not executable")
+		return "", func() {}, errors.New("sandbox runner: kit runner binary is not executable")
 	}
 
 	parent, err := os.MkdirTemp("", "daw-runner-kit-")
@@ -253,7 +254,7 @@ func stageKit(source, token string, includeRunner bool) (string, func(), error) 
 		// Session templates already contain the runner and static setup files.
 		// Build a genuinely small kit rather than copying the large executable
 		// into a temporary tree only to remove it again.
-		if err := os.MkdirAll(staged, 0o755); err != nil {
+		if err := os.MkdirAll(staged, 0o750); err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("sandbox runner: stage lightweight kit: %w", err)
 		}
@@ -262,13 +263,13 @@ func stageKit(source, token string, includeRunner bool) (string, func(), error) 
 			cleanup()
 			return "", func() {}, fmt.Errorf("sandbox runner: read kit spec: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(staged, "spec.yaml"), spec, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(staged, "spec.yaml"), spec, 0o600); err != nil {
 			cleanup()
 			return "", func() {}, fmt.Errorf("sandbox runner: stage kit spec: %w", err)
 		}
 	}
 	configDir := filepath.Join(staged, "files", "home", ".config", "daw")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
 		cleanup()
 		return "", func() {}, fmt.Errorf("sandbox runner: stage runner configuration: %w", err)
 	}

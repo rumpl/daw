@@ -1,7 +1,6 @@
 package stdiomux
 
 import (
-	"context"
 	"io"
 	"testing"
 )
@@ -21,11 +20,12 @@ func pair(t *testing.T) (*Mux, *Mux) {
 	t.Cleanup(func() { a.Close(); b.Close() })
 	return a, b
 }
+
 func TestBidirectionalStreams(t *testing.T) {
 	a, b := pair(t)
-	check := func(dial *Mux, accept *Mux, message string) {
+	check := func(dial, accept *Mux, message string) {
 		t.Helper()
-		c, err := dial.DialContext(context.Background(), "", "")
+		c, err := dial.DialContext(t.Context(), "", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,6 +47,7 @@ func TestBidirectionalStreams(t *testing.T) {
 	check(a, b, "host to runner")
 	check(b, a, "runner to host")
 }
+
 func TestServesHTTPOverMux(t *testing.T) {
 	a, b := pair(t)
 	conn, err := a.DialContext(t.Context(), "", "")

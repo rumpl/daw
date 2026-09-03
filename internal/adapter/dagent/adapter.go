@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -468,9 +469,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		}
 	} else {
 		attributes := make(map[string]string, len(req.SessionAttributes)+1)
-		for key, value := range req.SessionAttributes {
-			attributes[key] = value
-		}
+		maps.Copy(attributes, req.SessionAttributes)
 		if attributes[adapter.ExecutionTargetAttribute] == "" {
 			attributes[adapter.ExecutionTargetAttribute] = string(protocol.ExecutionTargetHost)
 		}

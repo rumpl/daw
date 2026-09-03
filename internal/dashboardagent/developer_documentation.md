@@ -545,7 +545,15 @@ interface PluginActivationContext {
 ```
 
 Managed event subscriptions reconnect with replay positions and are closed on
-deactivation. Plugin commands participate in slash completion; returning text
+deactivation. `PluginEvents` is part of `PluginActivationContext` only; page
+`PluginContext` deliberately does not expose `events`. A mounted page that needs
+plugin-owned invalidations should open `context.plugin.eventsUrl` with a direct
+`EventSource`, parse each `message` event's `{type,seq,data?}` JSON envelope,
+close it on cleanup or `context.signal` abort, and refetch authoritative state
+when it receives a `gap`. Backend publication uses the positional signature
+`events.publish(type, data)`, not `events.publish({type, data})`.
+
+Plugin commands participate in slash completion; returning text
 supplies the prompt and returning undefined handles the action without sending.
 Matching tool and attachment renderers replace the host fallback under a plugin
 error boundary. Matching tool actions add buttons beside the host tool card;
@@ -671,8 +679,14 @@ Chat({chatId: string})
 
 It owns SSE reduction, persisted draft, slash-command loading, send/steer/
 follow-up behavior, stop, conversation rendering, tool confirmation, and MCP
-elicitation dialogs. Obtain a live `chatId` from `createChat` or `resumeChat`.
-Closing the plugin does not dispose the backend chat.
+elicitation dialogs. Obtain a live `chatId` from `createChat` or `resumeChat`;
+persist the stable session ID instead of the process-local chat ID across
+restarts. Closing the plugin does not dispose the backend chat.
+
+The component includes the real composer and user input, not just a transcript.
+For its conversation to scroll, every containing flex/grid pane must have a
+bounded height and propagate `min-height:0`; the immediate wrapper should
+normally use `height:100%; min-height:0; overflow:hidden`.
 
 ### `components.Markdown`
 

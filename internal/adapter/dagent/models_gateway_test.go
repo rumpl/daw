@@ -1,7 +1,6 @@
 package dagent
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +20,10 @@ func TestModelsGatewayUsesNativeDockerAgentConfig(t *testing.T) {
 	}
 
 	a := &Adapter{}
-	if err := a.SetModelsGateway(context.Background(), " https://gateway.example.com/proxy/ "); err != nil {
+	if err := a.SetModelsGateway(t.Context(), " https://gateway.example.com/proxy/ "); err != nil {
 		t.Fatal(err)
 	}
-	got, err := a.ModelsGateway(context.Background())
+	got, err := a.ModelsGateway(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}

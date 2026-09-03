@@ -43,10 +43,8 @@ func TestTokenUsagePreservesLastMessageBilling(t *testing.T) {
 	c.normalize(daruntime.NewTokenUsageEvent(c.sess.ID, "root", &daruntime.Usage{
 		InputTokens: 1000, OutputTokens: 60, Cost: 0.02,
 		LastMessage: &daruntime.MessageUsage{
-			Usage: dachat.Usage{
-				InputTokens: 400, OutputTokens: 30, CachedInputTokens: 250,
-				CacheWriteTokens: 15, ReasoningTokens: 8,
-			},
+			InputTokens: 400, OutputTokens: 30, CachedInputTokens: 250,
+			CacheWriteTokens: 15, ReasoningTokens: 8,
 			Cost: 0.009, Model: "provider/model",
 		},
 	}))
@@ -184,7 +182,7 @@ func TestPartialToolCallIsEmittedAndArgumentDeltasAreMerged(t *testing.T) {
 	}
 	def := tools.Tool{Name: "shell", Category: "shell"}
 	c.normalize(&daruntime.PartialToolCallEvent{
-		AgentContext: daruntime.AgentContext{AgentName: "root"},
+		AgentName: "root",
 		ToolCall: tools.ToolCall{ID: "t1", Function: tools.FunctionCall{
 			Name: "shell", Arguments: `{"cmd":"echo `,
 		}},
@@ -205,7 +203,7 @@ func TestPartialToolCallIsEmittedAndArgumentDeltasAreMerged(t *testing.T) {
 	// Current docker-agent versions send only the new argument bytes and omit
 	// ToolDefinition after the first partial event.
 	c.normalize(&daruntime.PartialToolCallEvent{
-		AgentContext: daruntime.AgentContext{AgentName: "root"},
+		AgentName: "root",
 		ToolCall: tools.ToolCall{ID: "t1", Function: tools.FunctionCall{
 			Name: "shell", Arguments: `hello"}`,
 		}},
@@ -239,7 +237,7 @@ func TestUserMessageIsEmittedOnlyFromRuntimeEvent(t *testing.T) {
 	at := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 
 	c.normalize(&daruntime.UserMessageEvent{
-		AgentContext:    daruntime.AgentContext{Timestamp: at},
+		Timestamp:       at,
 		Message:         "change direction",
 		SessionID:       c.sess.ID,
 		SessionPosition: 3,

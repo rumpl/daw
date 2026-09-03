@@ -117,6 +117,7 @@ func (m *Mux) Done() <-chan struct{} { return m.done }
 func newStream(m *Mux, id uint32) *stream {
 	return &stream{mux: m, id: id, wake: make(chan struct{}, 1)}
 }
+
 func (m *Mux) readLoop() {
 	var header [9]byte
 	for {
@@ -190,10 +191,14 @@ func (m *Mux) writeFrame(typ byte, id uint32, payload []byte) error {
 		return m.closeError()
 	default:
 	}
+	payloadSize, err := safeFrameSize(len(payload))
+	if err != nil {
+		return err
+	}
 	var header [9]byte
 	header[0] = typ
 	binary.BigEndian.PutUint32(header[1:5], id)
-	binary.BigEndian.PutUint32(header[5:9], uint32(len(payload)))
+	binary.BigEndian.PutUint32(header[5:9], payloadSize)
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 	if _, err := m.w.Write(header[:]); err != nil {
@@ -208,6 +213,14 @@ func (m *Mux) writeFrame(typ byte, id uint32, payload []byte) error {
 	}
 	return nil
 }
+
+func safeFrameSize(size int) (uint32, error) {
+	if size < 0 || size > maxFrame {
+		return 0, fmt.Errorf("stdio mux payload too large: %d", size)
+	}
+	return uint32(size), nil // #nosec G115 -- size is bounded above by maxFrame.
+}
+
 func (m *Mux) shutdown(err error) {
 	m.closeOnce.Do(func() {
 		m.mu.Lock()
@@ -223,6 +236,7 @@ func (m *Mux) shutdown(err error) {
 		}
 	})
 }
+
 func (m *Mux) closeError() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -250,6 +264,7 @@ func (s *stream) receive(data []byte) {
 		_ = s.mux.writeFrame(frameReset, s.id, nil)
 	}
 }
+
 func (s *stream) remoteClose(err error) {
 	s.mu.Lock()
 	s.remoteClosed = true
@@ -263,12 +278,14 @@ func (s *stream) remoteClose(err error) {
 		s.mux.remove(s.id)
 	}
 }
+
 func (s *stream) signal() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
 	}
 }
+
 func (s *stream) Read(p []byte) (int, error) {
 	for {
 		s.mu.Lock()
@@ -298,7 +315,7 @@ func (s *stream) Read(p []byte) (int, error) {
 		} else {
 			wait := time.Until(deadline)
 			if wait <= 0 {
-				return 0, osDeadline{}
+				return 0, deadlineError{}
 			}
 			timer := time.NewTimer(wait)
 			select {
@@ -310,7 +327,7 @@ func (s *stream) Read(p []byte) (int, error) {
 					}
 				}
 			case <-timer.C:
-				return 0, osDeadline{}
+				return 0, deadlineError{}
 			case <-s.mux.done:
 				if !timer.Stop() {
 					select {
@@ -323,6 +340,7 @@ func (s *stream) Read(p []byte) (int, error) {
 		}
 	}
 }
+
 func (s *stream) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	closed := s.localClosed
@@ -332,14 +350,11 @@ func (s *stream) Write(p []byte) (int, error) {
 		return 0, net.ErrClosed
 	}
 	if !deadline.IsZero() && time.Now().After(deadline) {
-		return 0, osDeadline{}
+		return 0, deadlineError{}
 	}
 	written := 0
 	for len(p) > 0 {
-		n := len(p)
-		if n > maxFrame {
-			n = maxFrame
-		}
+		n := min(len(p), maxFrame)
 		if err := s.mux.writeFrame(frameData, s.id, p[:n]); err != nil {
 			return written, err
 		}
@@ -348,6 +363,7 @@ func (s *stream) Write(p []byte) (int, error) {
 	}
 	return written, nil
 }
+
 func (s *stream) Close() error {
 	s.mu.Lock()
 	if s.localClosed {
@@ -374,6 +390,7 @@ func (s *stream) SetDeadline(t time.Time) error {
 	s.signal()
 	return nil
 }
+
 func (s *stream) SetReadDeadline(t time.Time) error {
 	s.mu.Lock()
 	s.readDeadline = t
@@ -381,6 +398,7 @@ func (s *stream) SetReadDeadline(t time.Time) error {
 	s.signal()
 	return nil
 }
+
 func (s *stream) SetWriteDeadline(t time.Time) error {
 	s.mu.Lock()
 	s.writeDeadline = t
@@ -388,11 +406,13 @@ func (s *stream) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-type osDeadline struct{}
+type deadlineError struct{}
 
-func (osDeadline) Error() string   { return "i/o timeout" }
-func (osDeadline) Timeout() bool   { return true }
-func (osDeadline) Temporary() bool { return true }
+func (deadlineError) Error() string   { return "i/o timeout" }
+func (deadlineError) Timeout() bool   { return true }
+func (deadlineError) Temporary() bool { return true }
 
-var _ net.Listener = (*Mux)(nil)
-var _ net.Conn = (*stream)(nil)
+var (
+	_ net.Listener = (*Mux)(nil)
+	_ net.Conn     = (*stream)(nil)
+)

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	Version      = "1"
+	Version      = "2"
 	MaxBodyBytes = 64 << 20
 )
 
@@ -57,6 +57,7 @@ func (w *captureWriter) WriteHeader(status int) {
 		w.status = status
 	}
 }
+
 func (w *captureWriter) Write(value []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
@@ -78,6 +79,12 @@ type sessionRequest struct {
 }
 type summaryRequest struct {
 	Item session.Item `json:"item"`
+}
+type compactionRequest struct {
+	Session      *session.Session `json:"session"`
+	InputTokens  int64            `json:"inputTokens"`
+	OutputTokens int64            `json:"outputTokens"`
+	Item         session.Item     `json:"item"`
 }
 type errorRequest struct {
 	Error *session.Error `json:"error"`
@@ -198,6 +205,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/messages", s.addMessage)
 	s.mux.HandleFunc("PUT /v1/store/messages/{messageID}", s.updateMessage)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/sub-sessions", s.addSubSession)
+	s.mux.HandleFunc("POST /v1/store/sessions/{id}/compactions", s.persistCompaction)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/summaries", s.addSummary)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/errors", s.addError)
 	s.mux.HandleFunc("PUT /v1/store/sessions/{id}/usage", s.updateUsage)
@@ -240,6 +248,7 @@ func (s *Server) addSession(w http.ResponseWriter, r *http.Request) {
 	s.prepareSession(req.Session, req.ParentID)
 	writeStoreResult(w, s.store.AddSession(r.Context(), req.Session))
 }
+
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	value, err := s.store.GetSession(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -248,6 +257,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, sessionResponse(value))
 }
+
 func (s *Server) getSessions(w http.ResponseWriter, r *http.Request) {
 	value, err := s.store.GetSessions(r.Context())
 	if err != nil {
@@ -260,6 +270,7 @@ func (s *Server) getSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, response)
 }
+
 func (s *Server) getSessionSummaries(w http.ResponseWriter, r *http.Request) {
 	value, err := s.store.GetSessionSummaries(r.Context())
 	if err != nil {
@@ -268,6 +279,7 @@ func (s *Server) getSessionSummaries(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, value)
 }
+
 func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 	var req sessionRequest
 	if !decode(w, r, &req) {
@@ -284,9 +296,11 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 	s.prepareSession(req.Session, req.ParentID)
 	writeStoreResult(w, s.store.UpdateSession(r.Context(), req.Session))
 }
+
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 	writeStoreResult(w, s.store.DeleteSession(r.Context(), r.PathValue("id")))
 }
+
 func (s *Server) setStarred(w http.ResponseWriter, r *http.Request) {
 	var req starredRequest
 	if !decode(w, r, &req) {
@@ -294,6 +308,7 @@ func (s *Server) setStarred(w http.ResponseWriter, r *http.Request) {
 	}
 	writeStoreResult(w, s.store.SetSessionStarred(r.Context(), r.PathValue("id"), req.Starred))
 }
+
 func (s *Server) addMessage(w http.ResponseWriter, r *http.Request) {
 	var req messageRequest
 	if !decode(w, r, &req) {
@@ -310,6 +325,7 @@ func (s *Server) addMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, messageIDResponse{MessageID: id})
 }
+
 func (s *Server) updateMessage(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("messageID"), 10, 64)
 	if err != nil {
@@ -326,6 +342,7 @@ func (s *Server) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeStoreResult(w, s.store.UpdateMessage(r.Context(), id, req.Message))
 }
+
 func (s *Server) addSubSession(w http.ResponseWriter, r *http.Request) {
 	var req sessionRequest
 	if !decode(w, r, &req) {
@@ -338,6 +355,24 @@ func (s *Server) addSubSession(w http.ResponseWriter, r *http.Request) {
 	s.prepareSession(req.Session, r.PathValue("id"))
 	writeStoreResult(w, s.store.AddSubSession(r.Context(), r.PathValue("id"), req.Session))
 }
+
+func (s *Server) persistCompaction(w http.ResponseWriter, r *http.Request) {
+	var req compactionRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Session == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "session is required")
+		return
+	}
+	if req.Session.ID != r.PathValue("id") {
+		writeError(w, http.StatusBadRequest, "invalid_request", "session ID does not match path")
+		return
+	}
+	s.prepareSession(req.Session, req.Session.ParentID)
+	writeStoreResult(w, s.store.PersistCompaction(r.Context(), req.Session, req.InputTokens, req.OutputTokens, req.Item))
+}
+
 func (s *Server) addSummary(w http.ResponseWriter, r *http.Request) {
 	var req summaryRequest
 	if !decode(w, r, &req) {
@@ -345,6 +380,7 @@ func (s *Server) addSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	writeStoreResult(w, s.store.AddSummary(r.Context(), r.PathValue("id"), req.Item))
 }
+
 func (s *Server) addError(w http.ResponseWriter, r *http.Request) {
 	var req errorRequest
 	if !decode(w, r, &req) {
@@ -356,6 +392,7 @@ func (s *Server) addError(w http.ResponseWriter, r *http.Request) {
 	}
 	writeStoreResult(w, s.store.AddError(r.Context(), r.PathValue("id"), req.Error))
 }
+
 func (s *Server) updateUsage(w http.ResponseWriter, r *http.Request) {
 	var req usageRequest
 	if !decode(w, r, &req) {
@@ -363,6 +400,7 @@ func (s *Server) updateUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeStoreResult(w, s.store.UpdateSessionTokens(r.Context(), r.PathValue("id"), req.InputTokens, req.OutputTokens, req.Cost))
 }
+
 func (s *Server) updateTitle(w http.ResponseWriter, r *http.Request) {
 	var req titleRequest
 	if !decode(w, r, &req) {
@@ -385,6 +423,7 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	}
 	return true
 }
+
 func writeStoreResult(w http.ResponseWriter, err error) {
 	if err != nil {
 		writeStoreError(w, err)
@@ -392,19 +431,24 @@ func writeStoreResult(w http.ResponseWriter, err error) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
 func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, session.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "session data was not found")
 	case errors.Is(err, session.ErrEmptyID):
 		writeError(w, http.StatusBadRequest, "empty_id", "ID cannot be empty")
+	case errors.Is(err, session.ErrOriginMismatch):
+		writeError(w, http.StatusConflict, "origin_mismatch", "session origin does not match")
 	default:
 		writeError(w, http.StatusInternalServerError, "store_error", "session store operation failed")
 	}
 }
+
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, wireError{Code: code, Message: message})
 }
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

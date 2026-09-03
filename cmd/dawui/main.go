@@ -112,7 +112,8 @@ func run() error {
 	if runnerEndpoint != "" {
 		return errors.New("DAWUI_RUNNER_URL shared-runner mode is no longer supported; use DAWUI_SANDBOX_PER_SESSION=1 so sessions use the host store")
 	}
-	if fakeAdapter {
+	switch {
+	case fakeAdapter:
 		log.Warn("using the FAKE docker-agent adapter (DAWUI_FAKE_ADAPTER=1): no real agent will run")
 		f := fake.New()
 		if d := os.Getenv("DAWUI_FAKE_DELAY_MS"); d != "" {
@@ -124,7 +125,7 @@ func run() error {
 		ad = f
 		executionTargets = []protocol.ExecutionTargetOption{{Value: protocol.ExecutionTargetHost, Label: "Host", Description: "Run tools directly on this host."}}
 		defaultExecutionTarget = protocol.ExecutionTargetHost
-	} else if sandboxed {
+	case sandboxed:
 		mcpBridgeToken, err = randomToken()
 		if err != nil {
 			return fmt.Errorf("create sandbox MCP callback token: %w", err)
@@ -197,7 +198,7 @@ func run() error {
 			{Value: protocol.ExecutionTargetHost, Label: "Host", Description: "Run tools directly on this host."},
 		}
 		defaultExecutionTarget = protocol.ExecutionTargetSandbox
-	} else {
+	default:
 		realAdapter, err := dagent.New(ctx, dagent.Config{Logger: log, SessionDB: os.Getenv("DAWUI_SESSION_DB")})
 		if err != nil {
 			return fmt.Errorf("docker-agent could not be initialized: %w", err)
@@ -337,11 +338,12 @@ func run() error {
 		fmt.Printf("docker-agent dashboard listening on http://%s\n", listenAddress)
 	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
-	if perSessionSandbox {
+	switch {
+	case perSessionSandbox:
 		fmt.Println("  execution targets: host or one stopped/resumable Docker Sandbox per sandbox-targeted session")
-	} else if sandboxed {
+	case sandboxed:
 		fmt.Printf("  execution targets: host or shared sandbox runner %s\n", runnerEndpoint)
-	} else {
+	default:
 		fmt.Printf("  no sandbox: tools run on this host as %s\n", currentUser())
 	}
 	fmt.Printf("  global plugins: %s\n", pluginDir)
@@ -379,6 +381,7 @@ func (h *sandboxCallbackHandler) SetMCP(handler http.Handler) {
 	h.mcp = handler
 	h.mu.Unlock()
 }
+
 func (h *sandboxCallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(strings.Split(r.Host, ":")[0], "mcp-callback") {
 		h.mu.RLock()

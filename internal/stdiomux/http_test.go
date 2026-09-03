@@ -22,7 +22,11 @@ func TestHTTPInBothDirections(t *testing.T) {
 		transport.Proxy = nil
 		transport.DialContext = dial
 		defer transport.CloseIdleConnections()
-		res, err := (&http.Client{Transport: transport}).Get(target)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := (&http.Client{Transport: transport}).Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}

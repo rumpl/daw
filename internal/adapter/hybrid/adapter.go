@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
@@ -135,16 +136,16 @@ func targetFromAttributes(attributes map[string]string) protocol.ExecutionTarget
 	}
 	return target
 }
+
 func cloneAttributes(input map[string]string) map[string]string {
 	output := make(map[string]string, len(input)+1)
-	for key, value := range input {
-		output[key] = value
-	}
+	maps.Copy(output, input)
 	return output
 }
 
 type targetedChat struct {
 	adapter.Chat
+
 	target protocol.ExecutionTarget
 }
 

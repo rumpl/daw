@@ -26,7 +26,7 @@ func TestMutationOperationIDsAreIdempotent(t *testing.T) {
 	payload, _ := json.Marshal(messageRequest{Message: session.UserMessage("hello")})
 
 	var first string
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/store/sessions/"+value.ID+"/messages", bytes.NewReader(payload))
 		if err != nil {
 			t.Fatal(err)
@@ -69,7 +69,11 @@ func TestBridgeValidationAndAuthentication(t *testing.T) {
 	server := httptest.NewServer(bridge)
 	defer server.Close()
 
-	res, err := http.Get(server.URL + "/v1/store/health")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/v1/store/health", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +82,10 @@ func TestBridgeValidationAndAuthentication(t *testing.T) {
 		t.Fatalf("unauthenticated status = %d", res.StatusCode)
 	}
 
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/store/sessions", strings.NewReader(`{"session":null,"unknown":true}`))
+	req, err = http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/store/sessions", strings.NewReader(`{"session":null,"unknown":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Authorization", "Bearer secret")
 	req.Header.Set("X-DAW-Operation-ID", "malformed")
 	res, err = http.DefaultClient.Do(req)

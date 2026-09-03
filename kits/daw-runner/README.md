@@ -135,8 +135,8 @@ the token never enters the VM. DAW also allowlists the configured gateway in the
 sandbox network policy. Because credential policy is fixed at creation, a
 stopped session sandbox is recreated on resume if its Docker gateway hostname
 changed; host-owned session history is retained. The kit intentionally has no
-`setup.startup` runner hook: after `sbx run` completes, DAW starts the runner
-exactly once through `sbx exec`, placing it in the fully initialized
+`setup.startup` runner launch hook: after `sbx run` completes, DAW starts the
+runner exactly once through `sbx exec`, placing it in the fully initialized
 credential-proxy process context before it accepts model requests. The Docker
 Agent HTTP transport gives the sandbox-provided `HTTP_PROXY` and `HTTPS_PROXY`
 environment precedence over Docker Desktop's host-service socket. Its OpenAI

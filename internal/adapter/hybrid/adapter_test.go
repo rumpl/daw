@@ -1,7 +1,6 @@
 package hybrid
 
 import (
-	"context"
 	"testing"
 
 	"github.com/rumpl/daw/internal/adapter"
@@ -19,7 +18,7 @@ func TestListSessionsUsesHostCatalogAndTagsTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions, err := hybrid.ListSessions(context.Background(), "/workspace")
+	sessions, err := hybrid.ListSessions(t.Context(), "/workspace")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,13 +45,13 @@ func TestOpenChatSelectsTargetAndTagsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	chat, err := hybrid.OpenChat(context.Background(), adapter.OpenRequest{
+	chat, err := hybrid.OpenChat(t.Context(), adapter.OpenRequest{
 		ChatID: "chat-host", WorkingDir: "/workspace", ExecutionTarget: protocol.ExecutionTargetHost,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer chat.Close(context.Background())
+	defer chat.Close(t.Context())
 	if host.LastOpenRequest.ChatID != "chat-host" || sandbox.LastOpenRequest.ChatID != "" {
 		t.Fatalf("request routed to wrong adapter: host=%q sandbox=%q", host.LastOpenRequest.ChatID, sandbox.LastOpenRequest.ChatID)
 	}
@@ -74,13 +73,13 @@ func TestResumeRetainsOriginalTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	chat, err := hybrid.OpenChat(context.Background(), adapter.OpenRequest{
+	chat, err := hybrid.OpenChat(t.Context(), adapter.OpenRequest{
 		ChatID: "resume", WorkingDir: "/workspace", ResumeSessionID: "existing",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer chat.Close(context.Background())
+	defer chat.Close(t.Context())
 	if sandbox.LastOpenRequest.ResumeSessionID != "existing" || host.LastOpenRequest.ResumeSessionID != "" {
 		t.Fatalf("resume routed to wrong adapter: host=%q sandbox=%q", host.LastOpenRequest.ResumeSessionID, sandbox.LastOpenRequest.ResumeSessionID)
 	}

@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	Version          = "1"
+	Version          = "2"
 	maxResponseBytes = 64 << 20
 )
 
@@ -55,6 +55,12 @@ type messageRequest struct {
 }
 type summaryRequest struct {
 	Item session.Item `json:"item"`
+}
+type compactionRequest struct {
+	Session      *session.Session `json:"session"`
+	InputTokens  int64            `json:"inputTokens"`
+	OutputTokens int64            `json:"outputTokens"`
+	Item         session.Item     `json:"item"`
 }
 type errorRequest struct {
 	Error *session.Error `json:"error"`
@@ -104,7 +110,7 @@ func New(cfg Config) (*RemoteStore, error) {
 // begins accepting chat requests.
 func (s *RemoteStore) Check(ctx context.Context) error {
 	var health healthResponse
-	if err := s.query(ctx, http.MethodGet, "/v1/store/health", nil, &health); err != nil {
+	if err := s.query(ctx, "/v1/store/health", &health); err != nil {
 		return fmt.Errorf("session store handshake: %w", err)
 	}
 	if health.Version != Version {
@@ -116,9 +122,10 @@ func (s *RemoteStore) Check(ctx context.Context) error {
 func (s *RemoteStore) AddSession(ctx context.Context, value *session.Session) error {
 	return s.mutate(ctx, http.MethodPost, "/v1/store/sessions", sessionRequest{Session: value, ParentID: value.ParentID}, nil)
 }
+
 func (s *RemoteStore) GetSession(ctx context.Context, id string) (*session.Session, error) {
 	var value sessionRequest
-	if err := s.query(ctx, http.MethodGet, "/v1/store/sessions/"+url.PathEscape(id), nil, &value); err != nil {
+	if err := s.query(ctx, "/v1/store/sessions/"+url.PathEscape(id), &value); err != nil {
 		return nil, err
 	}
 	if value.Session == nil {
@@ -127,6 +134,7 @@ func (s *RemoteStore) GetSession(ctx context.Context, id string) (*session.Sessi
 	restoreParentLinks(value.Session, value.ParentID)
 	return value.Session, nil
 }
+
 func (s *RemoteStore) GetSessionByOrigin(ctx context.Context, id, origin string) (*session.Session, error) {
 	value, err := s.GetSession(ctx, id)
 	if err != nil {
@@ -137,9 +145,10 @@ func (s *RemoteStore) GetSessionByOrigin(ctx context.Context, id, origin string)
 	}
 	return value, nil
 }
+
 func (s *RemoteStore) GetSessions(ctx context.Context) ([]*session.Session, error) {
 	var wire []sessionRequest
-	if err := s.query(ctx, http.MethodGet, "/v1/store/sessions", nil, &wire); err != nil {
+	if err := s.query(ctx, "/v1/store/sessions", &wire); err != nil {
 		return nil, err
 	}
 	value := make([]*session.Session, len(wire))
@@ -149,42 +158,63 @@ func (s *RemoteStore) GetSessions(ctx context.Context) ([]*session.Session, erro
 	}
 	return value, nil
 }
+
 func (s *RemoteStore) GetSessionSummaries(ctx context.Context) ([]session.Summary, error) {
 	var value []session.Summary
-	if err := s.query(ctx, http.MethodGet, "/v1/store/session-summaries", nil, &value); err != nil {
+	if err := s.query(ctx, "/v1/store/session-summaries", &value); err != nil {
 		return nil, err
 	}
 	return value, nil
 }
+
 func (s *RemoteStore) DeleteSession(ctx context.Context, id string) error {
 	return s.mutate(ctx, http.MethodDelete, "/v1/store/sessions/"+url.PathEscape(id), nil, nil)
 }
+
 func (s *RemoteStore) UpdateSession(ctx context.Context, value *session.Session) error {
 	return s.mutate(ctx, http.MethodPut, "/v1/store/sessions/"+url.PathEscape(value.ID), sessionRequest{Session: value, ParentID: value.ParentID}, nil)
 }
+
 func (s *RemoteStore) SetSessionStarred(ctx context.Context, id string, starred bool) error {
 	return s.mutate(ctx, http.MethodPut, "/v1/store/sessions/"+url.PathEscape(id)+"/starred", starredRequest{starred}, nil)
 }
+
 func (s *RemoteStore) AddMessage(ctx context.Context, id string, value *session.Message) (int64, error) {
 	var result messageIDResponse
 	err := s.mutate(ctx, http.MethodPost, "/v1/store/sessions/"+url.PathEscape(id)+"/messages", messageRequest{value}, &result)
 	return result.MessageID, err
 }
+
 func (s *RemoteStore) UpdateMessage(ctx context.Context, id int64, value *session.Message) error {
 	return s.mutate(ctx, http.MethodPut, "/v1/store/messages/"+strconv.FormatInt(id, 10), messageRequest{value}, nil)
 }
+
 func (s *RemoteStore) AddSubSession(ctx context.Context, id string, value *session.Session) error {
 	return s.mutate(ctx, http.MethodPost, "/v1/store/sessions/"+url.PathEscape(id)+"/sub-sessions", sessionRequest{Session: value, ParentID: id}, nil)
 }
+
+func (s *RemoteStore) PersistCompaction(ctx context.Context, value *session.Session, inputTokens, outputTokens int64, item session.Item) error {
+	err := s.mutate(ctx, http.MethodPost, "/v1/store/sessions/"+url.PathEscape(value.ID)+"/compactions", compactionRequest{
+		Session: value, InputTokens: inputTokens, OutputTokens: outputTokens, Item: item,
+	}, nil)
+	if err == nil {
+		value.ApplyCompaction(inputTokens, outputTokens, item)
+	}
+	return err
+}
+
 func (s *RemoteStore) AddSummary(ctx context.Context, id string, value session.Item) error {
 	return s.mutate(ctx, http.MethodPost, "/v1/store/sessions/"+url.PathEscape(id)+"/summaries", summaryRequest{value}, nil)
 }
+
 func (s *RemoteStore) AddError(ctx context.Context, id string, value *session.Error) error {
 	return s.mutate(ctx, http.MethodPost, "/v1/store/sessions/"+url.PathEscape(id)+"/errors", errorRequest{value}, nil)
 }
+
 func (s *RemoteStore) UpdateSessionTokens(ctx context.Context, id string, input, output int64, cost float64) error {
 	return s.mutate(ctx, http.MethodPut, "/v1/store/sessions/"+url.PathEscape(id)+"/usage", usageRequest{input, output, cost}, nil)
 }
+
 func (s *RemoteStore) UpdateSessionTitle(ctx context.Context, id, title string) error {
 	return s.mutate(ctx, http.MethodPut, "/v1/store/sessions/"+url.PathEscape(id)+"/title", titleRequest{title}, nil)
 }
@@ -203,10 +233,10 @@ func restoreParentLinks(value *session.Session, parentID string) {
 	}
 }
 
-func (s *RemoteStore) query(ctx context.Context, method, path string, request, response any) error {
+func (s *RemoteStore) query(ctx context.Context, path string, response any) error {
 	s.mutations.Lock()
 	defer s.mutations.Unlock()
-	return s.do(ctx, method, path, request, response, "")
+	return s.do(ctx, http.MethodGet, path, nil, response, "")
 }
 
 func (s *RemoteStore) mutate(ctx context.Context, method, path string, request, response any) error {
@@ -273,6 +303,8 @@ func (s *RemoteStore) do(ctx context.Context, method, path string, input, output
 			return session.ErrNotFound
 		case "empty_id":
 			return session.ErrEmptyID
+		case "origin_mismatch":
+			return session.ErrOriginMismatch
 		}
 		if remote.Message == "" {
 			remote.Message = http.StatusText(res.StatusCode)

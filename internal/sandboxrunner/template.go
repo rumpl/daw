@@ -138,6 +138,15 @@ func templateDigest(kit string, cpus int, memory string) (string, error) {
 		filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner"),
 	}
 	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return "", fmt.Errorf("sandbox runner template: inspect %s: %w", path, err)
+		}
+		relative, err := filepath.Rel(kit, path)
+		if err != nil {
+			return "", fmt.Errorf("sandbox runner template: relativize %s: %w", path, err)
+		}
+		_, _ = fmt.Fprintf(hash, "path=%s mode=%#o\n", filepath.ToSlash(relative), info.Mode().Perm())
 		file, err := os.Open(path)
 		if err != nil {
 			return "", fmt.Errorf("sandbox runner template: hash %s: %w", path, err)
