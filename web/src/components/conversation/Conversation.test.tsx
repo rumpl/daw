@@ -247,15 +247,24 @@ describe('Conversation', () => {
     expect(container.querySelector('.conversation-row')).not.toHaveClass('conversation-row-enter');
   });
 
-  it('does not render user messages as Markdown', () => {
+  it('renders user messages as Markdown and can toggle their source', () => {
     const { container } = render(
       <Conversation
-        items={[assistantMessage({ role: 'user', text: '# Plain user text', streaming: false })]}
+        items={[assistantMessage({ role: 'user', text: '# User heading\n\n- first\n- second', streaming: false })]}
         empty={null}
       />,
     );
 
-    expect(container.querySelector('.msg-plain')).toHaveTextContent('# Plain user text');
+    expect(container.querySelector('.msg h1')).toHaveTextContent('User heading');
+    expect(container.querySelectorAll('.msg li')).toHaveLength(2);
+    expect(container.querySelector('.msg-plain')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View user message source' }));
+    expect(container.querySelector('.msg-plain')).toHaveTextContent('# User heading');
     expect(container.querySelector('.msg h1')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Render user message as Markdown' }));
+    expect(container.querySelector('.msg h1')).toHaveTextContent('User heading');
+    expect(container.querySelector('.msg-plain')).toBeNull();
   });
 });

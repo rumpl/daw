@@ -205,9 +205,7 @@ export function Sidebar({
         </p>
       ) : null}
 
-      <div className="sidebar-section-heading">
-        <span className="text-sm font-medium">Projects</span>
-      </div>
+      <p className="sidebar-heading sidebar-section-heading">Projects</p>
 
       <section className="sidebar-panel" aria-label="Projects and sessions">
         <label className="sr-only" htmlFor="session-search">Search projects and sessions</label>

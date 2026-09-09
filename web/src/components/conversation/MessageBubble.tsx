@@ -10,7 +10,7 @@ import { usePluginContributions } from '@/plugin-contributions';
 import type { MessageItem } from '@/protocol.gen';
 import { clip } from '@/safety';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Code2, Copy, Text } from 'lucide-react';
 
 function attachmentImageSrc(attachment: NonNullable<MessageItem['attachments']>[number]): string | null {
   if (!attachment.mimeType.startsWith('image/') || !attachment.data) return null;
@@ -26,6 +26,7 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
   const canShowActions = !isUser && !message.streaming;
   const canCopy = canShowActions && message.text.trim().length > 0;
   const [copied, setCopied] = useState(false);
+  const [showUserSource, setShowUserSource] = useState(false);
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previousStreamRef = useRef({ id: message.id, textLength: message.text.length, phase: false });
   const previousStream = previousStreamRef.current;
@@ -57,6 +58,20 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
 
   return (
     <article className={`msg msg-${isUser ? 'user' : 'assistant'}${canShowActions ? ' msg-actionable' : ''}`} aria-label={`${message.role} message`}>
+      {isUser ? (
+        <div className="msg-user-actions">
+          <Tooltip>
+            <TooltipTrigger render={
+              <Button type="button" size="icon-xs" variant="ghost" className="msg-user-view-toggle"
+                aria-label={showUserSource ? 'Render user message as Markdown' : 'View user message source'}
+                onClick={() => setShowUserSource(current => !current)}>
+                {showUserSource ? <Text aria-hidden="true" /> : <Code2 aria-hidden="true" />}
+              </Button>
+            } />
+            <TooltipContent>{showUserSource ? 'Render Markdown' : 'View source'}</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       {canShowActions ? (
         <div className="msg-actions">
           {contributionContext ? <PluginSlotView slot="assistant-message.actions" context={{ ...contributionContext, message }} /> : null}
@@ -105,7 +120,7 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
           <Markdown streaming animateFrom={animateFrom} animationPhase={animationPhase}>{message.text}</Markdown>
           <span className="caret" aria-hidden="true" />
         </div>
-      ) : isUser ? <pre className="msg-plain">{message.text}</pre> : <Markdown>{message.text}</Markdown>}
+      ) : isUser && showUserSource ? <pre className="msg-plain">{message.text}</pre> : <Markdown>{message.text}</Markdown>}
     </article>
   );
 }
