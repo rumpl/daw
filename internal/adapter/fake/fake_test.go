@@ -9,10 +9,7 @@ import (
 
 func TestCloseWhileEmittingEvents(t *testing.T) {
 	for range 100 {
-		c := &chat{
-			events:  make(chan protocol.Event, 1),
-			pending: map[string]chan reply{},
-		}
+		c := &chat{events: make(chan protocol.Event, 1)}
 		var emitters sync.WaitGroup
 		for range 8 {
 			emitters.Go(func() {

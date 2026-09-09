@@ -18,16 +18,10 @@ import (
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/tools"
-	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/sessionlineage"
 )
-
-type pendingTool struct {
-	call    tools.ToolCall
-	pattern string
-}
 
 type partialTool struct {
 	call       tools.ToolCall
@@ -51,10 +45,10 @@ type chat struct {
 	run          protocol.RunStatus
 	cancel       context.CancelFunc
 	generation   uint64
-	pendingTools map[string]pendingTool
 	partialTools map[string]partialTool
-	pendingElic  map[string]struct{}
-	grants       []string
+	// autoApproving holds tool calls whose confirmation is being answered
+	// automatically until the runtime acknowledges the approval.
+	autoApproving map[string]struct{}
 	// unsaved marks a brand-new session whose row is created lazily, on the
 	// first real prompt, exactly as the CLI does.
 	unsaved      bool
@@ -121,7 +115,6 @@ func (c *chat) startBackgroundBridges() {
 
 func (c *chat) Meta() protocol.SessionMeta {
 	c.mu.Lock()
-	grants := append([]string(nil), c.grants...)
 	model, thinking, levels := c.model, c.thinking, append([]string(nil), c.thinkLevels...)
 	ignore := c.agentsIgnore
 	c.mu.Unlock()
@@ -138,7 +131,7 @@ func (c *chat) Meta() protocol.SessionMeta {
 		levels = c.supportedThinkingLevels()
 	}
 	checker := c.team.Permissions()
-	view := viewFromChecker(checker, grants)
+	view := viewFromChecker(checker)
 	view.AgentsIgnore = ignore
 	if sp := c.sess.ClonePermissions(); sp != nil {
 		view.Allow = append(sp.Allow, view.Allow...)
@@ -478,6 +471,7 @@ func (c *chat) settle(gen uint64) {
 	c.run = protocol.RunStatus{State: protocol.RunStateIdle}
 	c.cancel = nil
 	clear(c.partialTools)
+	clear(c.autoApproving)
 	c.mu.Unlock()
 
 	// Confirm the runtime really is idle and both queues are drained before
@@ -520,96 +514,13 @@ func (c *chat) Abort() {
 	if c.run.State == protocol.RunStateRunning {
 		c.run.State = protocol.RunStateStopping
 	}
-	// Reject anything blocking so the runtime can unwind.
-	pendingTools := make([]string, 0, len(c.pendingTools))
-	for id := range c.pendingTools {
-		pendingTools = append(pendingTools, id)
-	}
-	pendingElic := make([]string, 0, len(c.pendingElic))
-	for id := range c.pendingElic {
-		pendingElic = append(pendingElic, id)
-	}
+	clear(c.autoApproving)
 	c.mu.Unlock()
 
-	ctx := context.Background()
-	for range pendingTools {
-		c.rt.Resume(ctx, daruntime.ResumeReject("the user stopped the run"))
-	}
-	for _, id := range pendingElic {
-		_ = c.rt.ResumeElicitation(ctx, tools.ElicitationActionCancel, nil, id)
-	}
 	c.publishRun()
 	if cancel != nil {
 		cancel()
 	}
-}
-
-// ---------------------------------------------------------------------------
-// interactive surfaces
-// ---------------------------------------------------------------------------
-
-// Confirm applies the user's decision. The permission pattern granted is the
-// one built by toolconfirm.BuildPermissionPattern when the dialog was raised —
-// the same string the user was shown.
-func (c *chat) Confirm(ctx context.Context, toolCallID string, decision protocol.ToolDecision, reason string) error {
-	c.mu.Lock()
-	pt, ok := c.pendingTools[toolCallID]
-	if !ok {
-		c.mu.Unlock()
-		return adapter.ErrNotFound
-	}
-	delete(c.pendingTools, toolCallID)
-	if decision == protocol.DecisionApproveAlways {
-		c.grants = append(c.grants, pt.pattern)
-	}
-	c.mu.Unlock()
-
-	var d toolconfirm.Decision
-	switch decision {
-	case protocol.DecisionApprove:
-		d = toolconfirm.Approve
-	case protocol.DecisionApproveAlways:
-		d = toolconfirm.ApproveTool
-	case protocol.DecisionReject:
-		d = toolconfirm.Reject
-	default:
-		return adapter.ErrNotFound
-	}
-	c.rt.Resume(ctx, d.Resume(pt.pattern, reason))
-	c.emit(protocol.Event{Type: protocol.EventToolResolved, ToolResolved: &protocol.ToolResolved{
-		ToolCallID: toolCallID, Decision: decision, Pattern: pt.pattern,
-	}})
-	return nil
-}
-
-// Elicit answers one elicitation, correlated by its ID.
-func (c *chat) Elicit(ctx context.Context, id string, action protocol.ElicitationAction, content map[string]any) error {
-	c.mu.Lock()
-	_, ok := c.pendingElic[id]
-	if !ok {
-		c.mu.Unlock()
-		return adapter.ErrNotFound
-	}
-	delete(c.pendingElic, id)
-	c.mu.Unlock()
-
-	var a tools.ElicitationAction
-	switch action {
-	case protocol.ElicitAccept:
-		a = tools.ElicitationActionAccept
-	case protocol.ElicitDecline:
-		a = tools.ElicitationActionDecline
-	default:
-		a = tools.ElicitationActionCancel
-	}
-	if err := c.rt.ResumeElicitation(ctx, a, content, id); err != nil {
-		return err
-	}
-	c.emit(protocol.Event{
-		Type:           protocol.EventElicitResolved,
-		ElicitResolved: &protocol.ElicitResolved{ElicitationID: id},
-	})
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -824,7 +735,7 @@ func (c *chat) Stats(context.Context) protocol.Stats {
 	}
 }
 
-// Close disposes the chat: cancel pending dialogs, stop the run, close the
+// Close disposes the chat: stop the run, close the
 // runtime and stop the toolsets. The shared session store is NOT closed here.
 func (c *chat) Close(ctx context.Context) error {
 	c.Abort()
@@ -837,15 +748,6 @@ func (c *chat) Close(ctx context.Context) error {
 	c.closed = true
 	c.generation++
 	c.mu.Unlock()
-
-	// Persist final metadata before tearing down — but never create a row for
-	// a session that was opened and closed without a single prompt.
-	c.mu.Lock()
-	unsaved := c.unsaved
-	c.mu.Unlock()
-	if !unsaved {
-		_ = c.a.store.UpdateSession(ctx, c.sess)
-	}
 
 	if err := c.rt.Close(); err != nil {
 		c.a.log.Warn("closing runtime", "error", err)

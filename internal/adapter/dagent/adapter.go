@@ -3,8 +3,7 @@
 //
 // Why the raw runtime rather than pkg/embeddedchat: embeddedchat's compact
 // Event type projects only text, tool activity, error and Done. This dashboard
-// needs the full stream — reasoning deltas, elicitation IDs for correlation,
-// sub-agent transfers, token/cost, compaction, retries, toolset warnings and
+// needs the full stream — reasoning deltas, sub-agent transfers, token/cost, compaction, retries, toolset warnings and
 // per-session permission control — so it subscribes to runtime.RunStream
 // directly, exactly as pkg/cli and the TUI do.
 //
@@ -303,8 +302,8 @@ func (a *Adapter) runtimeConfig(workingDir string) *dacfg.RuntimeConfig {
 	return rc
 }
 
-func viewFromChecker(c *permissions.Checker, grants []string) protocol.PermissionsView {
-	v := protocol.PermissionsView{SessionGrants: grants}
+func viewFromChecker(c *permissions.Checker) protocol.PermissionsView {
+	v := protocol.PermissionsView{}
 	if c != nil {
 		v.Allow = c.AllowPatterns()
 		v.Ask = c.AskPatterns()
@@ -334,10 +333,21 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 			Attributes: summary.Attributes,
 			CreatedAt:  summary.CreatedAt.UTC().Format(time.RFC3339),
 			Messages:   summary.NumMessages,
+			Starred:    summary.Starred,
 			// Cost:       summary.Cost,
 		})
 	}
 	return out, nil
+}
+
+func (a *Adapter) SetSessionStarred(ctx context.Context, sessionID string, starred bool) error {
+	if err := a.store.SetSessionStarred(ctx, sessionID, starred); err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			return adapter.ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
@@ -520,9 +530,7 @@ func (a *Adapter) OpenChat(ctx context.Context, req adapter.OpenRequest) (adapte
 		workingDir:   req.WorkingDir,
 		events:       make(chan protocol.Event, 512),
 		unsaved:      newSession,
-		pendingTools: map[string]pendingTool{},
 		partialTools: map[string]partialTool{},
-		pendingElic:  map[string]struct{}{},
 		agentsIgnore: agentsIgnore,
 		run:          protocol.RunStatus{State: protocol.RunStateIdle},
 		steerQueue:   steerQueue,

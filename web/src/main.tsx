@@ -7,6 +7,7 @@ import './styles.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('missing #root');
+if (new URLSearchParams(window.location.search).has('electron')) document.documentElement.classList.add('electron');
 createRoot(root).render(
   <StrictMode>
     <AppTheme>

@@ -16,6 +16,26 @@ function loadDraft(sessionId: string | null): DraftEntry {
   }
 }
 
+export function clearDraft(sessionId: string | null) {
+  if (!sessionId) return;
+  try {
+    localStorage.removeItem(LS_DRAFT + sessionId);
+  } catch {
+    /* Storage is optional. */
+  }
+}
+
+export function migrateDraft(fromSessionId: string, toSessionId: string) {
+  if (fromSessionId === toSessionId) return;
+  try {
+    const text = localStorage.getItem(LS_DRAFT + fromSessionId);
+    if (text !== null) localStorage.setItem(LS_DRAFT + toSessionId, text);
+    localStorage.removeItem(LS_DRAFT + fromSessionId);
+  } catch {
+    /* Storage is optional. */
+  }
+}
+
 /** Persists a separate composer draft for each stable session id. */
 export function useDraft(sessionId: string | null) {
   const [entry, setEntry] = useState<DraftEntry>(() => loadDraft(sessionId));

@@ -21,7 +21,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"), req.ExecutionTarget)
+	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"), req.ExecutionTarget, req.OperationID)
 }
 
 func (s *Server) pluginMCPServers() []adapter.MCPServer {
@@ -108,10 +108,10 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]))
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]), req.OperationID)
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget, operationID string) {
 	ws, ok := s.workspaces.Get(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
@@ -194,11 +194,35 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		return
 	}
 
+	if executionTarget != protocol.ExecutionTargetSandbox {
+		operationID = ""
+	}
+	operationID = strings.TrimSpace(operationID)
+	if len(operationID) > 128 {
+		s.fail(w, http.StatusBadRequest, "invalid_operation", "the provisioning operation id is too long")
+		return
+	}
+	publishProvisioning := func(event adapter.ProvisioningEvent) {
+		if operationID == "" {
+			return
+		}
+		s.events.publish(protocol.DashboardEvent{
+			Type:         protocol.DashboardEventSandboxProvisioning,
+			WorkspaceIDs: []string{workspaceID},
+			Provisioning: &protocol.SandboxProvisioning{
+				OperationID: operationID, Phase: event.Phase, Message: event.Message, Done: event.Done,
+			},
+		})
+	}
+
 	chatID := newOpaqueID("chat")
 	creationContext := s.sessionContexts.Issue(sessioncontext.Context{ParentChatID: chatID})
 	preference := s.preferences.Get(resumeID)
 	c, err := s.adapter.OpenChat(r.Context(), adapter.OpenRequest{
-		ChatID: chatID, SessionContext: creationContext, WorkingDir: workingDir, ResumeSessionID: resumeID,
+		ChatID:             chatID,
+		SessionContext:     creationContext,
+		WorkingDir:         workingDir,
+		ResumeSessionID:    resumeID,
 		ExecutionTarget:    executionTarget,
 		SessionAttributes:  attributes,
 		PersistImmediately: persistImmediately,
@@ -206,8 +230,10 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 		ThinkingLevel:      preference.ThinkingLevel,
 		DisabledTools:      preference.DisabledTools,
 		MCPServers:         s.pluginMCPServers(),
+		Progress:           publishProvisioning,
 	})
 	if err != nil {
+		publishProvisioning(adapter.ProvisioningEvent{Phase: "error", Message: "Sandbox provisioning failed.", Done: true})
 		s.sessionContexts.Revoke(creationContext)
 		switch {
 		case errors.Is(err, adapter.ErrNotFound):
@@ -263,6 +289,7 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	s.publishSessionsChanged(ws.ID, sessionID, "opened")
 	s.log.Info("chat opened", "chat", chatID, "session", sessionID, "workspace", ws.ID, "resumed", resumeID != "")
 
+	publishProvisioning(adapter.ProvisioningEvent{Phase: "ready", Message: "Sandbox ready.", Done: true})
 	s.json(w, http.StatusCreated, protocol.ChatRef{ChatID: chatID, SessionID: sessionID})
 }
 
@@ -430,64 +457,6 @@ func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name < cmds[j].Name })
 	s.json(w, http.StatusOK, cmds)
-}
-
-func (s *Server) handleToolConfirmation(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.mustChat(w, r)
-	if !ok {
-		return
-	}
-	req, ok := decode[protocol.ToolConfirmationReply](w, r, s)
-	if !ok {
-		return
-	}
-	switch req.Decision {
-	case protocol.DecisionApprove, protocol.DecisionApproveAlways, protocol.DecisionReject:
-	default:
-		s.fail(w, http.StatusBadRequest, "invalid_decision", "unknown decision")
-		return
-	}
-	c.mu.Lock()
-	_, pending := c.pendingC[req.ToolCallID]
-	c.mu.Unlock()
-	if !pending {
-		s.fail(w, http.StatusNotFound, "unknown_confirmation", "no such pending confirmation")
-		return
-	}
-	if err := c.chat.Confirm(r.Context(), req.ToolCallID, req.Decision, req.Reason); err != nil {
-		s.fail(w, http.StatusConflict, "confirm_failed", "that confirmation is no longer pending")
-		return
-	}
-	s.json(w, http.StatusAccepted, protocol.Accepted{Accepted: true})
-}
-
-func (s *Server) handleElicitation(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.mustChat(w, r)
-	if !ok {
-		return
-	}
-	req, ok := decode[protocol.ElicitationReply](w, r, s)
-	if !ok {
-		return
-	}
-	switch req.Action {
-	case protocol.ElicitAccept, protocol.ElicitDecline, protocol.ElicitCancel:
-	default:
-		s.fail(w, http.StatusBadRequest, "invalid_action", "unknown elicitation action")
-		return
-	}
-	c.mu.Lock()
-	_, pending := c.pendingE[req.ElicitationID]
-	c.mu.Unlock()
-	if !pending {
-		s.fail(w, http.StatusNotFound, "unknown_elicitation", "no such pending elicitation")
-		return
-	}
-	if err := c.chat.Elicit(r.Context(), req.ElicitationID, req.Action, req.Content); err != nil {
-		s.fail(w, http.StatusConflict, "elicit_failed", "that elicitation is no longer pending")
-		return
-	}
-	s.json(w, http.StatusAccepted, protocol.Accepted{Accepted: true})
 }
 
 func (s *Server) handleRetitle(w http.ResponseWriter, r *http.Request) {

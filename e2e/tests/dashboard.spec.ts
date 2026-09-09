@@ -68,6 +68,44 @@ async function startChat(page: Page, message: string) {
 }
 
 test.describe('dashboard', () => {
+  test('new-chat tabs are distinct, closable, and survive leaving a session URL', async ({ page }) => {
+    await page.goto('/');
+    await openDrawerIfMobile(page);
+    await openWorkspaceAndAgent(page);
+    if ((page.viewportSize()?.width ?? 0) <= 820) await page.keyboard.press('Escape');
+
+    // Start from a persisted session URL, which is the transition that used to
+    // remount Dashboard and discard all client-side tabs.
+    await composer(page).fill('Create the first session');
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page).toHaveURL(/\/sessions\//);
+    await expect(page.locator('.session-tab')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Open new chat tab' }).click();
+    await expect(page).toHaveURL('/');
+    await expect(page.locator('.session-tab')).toHaveCount(2);
+    await expect(page.getByRole('button', { name: 'Close session tab New chat' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Open new chat tab' }).click();
+    await expect(page.locator('.session-tab')).toHaveCount(3);
+    await expect(page.getByRole('button', { name: 'Close session tab New chat' })).toHaveCount(2);
+
+    await page.getByRole('button', { name: 'Close session tab New chat' }).last().click();
+    await expect(page.locator('.session-tab')).toHaveCount(2);
+
+    await page.getByRole('button', { name: 'Close session tab New chat' }).click();
+    await page.getByRole('button', { name: 'Close session tab Create the first session' }).click();
+    await expect(page.locator('.session-tab')).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.locator('.session-tab')).toHaveCount(0);
+
+    await openDrawerIfMobile(page);
+    const persistedSession = page.locator('.session-list button', { hasText: 'Create the first session' }).first();
+    await persistedSession.click();
+    await expect(page.locator('.session-tab')).toHaveCount(1);
+  });
+
   test('loads and hot-reloads a global plugin with host components and backend API', async ({ page }) => {
     writeFileSync(join(pluginDir, 'index.js'), pluginEntry('Plugin API'));
     await page.goto('/');
@@ -108,6 +146,9 @@ test.describe('dashboard', () => {
     await page.getByRole('button', { name: 'Send' }).click();
     await expect(page).toHaveURL(/\/sessions\//);
     await expect(composer(page)).toHaveValue('');
+    await expect.poll(() => page.evaluate(() =>
+      Object.keys(localStorage).filter((key) => key.startsWith('dawui.draft.')),
+    )).toEqual([]);
   });
 
   test('model picker: search, keyboard select, and it applies', async ({ page }) => {
@@ -164,29 +205,6 @@ test.describe('dashboard', () => {
 
     await expect(page.getByLabel('tool shell')).toBeVisible();
     await expect(page.getByRole('alertdialog')).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 20_000 });
-  });
-
-  test('explicit permission rule: send, confirm tool, settle', async ({ page }) => {
-    await page.goto('/');
-    await openDrawerIfMobile(page);
-    await openWorkspaceAndAgent(page);
-    await startChat(page, '/confirm list the files');
-
-    // Streaming assistant text appears.
-    await expect(page.getByLabel('assistant message')).toBeVisible();
-
-    // The tool confirmation dialog is impossible to miss and shows the exact
-    // pattern that would be granted.
-    const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('shell');
-    await expect(dialog).toContainText('Always-allow would grant exactly:');
-    await dialog.getByRole('button', { name: 'Approve once' }).click();
-
-    await expect(dialog).toBeHidden();
-    await expect(page.getByLabel('tool shell')).toBeVisible();
-    // Settled: Send is back.
     await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 20_000 });
   });
 

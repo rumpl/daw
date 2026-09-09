@@ -1,8 +1,8 @@
 {
   "name": "daw-desktop",
   "version": "1.0.0",
-  "description": "Electron desktop host for the Docker Agent dashboard",
-  "author": "DAW contributors",
+  "description": "Electron desktop host for Atelier, the programmable coding studio",
+  "author": "Atelier contributors",
   "private": true,
   "main": "main.cjs",
   "scripts": {
@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.docker.daw",
-    "productName": "Docker Agent Dashboard",
+    "productName": "Atelier",
     "asar": true,
     "files": [
       "main.cjs",
@@ -32,12 +32,20 @@
         "to": "backend/daw-sandbox"
       },
       {
-        "from": "../kits/daw-runner",
-        "to": "kits/daw-runner"
+        "from": "../bin/daw-runner-kit.ref",
+        "to": "backend/daw-runner-kit.ref"
       },
       {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "build/trayTemplate.png",
+        "to": "trayTemplate.png"
+      },
+      {
+        "from": "build/trayTemplate@2x.png",
+        "to": "trayTemplate@2x.png"
       }
     ],
     "directories": {

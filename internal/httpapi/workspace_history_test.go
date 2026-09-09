@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,6 +94,44 @@ func TestWorkspaceHistoryPersistsAndIsSharedThroughBootstrap(t *testing.T) {
 	open(s1, ts1, first)
 	open(s1, ts1, second)
 	open(s1, ts1, first) // reopening promotes it to the front
+
+	folderBody, err := json.Marshal(protocol.UpdateProjectFoldersRequest{Folders: []protocol.ProjectFolder{{
+		ID: "work", Name: "Work", Paths: []string{canonicalFirst},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderReq, err := http.NewRequestWithContext(t.Context(), http.MethodPut, ts1.URL+"/api/project-folders", bytes.NewReader(folderBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderReq.Header.Set("Content-Type", "application/json")
+	folderReq.Header.Set(CSRFHeader, s1.CSRFToken())
+	folderReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	folderResp, err := http.DefaultClient.Do(folderReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderResp.Body.Close()
+	if folderResp.StatusCode != http.StatusOK {
+		t.Fatalf("update folders: status %d", folderResp.StatusCode)
+	}
+
+	removeURL := ts1.URL + "/api/workspaces?path=" + url.QueryEscape(canonicalSecond)
+	removeReq, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, removeURL, http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeReq.Header.Set(CSRFHeader, s1.CSRFToken())
+	removeReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	removeResp, err := http.DefaultClient.Do(removeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeResp.Body.Close()
+	if removeResp.StatusCode != http.StatusOK {
+		t.Fatalf("remove workspace: status %d", removeResp.StatusCode)
+	}
 	stop(s1, ts1)
 
 	if info, err := os.Stat(historyFile); err != nil {
@@ -105,11 +144,11 @@ func TestWorkspaceHistoryPersistsAndIsSharedThroughBootstrap(t *testing.T) {
 	// MRU list without relying on localStorage.
 	s2, ts2 := start()
 	b := bootstrap(ts2)
-	if len(b.WorkspaceHints) != 2 {
-		t.Fatalf("workspace hints = %#v", b.WorkspaceHints)
+	if len(b.WorkspaceHints) != 1 || b.WorkspaceHints[0].Path != canonicalFirst {
+		t.Fatalf("workspace hints after removal = %#v", b.WorkspaceHints)
 	}
-	if b.WorkspaceHints[0].Path != canonicalFirst || b.WorkspaceHints[1].Path != canonicalSecond {
-		t.Fatalf("workspace hint order = %#v, want first then second", b.WorkspaceHints)
+	if len(b.ProjectFolders) != 1 || b.ProjectFolders[0].Name != "Work" || len(b.ProjectFolders[0].Paths) != 1 || b.ProjectFolders[0].Paths[0] != canonicalFirst {
+		t.Fatalf("project folders after restart = %#v", b.ProjectFolders)
 	}
 	stop(s2, ts2)
 

@@ -37,7 +37,7 @@ export function ChatHeader({ hasChat, state, busyAction, menuButton, drawerOpen,
         ) : null}
 
         <div className="topbar-title">
-          <h1>{clip(state.meta?.title || 'docker-agent', 80)}</h1>
+          {state.meta?.title ? <h1>{clip(state.meta.title, 80)}</h1> : null}
           {hasChat && state.meta ? (
             <Tooltip>
               <TooltipTrigger render={

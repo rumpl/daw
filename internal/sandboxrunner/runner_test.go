@@ -1,7 +1,6 @@
 package sandboxrunner
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,7 +49,7 @@ func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	process, err := startRunner(t.Context(), sbx.New(sbx.WithBinary(binary)), "session-one", "secret")
+	process, err := startRunner(t.Context(), sbx.New(sbx.WithBinary(binary)), "session-one", "/workspace", "runner-secret", "store-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +61,7 @@ func TestStartRunnerUsesPostRunExecContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(args)
-	for _, want := range []string{"exec\n", "session-one\n", "DAW_SESSION_STORE_TOKEN", "chmod 0755 /home/agent/.local/lib/daw-runner", "start-daw-runner"} {
+	for _, want := range []string{"exec\n", "session-one\n", "DAW_SESSION_STORE_TOKEN", "DAW_RUNNER_TOKEN", "DAW_RUNNER_WORKSPACE", "/home/agent/.local/lib/daw-runner"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("start command %q does not contain %q", got, want)
 		}
@@ -80,25 +79,20 @@ printf '%s\n' "$*" >>"` + logFile + `"
 	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	kit := filepath.Join(dir, "kit")
-	runnerBinary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")
-	if err := os.MkdirAll(filepath.Dir(runnerBinary), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(runnerBinary, []byte("runner"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kit, "spec.yaml"), []byte("schemaVersion: 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	name := "gateway-test-" + filepath.Base(dir)
 	t.Cleanup(func() { _ = RemoveToken(name) })
+	var phases []string
 	got, err := Start(t.Context(), sbx.New(sbx.WithBinary(binary)), Options{
-		Workspace: dir, Kit: kit, Name: name, SkipRunner: true,
-		ModelsGateway: "https://ai-gateway.docker.com/v1",
+		Workspace: dir, Kit: "docker.io/example/daw-runner:test", Name: name,
+		SessionStoreToken: "store-secret",
+		ModelsGateway:     "https://ai-gateway.docker.com/v1",
+		Progress:          func(phase, _ string) { phases = append(phases, phase) },
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Join(phases, ",") != "starting,configuring,runner" {
+		t.Fatalf("progress phases = %v", phases)
 	}
 	if got.GatewayAuthHost != "ai-gateway.docker.com" {
 		t.Fatalf("gateway auth host = %q", got.GatewayAuthHost)
@@ -112,57 +106,42 @@ printf '%s\n' "$*" >>"` + logFile + `"
 			t.Fatalf("sbx commands do not contain %q:\n%s", want, commands)
 		}
 	}
-}
-
-func TestTemplateDigestIncludesRunnerMode(t *testing.T) {
-	kit := t.TempDir()
-	binary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")
-	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(binary, []byte("runner"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kit, "spec.yaml"), []byte("schemaVersion: 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	withoutExec, err := templateDigest(kit, 0, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(binary, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	withExec, err := templateDigest(kit, 0, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if withoutExec == withExec {
-		t.Fatal("template digest did not change when runner execute bits changed")
+	if strings.Contains(string(commands), "ports "+name) {
+		t.Fatalf("new sandbox performed redundant existence probe:\n%s", commands)
 	}
 }
 
-func TestStageKitOmitsRunnerWhenTemplateContainsIt(t *testing.T) {
-	kit := t.TempDir()
-	binary := filepath.Join(kit, "files", "home", ".local", "lib", "daw-runner")
-	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+func TestStartReattachesPersistedSandboxByName(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "args")
+	binary := filepath.Join(dir, "sbx")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >>" + logFile + "\n"
+	if err := os.WriteFile(binary, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(binary, []byte("runner"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kit, "spec.yaml"), []byte("schemaVersion: 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	staged, cleanup, err := stageKit(kit, strings.Repeat("a", 64), false)
+	name := "reuse-test-" + filepath.Base(dir)
+	t.Cleanup(func() { _ = RemoveToken(name) })
+	got, err := Start(t.Context(), sbx.New(sbx.WithBinary(binary)), Options{
+		Workspace: dir, Kit: "docker.io/example/daw-runner:test", Name: name,
+		Reuse: true, SessionStoreToken: "store-secret",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cleanup()
-	if _, err := os.Stat(filepath.Join(staged, "files", "home", ".local", "lib", "daw-runner")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("template-baked runner remains in staged kit: %v", err)
+	if err := got.Process.Wait(); err != nil {
+		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(filepath.Join(staged, "files", "home", ".config", "daw", "runner-token")); err != nil || strings.TrimSpace(string(data)) != strings.Repeat("a", 64) {
-		t.Fatalf("staged token = %q, %v", data, err)
+	commands, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(commands), "run ") {
+		t.Fatalf("persisted sandbox used redundant sbx run before exec:\n%s", commands)
+	}
+	if !strings.Contains(string(commands), "exec --interactive "+name) {
+		t.Fatalf("persisted sandbox did not use direct exec:\n%s", commands)
+	}
+	if strings.Contains(string(commands), "docker.io/example/daw-runner:test") || strings.Contains(string(commands), dir+" ") {
+		t.Fatalf("reattach command includes creation options:\n%s", commands)
 	}
 }

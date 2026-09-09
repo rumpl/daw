@@ -43,6 +43,32 @@ func (s *Server) handleOpenWorkspace(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, ws)
 }
 
+func (s *Server) handleRemoveWorkspace(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		s.fail(w, http.StatusBadRequest, "missing_path", "workspace path is required")
+		return
+	}
+	if err := s.workspaces.Remove(path); err != nil {
+		s.log.Warn("remove workspace failed", "path", path, "error", err)
+		s.fail(w, http.StatusInternalServerError, "workspace_remove_failed", "the project could not be removed")
+		return
+	}
+	s.json(w, http.StatusOK, protocol.Accepted{Accepted: true})
+}
+
+func (s *Server) handleUpdateProjectFolders(w http.ResponseWriter, r *http.Request) {
+	req, ok := decode[protocol.UpdateProjectFoldersRequest](w, r, s)
+	if !ok {
+		return
+	}
+	if err := s.workspaces.UpdateFolders(req.Folders); err != nil {
+		s.fail(w, http.StatusBadRequest, "invalid_project_folders", err.Error())
+		return
+	}
+	s.json(w, http.StatusOK, protocol.Accepted{Accepted: true})
+}
+
 func (s *Server) failPath(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pathsec.ErrOutsideRoots):
@@ -71,6 +97,33 @@ func (s *Server) exposeSession(summary *protocol.SessionSummary) {
 	if summary.ExecutionTarget == "" {
 		summary.ExecutionTarget = s.defaultExecutionTarget
 	}
+}
+
+func (s *Server) handleListAllSessions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.adapter.ListSessions(r.Context(), "")
+	if err != nil {
+		s.log.Warn("list all sessions failed", "error", err)
+		s.fail(w, http.StatusInternalServerError, "session_list_failed",
+			"the docker-agent session store could not be listed")
+		return
+	}
+	liveChats := s.chats.bySessionSnapshot()
+	for i := range list {
+		s.exposeSession(&list[i])
+		if list[i].Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
+			list[i].WorkingDir = list[i].Attributes[executionlocations.AttributeWorkspacePath]
+		}
+		if chat := liveChats[list[i].SessionID]; chat != nil {
+			state := chat.runState()
+			list[i].Live = true
+			list[i].ChatID = chat.id
+			list[i].RunState = &state
+		}
+	}
+	if list == nil {
+		list = []protocol.SessionSummary{}
+	}
+	s.json(w, http.StatusOK, list)
 }
 
 func (s *Server) handleListLiveSessions(w http.ResponseWriter, r *http.Request) {
@@ -215,6 +268,42 @@ func nonNegativeQueryInt(r *http.Request, key string, fallback int) (int, error)
 		return 0, errors.New("invalid non-negative integer")
 	}
 	return n, nil
+}
+
+func (s *Server) handleSetSessionStarred(w http.ResponseWriter, r *http.Request) {
+	var summary *protocol.SessionSummary
+	list, err := s.adapter.ListSessions(r.Context(), "")
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "session_list_failed", "the docker-agent session store could not be listed")
+		return
+	}
+	for i := range list {
+		if list[i].SessionID == r.PathValue("sessionId") {
+			summary = &list[i]
+			break
+		}
+	}
+	if summary == nil {
+		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
+		return
+	}
+	req, ok := decode[struct {
+		Starred bool `json:"starred"`
+	}](w, r, s)
+	if !ok {
+		return
+	}
+	if err := s.adapter.SetSessionStarred(r.Context(), r.PathValue("sessionId"), req.Starred); err != nil {
+		if errors.Is(err, adapter.ErrNotFound) {
+			s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
+		} else {
+			s.log.Warn("star session failed", "session", r.PathValue("sessionId"), "error", err)
+			s.fail(w, http.StatusInternalServerError, "session_star_failed", "the session could not be updated")
+		}
+		return
+	}
+	s.publishSessionsChanged("", r.PathValue("sessionId"), "starred")
+	s.json(w, http.StatusOK, protocol.Accepted{Accepted: true})
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

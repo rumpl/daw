@@ -64,6 +64,9 @@ type OpenRequest struct {
 	SessionContext  string
 	WorkingDir      string
 	ResumeSessionID string
+	// Progress receives non-blocking lifecycle updates while a slow execution
+	// environment is being prepared. Adapters that need no provisioning ignore it.
+	Progress func(ProvisioningEvent) `json:"-"`
 	// ExecutionTarget is used only while creating a session. Resumes are routed
 	// to the session's original target and cannot migrate between runtimes.
 	ExecutionTarget protocol.ExecutionTarget
@@ -85,6 +88,12 @@ type OpenRequest struct {
 	MCPServers    []MCPServer
 }
 
+type ProvisioningEvent struct {
+	Phase   string
+	Message string
+	Done    bool
+}
+
 // Adapter is the process-wide docker-agent facade. It owns the single shared
 // session store.
 type Adapter interface {
@@ -95,6 +104,8 @@ type Adapter interface {
 	// ReadSession reads persisted session history without constructing a live
 	// runtime, loading toolsets, or claiming the session in the chat registry.
 	ReadSession(ctx context.Context, sessionID string) (StoredSession, error)
+	// SetSessionStarred persists whether a session is pinned to the top of its project list.
+	SetSessionStarred(ctx context.Context, sessionID string, starred bool) error
 	// ModelsGateway reads and updates docker-agent's native, process-wide models
 	// gateway setting. The URL is not a credential; for Docker gateways,
 	// docker-agent obtains authentication from Docker Desktop through its normal
@@ -137,9 +148,6 @@ type Chat interface {
 
 	Send(ctx context.Context, text string, attachments []Attachment, preferred protocol.DeliveryMode) (mode protocol.DeliveryMode, runID string, queued bool, err error)
 	Abort()
-
-	Confirm(ctx context.Context, toolCallID string, decision protocol.ToolDecision, reason string) error
-	Elicit(ctx context.Context, elicitationID string, action protocol.ElicitationAction, content map[string]any) error
 
 	Models(ctx context.Context) []protocol.ModelOption
 	Commands(ctx context.Context) []protocol.CommandInfo

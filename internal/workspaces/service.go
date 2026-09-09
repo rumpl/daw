@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/rumpl/daw/internal/pathsec"
@@ -30,6 +31,7 @@ type Service struct {
 	log         *slog.Logger
 	entries     map[string]*Workspace
 	hints       []protocol.WorkspaceHint
+	folders     []protocol.ProjectFolder
 }
 
 func New(guard *pathsec.Guard, historyFile string, log *slog.Logger) *Service {
@@ -73,10 +75,103 @@ func (s *Service) Add(id, path string) {
 	s.entries[id] = &Workspace{ID: id, Path: path}
 }
 
+func (s *Service) Remove(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := make([]protocol.WorkspaceHint, 0, len(s.hints))
+	for _, hint := range s.hints {
+		if hint.Path != path {
+			next = append(next, hint)
+		}
+	}
+	if len(next) == len(s.hints) {
+		return nil
+	}
+	s.hints = next
+	s.removePathFromFoldersLocked(path)
+	if s.historyFile != "" {
+		if err := writeWorkspaceHistory(s.historyFile, s.hints, s.folders); err != nil {
+			return fmt.Errorf("persist workspace removal: %w", err)
+		}
+	}
+	return nil
+}
+
 func (s *Service) Hints() []protocol.WorkspaceHint {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]protocol.WorkspaceHint(nil), s.hints...)
+}
+
+func (s *Service) Folders() []protocol.ProjectFolder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneFolders(s.folders)
+}
+
+func (s *Service) UpdateFolders(folders []protocol.ProjectFolder) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	known := make(map[string]bool, len(s.hints))
+	for _, hint := range s.hints {
+		known[hint.Path] = true
+	}
+	seenIDs := make(map[string]bool, len(folders))
+	seenPaths := make(map[string]bool)
+	next := make([]protocol.ProjectFolder, 0, len(folders))
+	if len(folders) > maxProjectFolders {
+		return fmt.Errorf("too many project folders")
+	}
+	for _, folder := range folders {
+		folder.ID = strings.TrimSpace(folder.ID)
+		folder.Name = strings.TrimSpace(folder.Name)
+		if folder.ID == "" || len(folder.ID) > 100 || seenIDs[folder.ID] {
+			return fmt.Errorf("invalid or duplicate project folder id")
+		}
+		if folder.Name == "" || len(folder.Name) > 80 {
+			return fmt.Errorf("invalid project folder name")
+		}
+		seenIDs[folder.ID] = true
+		paths := make([]string, 0, len(folder.Paths))
+		for _, path := range folder.Paths {
+			if !known[path] || seenPaths[path] {
+				return fmt.Errorf("project folder contains an unknown or duplicate path")
+			}
+			seenPaths[path] = true
+			paths = append(paths, path)
+		}
+		next = append(next, protocol.ProjectFolder{ID: folder.ID, Name: folder.Name, Paths: paths})
+	}
+	if s.historyFile != "" {
+		if err := writeWorkspaceHistory(s.historyFile, s.hints, next); err != nil {
+			return fmt.Errorf("persist project folders: %w", err)
+		}
+	}
+	s.folders = next
+	return nil
+}
+
+func cloneFolders(folders []protocol.ProjectFolder) []protocol.ProjectFolder {
+	result := make([]protocol.ProjectFolder, len(folders))
+	for i, folder := range folders {
+		result[i] = folder
+		result[i].Paths = append([]string(nil), folder.Paths...)
+	}
+	return result
+}
+
+func (s *Service) removePathFromFoldersLocked(path string) {
+	for i := range s.folders {
+		next := s.folders[i].Paths[:0]
+		for _, candidate := range s.folders[i].Paths {
+			if candidate != path {
+				next = append(next, candidate)
+			}
+		}
+		s.folders[i].Paths = next
+	}
 }
 
 func (s *Service) Path(id string) (string, bool) {
@@ -101,7 +196,7 @@ func (s *Service) rememberLocked(path string) {
 	}
 	s.hints = next
 	if s.historyFile != "" {
-		if err := writeWorkspaceHistory(s.historyFile, s.hints); err != nil {
+		if err := writeWorkspaceHistory(s.historyFile, s.hints, s.folders); err != nil {
 			s.log.Warn("could not persist workspace history", "error", err)
 		}
 	}
@@ -114,14 +209,16 @@ func newID() string {
 }
 
 const (
-	workspaceHistoryVersion = 1
+	workspaceHistoryVersion = 2
 	maxWorkspaceHints       = 10
+	maxProjectFolders       = 50
 	maxWorkspaceHistorySize = 64 << 10
 )
 
 type workspaceHistory struct {
-	Version int      `json:"version"`
-	Paths   []string `json:"paths"`
+	Version int                      `json:"version"`
+	Paths   []string                 `json:"paths"`
+	Folders []protocol.ProjectFolder `json:"folders,omitempty"`
 }
 
 // loadHistory restores the server-wide project list. Every stored path is
@@ -155,6 +252,24 @@ func (s *Service) loadHistory() {
 			break
 		}
 	}
+	known := make(map[string]bool, len(s.hints))
+	for _, hint := range s.hints {
+		known[hint.Path] = true
+	}
+	seenPaths := make(map[string]bool)
+	for _, folder := range history.Folders {
+		if strings.TrimSpace(folder.ID) == "" || strings.TrimSpace(folder.Name) == "" || len(s.folders) == maxProjectFolders {
+			continue
+		}
+		paths := make([]string, 0, len(folder.Paths))
+		for _, path := range folder.Paths {
+			if known[path] && !seenPaths[path] {
+				seenPaths[path] = true
+				paths = append(paths, path)
+			}
+		}
+		s.folders = append(s.folders, protocol.ProjectFolder{ID: folder.ID, Name: folder.Name, Paths: paths})
+	}
 }
 
 func readWorkspaceHistory(path string) (workspaceHistory, error) {
@@ -176,7 +291,7 @@ func readWorkspaceHistory(path string) (workspaceHistory, error) {
 	if err := json.Unmarshal(data, &history); err != nil {
 		return history, fmt.Errorf("decode workspace history: %w", err)
 	}
-	if history.Version != workspaceHistoryVersion {
+	if history.Version != 1 && history.Version != workspaceHistoryVersion {
 		return history, fmt.Errorf("unsupported workspace history version %d", history.Version)
 	}
 	return history, nil
@@ -185,7 +300,7 @@ func readWorkspaceHistory(path string) (workspaceHistory, error) {
 // writeWorkspaceHistory uses a same-directory rename so a crash can leave at
 // most the previous complete list. Paths are private host information, hence
 // both the directory and file are owner-only when they are created here.
-func writeWorkspaceHistory(path string, hints []protocol.WorkspaceHint) (retErr error) {
+func writeWorkspaceHistory(path string, hints []protocol.WorkspaceHint, folders []protocol.ProjectFolder) (retErr error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create workspace history directory: %w", err)
@@ -195,7 +310,7 @@ func writeWorkspaceHistory(path string, hints []protocol.WorkspaceHint) (retErr 
 	for _, hint := range hints {
 		paths = append(paths, hint.Path)
 	}
-	data, err := json.Marshal(workspaceHistory{Version: workspaceHistoryVersion, Paths: paths})
+	data, err := json.Marshal(workspaceHistory{Version: workspaceHistoryVersion, Paths: paths, Folders: folders})
 	if err != nil {
 		return fmt.Errorf("encode workspace history: %w", err)
 	}

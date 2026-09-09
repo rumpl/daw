@@ -1,4 +1,4 @@
-# Docker Agent Dashboard developer API
+# Atelier developer API
 
 This is the complete developer contract for dashboard plugin API version 1.
 Plugins are trusted same-origin browser ES modules. The global plugin directory
@@ -77,6 +77,11 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 - `POST /api/workspaces/open`
   - Body: `{path: string}` where path is absolute and inside the server user's home directory.
   - Returns `200 Workspace`. The opaque `workspaceId` is used in later calls.
+- `DELETE /api/workspaces?path={path}` → `200 Accepted`
+  - Forgets the project from sidebar history without deleting files or sessions.
+- `PUT /api/project-folders` → `200 Accepted`
+  - Body: `{folders: ProjectFolder[]}`. Replaces the server-persisted manual sidebar grouping.
+  - Folder IDs and names must be non-empty and unique; each known project path may appear in at most one folder.
 
 Every chat uses the dashboard's SDK-built coding agent. There is no agent
 selection or agent-resolution API.
@@ -88,8 +93,13 @@ selection or agent-resolution API.
     `gap` invalidations. Reconnect with the last applied sequence; clients
     refresh the corresponding authoritative REST resources.
 
+- `GET /api/sessions` → `200 SessionSummary[]`
+  - Returns every stored session across all workspaces, including live/run state when applicable.
 - `GET /api/sessions/live` → `200 SessionSummary[]`
   - Every session currently owned by this server across all workspaces.
+- `PUT /api/sessions/{sessionId}/starred` → `200 Accepted`
+  - Body: `{starred: boolean}`. Persists whether the session is pinned to the
+    top of its project list.
 - `GET /api/workspaces/{workspaceId}/sessions` → `200 SessionSummary[]`
   - Stored sessions for one opened workspace, including live status.
 - `GET /api/workspaces/{workspaceId}/sessions/{sessionId}` → `200 StoredSession`
@@ -147,13 +157,6 @@ selection or agent-resolution API.
   - Only valid while idle. Returns `200 SessionMeta`.
 - `GET /api/chats/{id}/models` → `200 ModelOption[]`
 - `GET /api/chats/{id}/commands` → `200 CommandInfo[]`
-- `POST /api/chats/{id}/tool-confirmation`
-  - Body: `{toolCallId, decision, reason}`. Decisions: `approve`,
-    `approveAlways`, `reject`. Returns `202 Accepted`.
-  - Use the request's server-produced permission `pattern`; never rebuild it.
-- `POST /api/chats/{id}/elicitation`
-  - Body: `{elicitationId, action, content?}`. Actions: `accept`, `decline`,
-    `cancel`. Returns `202 Accepted`.
 - `POST /api/chats/{id}/retitle`
   - Body: `{title: string}`. Returns `200 Accepted`.
 - `POST /api/chats/{id}/compact` → `202 Accepted`
@@ -172,10 +175,7 @@ The following are the JSON/TypeScript shapes. Go may encode an absent slice as
 ```ts
 type RunState = "idle" | "running" | "stopping";
 type DeliveryMode = "normal" | "steer" | "followUp";
-type ToolState = "pending" | "awaiting_confirmation" | "running" |
-  "success" | "error" | "rejected";
-type ToolDecision = "approve" | "approveAlways" | "reject";
-type ElicitationAction = "accept" | "decline" | "cancel";
+type ToolState = "pending" | "running" | "success" | "error" | "rejected";
 type ExecutionTarget = "host" | "sandbox";
 
 interface Health { status: string; uptimeSeconds: number }
@@ -187,6 +187,7 @@ interface ExecutionTargetOption {
 }
 interface ExecutionTargetPreference { executionTarget: ExecutionTarget }
 interface WorkspaceHint { path: string; label: string }
+interface ProjectFolder { id: string; name: string; paths: string[] | null }
 interface Bootstrap {
   appVersion: string; agentVersion: string; agentCommit: string;
   configDir: string; dataDir: string; cacheDir: string; sessionDb: string;
@@ -194,7 +195,9 @@ interface Bootstrap {
   executionTargets: ExecutionTargetOption[] | null;
   defaultExecutionTarget: ExecutionTarget;
   modelsAvailable: boolean; modelsHint: string;
-  workspaceHints: WorkspaceHint[] | null; notices: Notice[] | null;
+  workspaceHints: WorkspaceHint[] | null;
+  projectFolders: ProjectFolder[] | null;
+  notices: Notice[] | null;
 }
 interface Workspace {
   workspaceId: string; path: string; label: string; notices: Notice[] | null;
@@ -202,11 +205,11 @@ interface Workspace {
 }
 interface PermissionsView {
   allow: string[] | null; ask: string[] | null; deny: string[] | null;
-  agentsIgnore: boolean; sessionGrants: string[] | null;
+  agentsIgnore: boolean;
 }
 interface SessionSummary {
   sessionId: string; title: string; workingDir: string; createdAt: string;
-  messages: number; cost?: number; executionTarget?: ExecutionTarget;
+  messages: number; cost?: number; starred: boolean; executionTarget?: ExecutionTarget;
   live: boolean; chatId?: string; runState?: RunState;
   parentSessionId?: string; rootSessionId?: string; originKind?: string;
   originPluginId?: string;
@@ -264,20 +267,9 @@ type Item =
   | {kind:"transfer"; transfer?:Transfer}
   | {kind:"notice"; notice?:Notice}
   | {kind:"summary"; summary?:Summary};
-interface RejectionReason { label: string; reason: string }
-interface ToolConfirmationRequest {
-  toolCallId: string; toolName: string; displayName?: string; agentName: string;
-  argsSummary: string; pattern: string; patternLabel: string;
-  metadata?: Record<string,string>; rejectionReasons: RejectionReason[] | null;
-}
-interface ElicitationRequest {
-  elicitationId: string; message: string; mode: string; url: string;
-  agentName: string; schema?: unknown;
-}
 interface Snapshot {
   seq: number; meta: SessionMeta; items: Item[] | null; run: RunStatus;
-  usage: Usage; pendingConfirmations: ToolConfirmationRequest[] | null;
-  pendingElicitations: ElicitationRequest[] | null;
+  usage: Usage;
 }
 interface Accepted {
   accepted: boolean; mode: DeliveryMode | ""; runId: string; queued: boolean;
@@ -316,11 +308,6 @@ type Event =
     delta:{itemId:string;text:string}}
  | {type:"assistant_end"|"reasoning_end"; seq:number; ref:{itemId:string}}
  | {type:"tool_start"|"tool_update"|"tool_end"; seq:number; tool:ToolActivity}
- | {type:"tool_confirmation"; seq:number; confirmation:ToolConfirmationRequest}
- | {type:"tool_confirmation_resolved"; seq:number;
-    toolResolved:{toolCallId:string;decision:ToolDecision;pattern:string}}
- | {type:"elicitation"; seq:number; elicitation:ElicitationRequest}
- | {type:"elicitation_resolved"; seq:number; elicitResolved:{elicitationId:string}}
  | {type:"transfer"; seq:number; transfer:Transfer}
  | {type:"usage"; seq:number; usage:Usage}
  | {type:"notice"; seq:number; notice:Notice}
@@ -562,7 +549,7 @@ opens or replaces the contextual view beside that session and returns an
 idempotent close function. Views are scoped by stable session ID, survive tab
 switching, and are removed when their plugin stops or the live session closes.
 On narrow screens the view overlays the chat. The `assistant-message.actions` slot is rendered beside the
-“Download as Markdown” button on each completed assistant message and receives
+response copy action on each completed assistant message and receives
 that message as `context.message`; other slot contexts omit `message`. The
 command palette opens with Cmd/Ctrl+K. Notification
 `timeoutMs` defaults to 6000; zero keeps it visible. Global plugin CSS remains
@@ -606,8 +593,11 @@ interface DashboardAPI {
   updatePluginConfiguration(pluginId:string,
     values:Record<string,unknown>):Promise<PluginConfiguration>;
   openWorkspace(path:string): Promise<Workspace>;
+  removeWorkspace(path:string): Promise<Accepted>;
+  allSessions(): Promise<SessionSummary[]>;
   liveSessions(): Promise<SessionSummary[]>;
   sessions(workspaceId:string): Promise<SessionSummary[]>;
+  starSession(sessionId:string, starred:boolean): Promise<Accepted>;
   session(workspaceId:string, sessionId:string,
     options?:{signal?:AbortSignal}):Promise<StoredSession>;
   sessionItems(workspaceId:string, sessionId:string,
@@ -632,10 +622,6 @@ interface DashboardAPI {
     patch:{model?:string;thinkingLevel?:string}): Promise<SessionMeta>;
   models(chatId:string): Promise<ModelOption[]>;
   commands(chatId:string): Promise<CommandInfo[]>;
-  confirmTool(chatId:string, reply:{toolCallId:string;
-    decision:ToolDecision;reason:string}): Promise<Accepted>;
-  answerElicitation(chatId:string, reply:{elicitationId:string;
-    action:ElicitationAction;content?:Record<string,unknown>}): Promise<Accepted>;
   retitle(chatId:string, title:string): Promise<Accepted>;
   compact(chatId:string): Promise<Accepted>;
   stats(chatId:string): Promise<Stats>;
@@ -678,8 +664,7 @@ Chat({chatId: string})
 ```
 
 It owns SSE reduction, persisted draft, slash-command loading, send/steer/
-follow-up behavior, stop, conversation rendering, tool confirmation, and MCP
-elicitation dialogs. Obtain a live `chatId` from `createChat` or `resumeChat`;
+follow-up behavior, stop, and conversation rendering. Obtain a live `chatId` from `createChat` or `resumeChat`;
 persist the stable session ID instead of the process-local chat ID across
 restarts. Closing the plugin does not dispose the backend chat.
 
@@ -771,33 +756,6 @@ ModelPicker({models:ModelOption[], current:string, disabled:boolean,
 
 Searchable grouped model dialog with keyboard support.
 
-### `components.PendingDialogs`
-
-```ts
-PendingDialogs({
-  state:ChatState;
-  onToolDecision(decision:ToolDecision, reason:string):void;
-  onElicitationAnswer(action:ElicitationAction,
-    content:Record<string,unknown>):void;
-})
-```
-
-Shows the first pending confirmation or elicitation.
-
-### `components.ToolConfirmDialog`
-
-```ts
-ToolConfirmDialog({request:ToolConfirmationRequest,
-  onDecide(decision:ToolDecision, reason:string):void})
-```
-
-### `components.ElicitationDialog`
-
-```ts
-ElicitationDialog({request:ElicitationRequest,
-  onAnswer(action:ElicitationAction, content:Record<string,unknown>):void})
-```
-
 ## Complete host hook registry
 
 Hooks must run inside a plugin React component rendered by `ui.render`.
@@ -820,7 +778,6 @@ Returns:
 ```ts
 interface ChatState {
   seq:number; items:Item[]; meta:SessionMeta|null; run:RunStatus; usage:Usage;
-  confirmations:ToolConfirmationRequest[]; elicitations:ElicitationRequest[];
   closed:boolean; closedReason:string;
 }
 ```

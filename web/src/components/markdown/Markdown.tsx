@@ -1,4 +1,4 @@
-import { memo, isValidElement, useMemo } from 'react';
+import { createContext, memo, isValidElement, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -65,6 +65,24 @@ function fencedCode(child: ReactNode): { lang: string; code: string } | null {
   return { lang: match[1] ?? '', code: code.replace(/\n$/, '') };
 }
 
+const MermaidStreamingContext = createContext(false);
+
+function MarkdownPre({ children: content }: { children?: ReactNode }) {
+  const streaming = useContext(MermaidStreamingContext);
+  const fenced = fencedCode(content);
+  if (fenced?.lang === 'mermaid') {
+    return <Mermaid code={fenced.code} streaming={streaming} />;
+  }
+  if (fenced) {
+    return <CodeBlock code={fenced.code} language={fenced.lang}>{content}</CodeBlock>;
+  }
+  return (
+    <pre className="md-pre" tabIndex={0}>
+      {content}
+    </pre>
+  );
+}
+
 /**
  * Markdown renders GFM (plus math and mermaid) for completed assistant
  * messages.
@@ -79,10 +97,11 @@ function fencedCode(child: ReactNode): { lang: string; code: string } | null {
  * path never produces an HTML string; dangerouslySetInnerHTML is used only by
  * the Mermaid component on sanitized, library-generated SVG.
  */
-export const Markdown = memo(function Markdown({ children, animateFrom, animationPhase = 'a' }: {
+export const Markdown = memo(function Markdown({ children, animateFrom, animationPhase = 'a', streaming = false }: {
   children: string;
   animateFrom?: number;
   animationPhase?: 'a' | 'b';
+  streaming?: boolean;
 }) {
   const rehypePlugins = useMemo(() => {
     const plugins: NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']> = [
@@ -96,12 +115,13 @@ export const Markdown = memo(function Markdown({ children, animateFrom, animatio
   }, [animateFrom, animationPhase, children.length]);
 
   return (
-    <div className="md">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={rehypePlugins}
-        // No rehype-raw / skipHtml default keeps embedded HTML as text.
-        components={{
+    <MermaidStreamingContext.Provider value={streaming}>
+      <div className="md">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={rehypePlugins}
+          // No rehype-raw / skipHtml default keeps embedded HTML as text.
+          components={{
           a({ href, children: content }) {
             const safe = safeUrl(href);
             if (!safe) return <span className="md-blocked-link">{content}</span>;
@@ -117,21 +137,7 @@ export const Markdown = memo(function Markdown({ children, animateFrom, animatio
             // presence and the CSP blocks them anyway.
             return <span className="md-blocked-image">[image: {alt ?? 'omitted'}]</span>;
           },
-          pre({ children: content }) {
-            // A ```mermaid fence renders as a diagram instead of a code block.
-            const fenced = fencedCode(content);
-            if (fenced?.lang === 'mermaid') {
-              return <Mermaid code={fenced.code} />;
-            }
-            if (fenced) {
-              return <CodeBlock code={fenced.code} language={fenced.lang}>{content}</CodeBlock>;
-            }
-            return (
-              <pre className="md-pre" tabIndex={0}>
-                {content}
-              </pre>
-            );
-          },
+          pre: MarkdownPre,
           table({ children: content }) {
             return (
               <div className="md-table-scroll" tabIndex={0}>
@@ -140,9 +146,10 @@ export const Markdown = memo(function Markdown({ children, animateFrom, animatio
             );
           },
         }}
-      >
-        {children}
-      </ReactMarkdown>
-    </div>
+        >
+          {children}
+        </ReactMarkdown>
+      </div>
+    </MermaidStreamingContext.Provider>
   );
 });

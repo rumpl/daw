@@ -58,7 +58,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: s.csrf, Sandboxed: s.sandboxed,
 		ExecutionTargets: s.executionTargets, DefaultExecutionTarget: s.preferredExecutionTarget(),
 		ModelsAvailable: info.ModelsAvailable, ModelsHint: info.ModelsHint,
-		WorkspaceHints: wsHints, Notices: notices,
+		WorkspaceHints: wsHints, ProjectFolders: s.workspaces.Folders(), Notices: notices,
 	})
 }
 

@@ -6,11 +6,10 @@ import { useChat } from '@/hooks/useChat';
 import { useDraft } from '@/hooks/useDraft';
 import { Composer, type SendMode } from '@/components/chat/Composer';
 import { Conversation } from '@/components/conversation/Conversation';
-import { PendingDialogs } from '@/components/dialogs/PendingDialogs';
 
 // PluginChat is a stable, high-level host component for plugins that want to
 // embed an existing dashboard chat without rebuilding streaming, composer,
-// command completion, confirmation, and elicitation behavior.
+// and command completion behavior.
 export function PluginChat({ chatId }: { chatId: string }) {
   const { state, connection } = useChat(chatId || null);
   const { draft, setDraft } = useDraft(state.meta?.sessionId ?? null);
@@ -76,17 +75,6 @@ export function PluginChat({ chatId }: { chatId: string }) {
         onRemoveAttachment={() => undefined}
         onSend={send}
         onStop={() => void run(() => api.abort(chatId))}
-      />
-      <PendingDialogs
-        state={state}
-        onToolDecision={(decision, reason) => void run(async () => {
-          const request = state.confirmations[0];
-          if (request) await api.confirmTool(chatId, { toolCallId: request.toolCallId, decision, reason });
-        })}
-        onElicitationAnswer={(action, content) => void run(async () => {
-          const request = state.elicitations[0];
-          if (request) await api.answerElicitation(chatId, { elicitationId: request.elicitationId, action, content });
-        })}
       />
     </section>
   );

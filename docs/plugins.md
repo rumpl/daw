@@ -216,8 +216,12 @@ Plugins contribute agent tools through native MCP servers declared under
 Server names are namespaced as `<plugin-id>-<server-id>`. MCP server declarations
 are part of the global tool catalog and use the same global enabled filter as
 built-in tools. Each chat runtime creates its own MCP transport from that shared
-configuration, so prompts, elicitation, sampling, tool change notifications,
-restart supervision, and shutdown still use docker-agent's native MCP runtime.
+configuration. Local command MCP processes always run on the dashboard host,
+including when their owning agent runs in a sandbox; sandbox runtimes receive a
+byte-transparent stdio relay rather than the command, environment, or host
+credentials. Remote URL MCP servers remain remote. Prompts, sampling, tool
+change notifications, restart supervision, and shutdown therefore still use
+docker-agent's native MCP runtime.
 Editing a plugin updates the global catalog; existing transports retain the graph
 they opened with until their runtime is reopened.
 
@@ -282,7 +286,7 @@ The command palette opens with Cmd/Ctrl+K. Additive slots are
 `assistant-message.actions`, `composer.actions`, `session-tab.badge`, and
 `sidebar.footer`. Slot render functions receive
 `{workspace, chatId, session, sessionId?, message?}` and must return a host-React
-node. The `assistant-message.actions` slot appears beside “Download as Markdown”
+node. The `assistant-message.actions` slot appears beside the response copy action
 on each completed assistant message; its context includes that `message`.
 
 `setSessionBadge(sessionId, {id, value, tone?})` adds a tab badge. Supported
@@ -428,7 +432,6 @@ registry currently exposes:
 - `Chat`, a complete embeddable chat accepting `{ chatId }`
 - `Markdown` and `Mermaid`
 - `Conversation`, `Composer`, and `ChatHeader`
-- `PendingDialogs`, `ToolConfirmDialog`, and `ElicitationDialog`
 - `ModelPicker` and `ToolCard`
 - hooks `useChat(chatId)` and `useDraft(sessionId)`
 
@@ -446,9 +449,9 @@ export function mount(context) {
 
 To embed a complete existing chat, render `components.Chat` with its opaque
 `chatId`. It includes streaming, a scrollable conversation, the composer and
-user input, slash commands, stop behavior, tool confirmation, and elicitation
-dialogs. Obtain a current process-local chat ID with `api.createChat` or
-`api.resumeChat`; persist the stable session ID instead of a chat ID across
+user input, slash commands, and stop behavior. Elicitation requests from MCP
+servers are cancelled automatically; the dashboard has no elicitation UI.
+Obtain a current process-local chat ID with `api.createChat` or `api.resumeChat`; persist the stable session ID instead of a chat ID across
 dashboard restarts.
 
 The host chat uses a nested flex layout. Its ancestors must provide a bounded

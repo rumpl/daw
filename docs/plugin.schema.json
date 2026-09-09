@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://daw.local/schemas/plugin-v1.json",
-  "title": "docker-agent dashboard plugin",
+  "title": "Atelier plugin",
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "id", "name"],

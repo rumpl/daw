@@ -1,12 +1,10 @@
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ChevronDown, Folder, FolderOpen, Plus, Search, Settings } from 'lucide-react';
-import { useMemo, useState, type RefObject } from 'react';
-import type { Bootstrap, Plugin, PluginError, SessionSummary, Workspace } from '@/protocol.gen';
+import { ChevronRight, Folder, FolderPlus, PanelLeftClose, Plus, Search, Settings, Trash2 } from 'lucide-react';
+import { useMemo, useState, type DragEvent, type RefObject } from 'react';
+import type { Bootstrap, Plugin, PluginError, ProjectFolder, SessionSummary, Workspace } from '@/protocol.gen';
 import { clip } from '@/safety';
 import { PluginSlotView } from '@/components/plugins/PluginSlotView';
 import { groupSessionsByDay } from './sessionTree';
@@ -16,21 +14,28 @@ interface SidebarProps {
   boot: Bootstrap;
   workspace: Workspace | null;
   sessions: SessionSummary[];
+  allSessions?: SessionSummary[];
   recentWorkspaces: string[];
+  projectFolders?: ProjectFolder[];
+  onProjectFoldersChange?: (folders: ProjectFolder[]) => void;
   plugins: Plugin[];
   pluginErrors: PluginError[];
   activePluginId: string | null;
   activePluginPath: string;
   activeSessionId?: string | null;
-  workspacePath: string;
+  workspacePath?: string;
   busy: boolean;
   drawerRef: RefObject<HTMLDivElement | null>;
-  onWorkspacePathChange: (path: string) => void;
-  onOpenWorkspace: (path: string) => void;
-  onNewChat: () => void;
+  onWorkspacePathChange?: (path: string) => void;
+  onOpenWorkspace?: (path: string) => void;
+  onRemoveWorkspace?: (path: string) => void;
+  onNewChat: (workspacePath: string) => void;
   onResumeChat: (sessionId: string, workspacePath?: string) => void;
+  onStarSession?: (sessionId: string, starred: boolean) => void;
   onOpenPlugin: (pluginId: string, path: string) => void;
   onOpenSettings?: () => void;
+  onOpenProjectSettings?: () => void;
+  onCollapse?: () => void;
   settingsActive?: boolean;
 }
 
@@ -39,126 +44,142 @@ function projectLabel(path: string) {
 }
 
 export function Sidebar({
-  boot,
   workspace,
   sessions,
+  allSessions = sessions,
   recentWorkspaces,
+  projectFolders = [],
+  onProjectFoldersChange = () => undefined,
   plugins,
   pluginErrors,
   activePluginId,
   activePluginPath,
   activeSessionId = null,
-  workspacePath,
   busy,
   drawerRef,
-  onWorkspacePathChange,
-  onOpenWorkspace,
   onNewChat,
   onResumeChat,
+  onStarSession = () => undefined,
   onOpenPlugin,
   onOpenSettings,
+  onOpenProjectSettings,
+  onCollapse,
   settingsActive,
 }: SidebarProps) {
   const contributionContext = { workspace, chatId: null, session: null };
   const [sessionFilter, setSessionFilter] = useState('');
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [showPathInput, setShowPathInput] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderName, setFolderName] = useState('');
 
-  const filteredSessions = useMemo(() => {
+  const projects = useMemo(() => {
+    const paths = Array.from(new Set(recentWorkspaces))
+      .sort((left, right) => projectLabel(left).localeCompare(projectLabel(right), undefined, { sensitivity: 'base' }));
     const query = sessionFilter.trim().toLowerCase();
-    if (!query) return sessions;
-    const byID = new Map(sessions.map((session) => [session.sessionId, session]));
-    const included = new Set<string>();
-    for (const session of sessions) {
-      if (!session.title.toLowerCase().includes(query) && !session.sessionId.toLowerCase().includes(query)) continue;
-      let current: SessionSummary | undefined = session;
-      while (current && !included.has(current.sessionId)) {
-        included.add(current.sessionId);
-        current = current.parentSessionId ? byID.get(current.parentSessionId) : undefined;
-      }
-    }
-    return sessions.filter((session) => included.has(session.sessionId));
-  }, [sessions, sessionFilter]);
+    return paths.map((path) => {
+      const matchingSessions = allSessions.filter((session) => session.workingDir === path);
+      const projectSessions = path === workspace?.path
+        ? Array.from(new Map([...matchingSessions, ...sessions].map((session) => [session.sessionId, session])).values())
+        : matchingSessions;
+      const filtered = !query ? projectSessions : projectSessions.filter((session) =>
+        session.title.toLowerCase().includes(query) || session.sessionId.toLowerCase().includes(query));
+      return {
+        path,
+        sessions: filtered,
+        running: projectSessions.filter((session) => session.runState === 'running').length,
+      };
+    }).filter((project) => !query || projectLabel(project.path).toLowerCase().includes(query) || project.sessions.length > 0);
+  }, [allSessions, recentWorkspaces, sessionFilter, sessions, workspace?.path]);
+  const projectsByPath = useMemo(() => new Map(projects.map((project) => [project.path, project])), [projects]);
+  const groupedPaths = new Set(projectFolders.flatMap((folder) => folder.paths ?? []));
+  const ungroupedProjects = projects.filter((project) => !groupedPaths.has(project.path));
 
-  const groupedSessions = useMemo(() => groupSessionsByDay(filteredSessions), [filteredSessions]);
-
-  const projectWorkspaces = useMemo(
-    () => Array.from(new Set([workspace?.path, ...recentWorkspaces].filter((path): path is string => Boolean(path)))),
-    [recentWorkspaces, workspace?.path],
-  );
-  const openProject = (path: string) => {
-    setProjectPickerOpen(false);
-    setShowPathInput(false);
-    onOpenWorkspace(path);
+  const createFolder = () => {
+    const name = folderName.trim();
+    if (!name) return;
+    onProjectFoldersChange([...projectFolders, { id: crypto.randomUUID(), name, paths: [] }]);
+    setFolderName('');
+    setCreatingFolder(false);
   };
+
+  const moveProject = (path: string, folderId: string | null) => {
+    onProjectFoldersChange(projectFolders.map((folder) => ({
+      ...folder,
+      paths: [...(folder.paths ?? []).filter((candidate) => candidate !== path), ...(folder.id === folderId ? [path] : [])],
+    })));
+  };
+
+  const droppedProject = (event: DragEvent, folderId: string | null) => {
+    event.preventDefault();
+    const path = event.dataTransfer.getData('application/x-atelier-project');
+    if (projectsByPath.has(path)) moveProject(path, folderId);
+  };
+
+  const renderProject = (project: (typeof projects)[number]) => {
+    const projectNodes = groupSessionsByDay(project.sessions).flatMap((group) => group.sessions);
+    return (
+      <Collapsible key={project.path} defaultOpen={project.running > 0} className="project-group"
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('application/x-atelier-project', project.path);
+        }}>
+        <div className="project-row" draggable>
+          <CollapsibleTrigger render={
+            <Button type="button" variant="ghost" className="project-open"
+              title={project.path} aria-label={`Toggle sessions for ${projectLabel(project.path)}`}>
+              <ChevronRight className="project-chevron" aria-hidden="true" />
+              <Folder aria-hidden="true" />
+              <span>{clip(projectLabel(project.path), 60)}</span>
+            </Button>
+          } />
+          {project.running > 0 ? (
+            <span className="project-running" aria-label="Running" title={`${project.running} running`}>
+              <span className="run-dot run-running" aria-hidden="true" />
+            </span>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger render={
+              <Button type="button" size="icon-xs" variant="ghost" className="project-new-chat"
+                aria-label={`New chat in ${projectLabel(project.path)}`}
+                onClick={() => onNewChat(project.path)} disabled={busy}>
+                <Plus aria-hidden="true" />
+              </Button>
+            } />
+            <TooltipContent>New chat</TooltipContent>
+          </Tooltip>
+        </div>
+        <CollapsibleContent>
+          {project.sessions.length === 0 ? <p className="project-empty">No sessions</p> : (
+            <ul role="tree" className="project-sessions">
+              {projectNodes.map((node) => (
+                <SessionTreeItem key={node.session.sessionId} node={node} busy={busy}
+                  activeSessionId={activeSessionId}
+                  onStarSession={onStarSession}
+                  onResumeChat={(sessionId) => onResumeChat(sessionId, project.path)} />
+              ))}
+            </ul>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    );
+  };
+
 
   return (
     <div className="sidebar-inner" ref={drawerRef} aria-busy={busy || undefined}>
-      <div className="brand">
-        docker-agent<span className="brand-sub"> dashboard</span>
+      <div className="brand-row">
+        <div className="brand">
+          Atelier<span className="brand-sub"> coding studio</span>
+        </div>
+        <Tooltip>
+          <TooltipTrigger render={
+            <Button type="button" size="icon-xs" variant="ghost" className="sidebar-collapse-button"
+              aria-label="Collapse sidebar" onClick={onCollapse}>
+              <PanelLeftClose aria-hidden="true" />
+            </Button>
+          } />
+          <TooltipContent>Collapse sidebar</TooltipContent>
+        </Tooltip>
       </div>
-
-      <DropdownMenu open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
-        <DropdownMenuTrigger render={
-          <Button type="button" variant="outline" className="project-switcher">
-            <Folder aria-hidden="true" />
-            <span className="project-label">
-              <span className="project-name">{workspace ? clip(projectLabel(workspace.path), 60) : 'Choose a project'}</span>
-              <span className="project-path">{workspace ? clip(workspace.path, 120) : 'Select a working directory'}</span>
-            </span>
-            <ChevronDown className="project-chevron" aria-hidden="true" />
-          </Button>
-        } />
-        <DropdownMenuContent align="start" sideOffset={6} className="project-menu">
-          <DropdownMenuGroup>
-          <DropdownMenuLabel>Recent projects</DropdownMenuLabel>
-          {projectWorkspaces.map((path) => {
-            const current = path === workspace?.path;
-            return (
-              <DropdownMenuItem key={path} onClick={() => openProject(path)} disabled={busy}
-                aria-current={current ? 'page' : undefined}>
-                <Folder aria-hidden="true" />
-                <div className="project-menu-label flex flex-col">
-                  <span className="font-medium">{clip(projectLabel(path), 60)}</span>
-                  <span className="truncate text-xs text-muted-foreground">{clip(path, 160)}</span>
-                </div>
-              </DropdownMenuItem>
-            );
-          })}
-          {projectWorkspaces.length === 0 ? <DropdownMenuItem disabled>No recent projects</DropdownMenuItem> : null}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setShowPathInput(true)}>
-            <FolderOpen aria-hidden="true" /> Open another directory…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <Dialog open={showPathInput} onOpenChange={setShowPathInput}>
-        <DialogContent className="sm:max-w-md" aria-describedby="open-project-description">
-          <DialogTitle>Open a project</DialogTitle>
-          <DialogDescription id="open-project-description">Enter the absolute path to a working directory.</DialogDescription>
-          <form onSubmit={(event) => { event.preventDefault(); openProject(workspacePath); }} className="flex flex-col gap-3 pt-2">
-            <Input aria-label="Working directory path" value={workspacePath}
-              onChange={(event) => onWorkspacePathChange(event.target.value)}
-              placeholder="/absolute/path/to/project" list="ws-hints" autoFocus />
-            <datalist id="ws-hints">{recentWorkspaces.map((path) => <option key={path} value={path} />)}</datalist>
-            <div className="flex justify-end gap-3">
-              <DialogClose render={<Button type="button" variant="secondary" />}>Cancel</DialogClose>
-              <Button type="submit" disabled={busy || !workspacePath.trim()}>Open project</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Button
-        type="button"
-        className="new-chat-button w-full"
-        onClick={() => onNewChat()}
-        disabled={!workspace || busy}
-      >
-        <Plus size={15} aria-hidden="true" /> New chat
-      </Button>
 
       {plugins.some((plugin) => plugin.pages?.some((page) => page.sidebar)) ? (
         <nav className="plugin-navigation" aria-label="Plugins">
@@ -184,41 +205,86 @@ export function Sidebar({
         </p>
       ) : null}
 
-      <div className="sidebar-section-heading flex items-center justify-between">
-        <span className="text-sm font-medium">Sessions</span>
-        <span className="text-xs text-muted-foreground">{sessions.length}</span>
+      <div className="sidebar-section-heading">
+        <span className="text-sm font-medium">Projects</span>
       </div>
 
-      <section className="sidebar-panel" aria-label="Sessions">
-          <label className="sr-only" htmlFor="session-search">Search sessions</label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input id="session-search" value={sessionFilter} className="pl-8"
-              onChange={(event) => setSessionFilter(event.target.value)} placeholder="Search sessions" />
+      <section className="sidebar-panel" aria-label="Projects and sessions">
+        <label className="sr-only" htmlFor="session-search">Search projects and sessions</label>
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input id="session-search" value={sessionFilter} className="pl-8"
+            onChange={(event) => setSessionFilter(event.target.value)} placeholder="Search projects and sessions" />
+        </div>
+        {projects.length === 0 ? (
+          <div className="sidebar-empty-projects">
+            <p className="hint">No projects added yet.</p>
+            <Button type="button" variant="outline" onClick={() => onOpenProjectSettings?.()}>
+              Add project
+            </Button>
           </div>
-          {filteredSessions.length === 0 ? (
-            <p className="hint">
-              {workspace ? 'No sessions yet for this project.' : 'Choose a project to see sessions.'}
-            </p>
-          ) : (
-            <ScrollArea className="session-list">
-              {groupedSessions.map((group, index) => (
-                <section
-                  className={`session-day${group.label === 'Today' ? ' session-day-current' : ''}`}
-                  key={group.label}
-                  aria-labelledby={`session-day-${index}`}
-                >
-                  <h3 id={`session-day-${index}`}>{group.label}</h3>
-                  <ul role="tree">
-                    {group.sessions.map((node) => (
-                      <SessionTreeItem key={node.session.sessionId} node={node} busy={busy}
-                        activeSessionId={activeSessionId} onResumeChat={onResumeChat} />
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </ScrollArea>
-          )}
+        ) : (
+          <div className="project-list">
+            {projectFolders.map((folder) => {
+              const folderProjects = (folder.paths ?? []).flatMap((path) => {
+                const project = projectsByPath.get(path);
+                return project ? [project] : [];
+              });
+              if (sessionFilter && folderProjects.length === 0) return null;
+              return (
+                <Collapsible key={folder.id} defaultOpen className="project-folder"
+                  onDragOver={(event) => event.preventDefault()} onDrop={(event) => droppedProject(event, folder.id)}>
+                  <div className="project-folder-row">
+                    <CollapsibleTrigger render={
+                      <Button type="button" variant="ghost" className="project-folder-open"
+                        aria-label={`Toggle folder ${folder.name}`}>
+                        <ChevronRight className="project-chevron" aria-hidden="true" />
+                        <Folder aria-hidden="true" />
+                        <span>{clip(folder.name, 60)}</span>
+                      </Button>
+                    } />
+                    <Button type="button" size="icon-xs" variant="ghost" className="project-folder-delete"
+                      aria-label={`Delete folder ${folder.name}`}
+                      onClick={() => onProjectFoldersChange(projectFolders.filter((candidate) => candidate.id !== folder.id))}>
+                      <Trash2 aria-hidden="true" />
+                    </Button>
+                  </div>
+                  <CollapsibleContent className="project-folder-content">
+                    {folderProjects.length === 0 ? <p className="project-folder-empty">Drop projects here</p> : folderProjects.map(renderProject)}
+                  </CollapsibleContent>
+                </Collapsible>
+              );
+            })}
+            <div className="ungrouped-projects" aria-label="Ungrouped projects"
+              onDragOver={(event) => event.preventDefault()} onDrop={(event) => droppedProject(event, null)}>
+              {projectFolders.length > 0 && ungroupedProjects.length > 0 ? <p className="project-folder-label">Ungrouped</p> : null}
+              {ungroupedProjects.map(renderProject)}
+            </div>
+            <div className="project-folder-add">
+              {creatingFolder ? (
+                <form onSubmit={(event) => { event.preventDefault(); createFolder(); }}>
+                  <FolderPlus aria-hidden="true" />
+                  <Input autoFocus aria-label="Folder name" value={folderName} maxLength={80}
+                    onChange={(event) => setFolderName(event.target.value)} placeholder="New folder"
+                    onBlur={() => { setCreatingFolder(false); setFolderName(''); }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setCreatingFolder(false);
+                        setFolderName('');
+                      }
+                    }} />
+                </form>
+              ) : (
+                <Button type="button" variant="ghost" className="project-folder-add-button"
+                  aria-label="New project folder" onClick={() => setCreatingFolder(true)}>
+                  <FolderPlus aria-hidden="true" />
+                  <span>New folder</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
       </section>
 
       <PluginSlotView slot="sidebar.footer" context={contributionContext} />
@@ -233,7 +299,6 @@ export function Sidebar({
           } />
           <TooltipContent>Settings</TooltipContent>
         </Tooltip>
-        <span className="sidebar-version text-xs text-muted-foreground">docker-agent {clip(boot.agentVersion, 40)}</span>
       </footer>
     </div>
   );

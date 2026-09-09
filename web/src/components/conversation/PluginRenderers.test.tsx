@@ -27,6 +27,32 @@ describe('plugin renderers', () => {
     act(() => removePluginContributions('render-test'));
   });
 
+  it('applies a renderer registered after historical tools have mounted', () => {
+    render(<Conversation items={[{kind: 'tool', tool}]} empty={null} />);
+    expect(screen.getByText('Acme Plan')).toBeVisible();
+
+    const registry = createContributionRegistry('late-renderer');
+    act(() => {
+      registry.registerToolRenderer({id: 'tool', match: value => value.name === 'acme_plan', render: () => 'late custom tool'});
+    });
+
+    expect(screen.getByText('late custom tool')).toBeVisible();
+    act(() => removePluginContributions('late-renderer'));
+  });
+
+  it('keeps a replacement renderer when the old registration disposes late', () => {
+    const oldRegistry = createContributionRegistry('reactivated-renderer');
+    const unregisterOld = oldRegistry.registerToolRenderer({id: 'tool', match: () => true, render: () => 'old custom tool'});
+    const newRegistry = createContributionRegistry('reactivated-renderer');
+    newRegistry.registerToolRenderer({id: 'tool', match: () => true, render: () => 'new custom tool'});
+
+    unregisterOld();
+    render(<Conversation items={[{kind: 'tool', tool}]} empty={null} />);
+
+    expect(screen.getByText('new custom tool')).toBeVisible();
+    act(() => removePluginContributions('reactivated-renderer'));
+  });
+
   it('adds a matching tool action beside the trigger without toggling the tool', () => {
     const run = vi.fn();
     const registry = createContributionRegistry('tool-action-test');

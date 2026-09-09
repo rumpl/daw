@@ -17,7 +17,9 @@ import { memo, useEffect, useId, useRef, useState } from 'react';
  * Rendering is async and lazy: the mermaid bundle (large) is only pulled in
  * the first time a diagram appears, keeping the initial payload small.
  */
-export const Mermaid = memo(function Mermaid({ code }: { code: string }) {
+const STREAMING_RENDER_DELAY_MS = 300;
+
+export const Mermaid = memo(function Mermaid({ code, streaming = false }: { code: string; streaming?: boolean }) {
   const id = useId().replace(/[^a-zA-Z0-9-]/g, '');
   const [svg, setSvg] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export const Mermaid = memo(function Mermaid({ code }: { code: string }) {
     let cancelled = false;
     setError(null);
 
-    (async () => {
+    const render = async () => {
       try {
         const { default: mermaid } = await import('mermaid');
         const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
@@ -41,17 +43,23 @@ export const Mermaid = memo(function Mermaid({ code }: { code: string }) {
         const { svg: out } = await mermaid.render(`mermaid-${id}`, code);
         if (!cancelled) setSvg(out);
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && !streaming) {
           setError(err instanceof Error ? err.message : 'Failed to render diagram');
           setSvg('');
         }
       }
-    })();
+    };
+
+    // Mermaid accepts many incomplete definitions as valid, so parsing every
+    // token still replaces the SVG (and its height) repeatedly. Wait until the
+    // diagram source has settled before validating and committing a new SVG.
+    const timeout = window.setTimeout(render, streaming ? STREAMING_RENDER_DELAY_MS : 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
     };
-  }, [code, id]);
+  }, [code, id, streaming]);
 
   if (error) {
     return (

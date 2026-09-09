@@ -48,7 +48,6 @@ type ToolState string
 
 const (
 	ToolStatePending  ToolState = "pending"
-	ToolStateAwaiting ToolState = "awaiting_confirmation"
 	ToolStateRunning  ToolState = "running"
 	ToolStateSuccess  ToolState = "success"
 	ToolStateError    ToolState = "error"
@@ -62,28 +61,6 @@ const (
 	NoticeInfo    NoticeLevel = "info"
 	NoticeWarning NoticeLevel = "warning"
 	NoticeError   NoticeLevel = "error"
-)
-
-// ToolDecision mirrors pkg/tui/components/toolconfirm.Decision.
-type ToolDecision string
-
-const (
-	// DecisionApprove approves this one call (runtime.ResumeApprove).
-	DecisionApprove ToolDecision = "approve"
-	// DecisionApproveAlways grants the exact pattern shown in the dialog,
-	// built by toolconfirm.BuildPermissionPattern.
-	DecisionApproveAlways ToolDecision = "approveAlways"
-	// DecisionReject rejects with an optional reason (runtime.ResumeReject).
-	DecisionReject ToolDecision = "reject"
-)
-
-// ElicitationAction mirrors tools.ElicitationAction.
-type ElicitationAction string
-
-const (
-	ElicitAccept  ElicitationAction = "accept"
-	ElicitDecline ElicitationAction = "decline"
-	ElicitCancel  ElicitationAction = "cancel"
 )
 
 // ---------------------------------------------------------------------------
@@ -196,42 +173,6 @@ type Item struct {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive requests
-// ---------------------------------------------------------------------------
-
-// RejectionReason is one preset from toolconfirm.RejectionReasons().
-type RejectionReason struct {
-	Label  string `json:"label"`
-	Reason string `json:"reason"`
-}
-
-// ToolConfirmationRequest is a blocking tool-approval prompt. Pattern is the
-// exact string that will be granted if the user picks "always allow" — it is
-// produced by toolconfirm.BuildPermissionPattern and never rebuilt client-side.
-type ToolConfirmationRequest struct {
-	ToolCallID       string            `json:"toolCallId"`
-	ToolName         string            `json:"toolName"`
-	DisplayName      string            `json:"displayName,omitempty"`
-	AgentName        string            `json:"agentName"`
-	ArgsSummary      string            `json:"argsSummary"`
-	Pattern          string            `json:"pattern"`
-	PatternLabel     string            `json:"patternLabel"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	RejectionReasons []RejectionReason `json:"rejectionReasons"`
-}
-
-// ElicitationRequest is an MCP elicitation. Replies are correlated by
-// ElicitationID, never by position.
-type ElicitationRequest struct {
-	ElicitationID string `json:"elicitationId"`
-	Message       string `json:"message"`
-	Mode          string `json:"mode"`
-	URL           string `json:"url"`
-	AgentName     string `json:"agentName"`
-	Schema        any    `json:"schema,omitempty"`
-}
-
-// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 
@@ -280,11 +221,10 @@ type Usage struct {
 
 // PermissionsView reports the pattern sets the autonomous runtime evaluates.
 type PermissionsView struct {
-	Allow         []string `json:"allow"`
-	Ask           []string `json:"ask"`
-	Deny          []string `json:"deny"`
-	AgentsIgnore  bool     `json:"agentsIgnore"`
-	SessionGrants []string `json:"sessionGrants"`
+	Allow        []string `json:"allow"`
+	Ask          []string `json:"ask"`
+	Deny         []string `json:"deny"`
+	AgentsIgnore bool     `json:"agentsIgnore"`
 }
 
 // SessionMeta is per-chat metadata shown in the header and sidebar.
@@ -310,13 +250,11 @@ type SessionMeta struct {
 
 // Snapshot is the complete, authoritative state of a chat.
 type Snapshot struct {
-	Seq                  uint64                    `json:"seq"`
-	Meta                 SessionMeta               `json:"meta"`
-	Items                []Item                    `json:"items"`
-	Run                  RunStatus                 `json:"run"`
-	Usage                Usage                     `json:"usage"`
-	PendingConfirmations []ToolConfirmationRequest `json:"pendingConfirmations"`
-	PendingElicitations  []ElicitationRequest      `json:"pendingElicitations"`
+	Seq   uint64      `json:"seq"`
+	Meta  SessionMeta `json:"meta"`
+	Items []Item      `json:"items"`
+	Run   RunStatus   `json:"run"`
+	Usage Usage       `json:"usage"`
 }
 
 // ---------------------------------------------------------------------------
@@ -327,27 +265,23 @@ type Snapshot struct {
 type EventType string
 
 const (
-	EventSnapshot         EventType = "snapshot"
-	EventRunStatus        EventType = "run_status"
-	EventMessageItem      EventType = "message_item"
-	EventAssistantDelta   EventType = "assistant_delta"
-	EventAssistantEnd     EventType = "assistant_end"
-	EventReasoningDelta   EventType = "reasoning_delta"
-	EventReasoningEnd     EventType = "reasoning_end"
-	EventToolStart        EventType = "tool_start"
-	EventToolUpdate       EventType = "tool_update"
-	EventToolEnd          EventType = "tool_end"
-	EventToolConfirmation EventType = "tool_confirmation"
-	EventToolResolved     EventType = "tool_confirmation_resolved"
-	EventElicitation      EventType = "elicitation"
-	EventElicitResolved   EventType = "elicitation_resolved"
-	EventTransfer         EventType = "transfer"
-	EventUsage            EventType = "usage"
-	EventNotice           EventType = "notice"
-	EventSummary          EventType = "summary"
-	EventSessionMeta      EventType = "session_meta"
-	EventGap              EventType = "gap"
-	EventChatClosed       EventType = "chat_closed"
+	EventSnapshot       EventType = "snapshot"
+	EventRunStatus      EventType = "run_status"
+	EventMessageItem    EventType = "message_item"
+	EventAssistantDelta EventType = "assistant_delta"
+	EventAssistantEnd   EventType = "assistant_end"
+	EventReasoningDelta EventType = "reasoning_delta"
+	EventReasoningEnd   EventType = "reasoning_end"
+	EventToolStart      EventType = "tool_start"
+	EventToolUpdate     EventType = "tool_update"
+	EventToolEnd        EventType = "tool_end"
+	EventTransfer       EventType = "transfer"
+	EventUsage          EventType = "usage"
+	EventNotice         EventType = "notice"
+	EventSummary        EventType = "summary"
+	EventSessionMeta    EventType = "session_meta"
+	EventGap            EventType = "gap"
+	EventChatClosed     EventType = "chat_closed"
 )
 
 // Delta carries streamed assistant or reasoning text for one message item.
@@ -361,18 +295,6 @@ type ItemRef struct {
 	ItemID string `json:"itemId"`
 }
 
-// ToolResolved reports the decision applied to a confirmation request.
-type ToolResolved struct {
-	ToolCallID string       `json:"toolCallId"`
-	Decision   ToolDecision `json:"decision"`
-	Pattern    string       `json:"pattern"`
-}
-
-// ElicitResolved reports that an elicitation was answered.
-type ElicitResolved struct {
-	ElicitationID string `json:"elicitationId"`
-}
-
 // ChatClosed is the terminal event for a disposed chat.
 type ChatClosed struct {
 	Reason string `json:"reason"`
@@ -384,22 +306,18 @@ type Event struct {
 	Type EventType `json:"type"`
 	Seq  uint64    `json:"seq"`
 
-	Snapshot       *Snapshot                `json:"snapshot,omitempty"`
-	Run            *RunStatus               `json:"run,omitempty"`
-	Message        *MessageItem             `json:"message,omitempty"`
-	Delta          *Delta                   `json:"delta,omitempty"`
-	Ref            *ItemRef                 `json:"ref,omitempty"`
-	Tool           *ToolActivity            `json:"tool,omitempty"`
-	Confirmation   *ToolConfirmationRequest `json:"confirmation,omitempty"`
-	ToolResolved   *ToolResolved            `json:"toolResolved,omitempty"`
-	Elicitation    *ElicitationRequest      `json:"elicitation,omitempty"`
-	ElicitResolved *ElicitResolved          `json:"elicitResolved,omitempty"`
-	Transfer       *Transfer                `json:"transfer,omitempty"`
-	Usage          *Usage                   `json:"usage,omitempty"`
-	Notice         *Notice                  `json:"notice,omitempty"`
-	Summary        *Summary                 `json:"summary,omitempty"`
-	Meta           *SessionMeta             `json:"meta,omitempty"`
-	Closed         *ChatClosed              `json:"closed,omitempty"`
+	Snapshot *Snapshot     `json:"snapshot,omitempty"`
+	Run      *RunStatus    `json:"run,omitempty"`
+	Message  *MessageItem  `json:"message,omitempty"`
+	Delta    *Delta        `json:"delta,omitempty"`
+	Ref      *ItemRef      `json:"ref,omitempty"`
+	Tool     *ToolActivity `json:"tool,omitempty"`
+	Transfer *Transfer     `json:"transfer,omitempty"`
+	Usage    *Usage        `json:"usage,omitempty"`
+	Notice   *Notice       `json:"notice,omitempty"`
+	Summary  *Summary      `json:"summary,omitempty"`
+	Meta     *SessionMeta  `json:"meta,omitempty"`
+	Closed   *ChatClosed   `json:"closed,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -410,20 +328,32 @@ type Event struct {
 type DashboardEventType string
 
 const (
-	DashboardEventSnapshot        DashboardEventType = "snapshot"
-	DashboardEventSessionsChanged DashboardEventType = "sessions_changed"
-	DashboardEventPluginsChanged  DashboardEventType = "plugins_changed"
-	DashboardEventGap             DashboardEventType = "gap"
+	DashboardEventSnapshot            DashboardEventType = "snapshot"
+	DashboardEventSessionsChanged     DashboardEventType = "sessions_changed"
+	DashboardEventPluginsChanged      DashboardEventType = "plugins_changed"
+	DashboardEventSandboxProvisioning DashboardEventType = "sandbox_provisioning"
+	DashboardEventGap                 DashboardEventType = "gap"
 )
+
+// SandboxProvisioning describes one progress update while a session sandbox is
+// being made ready. OperationID correlates dashboard-wide events with the
+// create or resume request that initiated the work.
+type SandboxProvisioning struct {
+	OperationID string `json:"operationId"`
+	Phase       string `json:"phase"`
+	Message     string `json:"message"`
+	Done        bool   `json:"done"`
+}
 
 // DashboardEvent notifies clients that an authoritative REST resource changed.
 type DashboardEvent struct {
-	Type         DashboardEventType `json:"type"`
-	Seq          uint64             `json:"seq"`
-	WorkspaceIDs []string           `json:"workspaceIds,omitempty"`
-	SessionIDs   []string           `json:"sessionIds,omitempty"`
-	Reason       string             `json:"reason,omitempty"`
-	Revision     string             `json:"revision,omitempty"`
+	Type         DashboardEventType   `json:"type"`
+	Seq          uint64               `json:"seq"`
+	WorkspaceIDs []string             `json:"workspaceIds,omitempty"`
+	SessionIDs   []string             `json:"sessionIds,omitempty"`
+	Reason       string               `json:"reason,omitempty"`
+	Revision     string               `json:"revision,omitempty"`
+	Provisioning *SandboxProvisioning `json:"provisioning,omitempty"`
 }
 
 // PluginEvent is one namespaced event published by a plugin backend.
@@ -461,6 +391,13 @@ type WorkspaceHint struct {
 	Label string `json:"label"`
 }
 
+// ProjectFolder is a manually arranged group of workspace paths.
+type ProjectFolder struct {
+	ID    string   `json:"id"`
+	Name  string   `json:"name"`
+	Paths []string `json:"paths"`
+}
+
 // Bootstrap is GET /api/bootstrap: non-secret app and docker-agent status.
 type Bootstrap struct {
 	AppVersion             string                  `json:"appVersion"`
@@ -478,6 +415,7 @@ type Bootstrap struct {
 	ModelsAvailable        bool                    `json:"modelsAvailable"`
 	ModelsHint             string                  `json:"modelsHint"`
 	WorkspaceHints         []WorkspaceHint         `json:"workspaceHints"`
+	ProjectFolders         []ProjectFolder         `json:"projectFolders"`
 	Notices                []Notice                `json:"notices"`
 }
 
@@ -554,6 +492,11 @@ type OpenWorkspaceRequest struct {
 	Path string `json:"path"`
 }
 
+// UpdateProjectFoldersRequest replaces the persisted project folder arrangement.
+type UpdateProjectFoldersRequest struct {
+	Folders []ProjectFolder `json:"folders"`
+}
+
 // Workspace is an opaque, server-resolved working directory.
 type Workspace struct {
 	WorkspaceID  string   `json:"workspaceId"`
@@ -583,7 +526,7 @@ type StoredSessionMeta struct {
 }
 
 // StoredSession is the read-only persisted-session resource. It deliberately
-// excludes live run state, queues, confirmations, and SSE sequence numbers.
+// excludes live run state, queues, and SSE sequence numbers.
 type StoredSession struct {
 	Meta  StoredSessionMeta `json:"meta"`
 	Usage Usage             `json:"usage"`
@@ -609,6 +552,7 @@ type SessionSummary struct {
 	CreatedAt       string            `json:"createdAt"`
 	Messages        int               `json:"messages"`
 	Cost            float64           `json:"cost,omitempty"`
+	Starred         bool              `json:"starred"`
 	ExecutionTarget ExecutionTarget   `json:"executionTarget,omitempty"`
 	Live            bool              `json:"live"`
 	ChatID          string            `json:"chatId,omitempty"`
@@ -639,12 +583,14 @@ type CreateChatRequest struct {
 	WorkspaceID         string          `json:"workspaceId"`
 	ExecutionLocationID string          `json:"executionLocationId,omitempty"`
 	ExecutionTarget     ExecutionTarget `json:"executionTarget,omitempty"`
+	OperationID         string          `json:"operationId,omitempty"`
 }
 
 // ResumeChatRequest is POST /api/chats/resume.
 type ResumeChatRequest struct {
 	WorkspaceID string `json:"workspaceId"`
 	SessionID   string `json:"sessionId"`
+	OperationID string `json:"operationId,omitempty"`
 }
 
 // ChatRef identifies a chat.
@@ -733,20 +679,6 @@ type ChatOptions struct {
 	ThinkingLevels []string      `json:"thinkingLevels"`
 	Models         []ModelOption `json:"models"`
 	Tools          []ToolOption  `json:"tools"`
-}
-
-// ToolConfirmationReply is POST /api/chats/:id/tool-confirmation.
-type ToolConfirmationReply struct {
-	ToolCallID string       `json:"toolCallId"`
-	Decision   ToolDecision `json:"decision"`
-	Reason     string       `json:"reason"`
-}
-
-// ElicitationReply is POST /api/chats/:id/elicitation.
-type ElicitationReply struct {
-	ElicitationID string            `json:"elicitationId"`
-	Action        ElicitationAction `json:"action"`
-	Content       map[string]any    `json:"content,omitempty"`
 }
 
 // RetitleRequest is POST /api/chats/:id/retitle.

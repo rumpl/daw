@@ -8,16 +8,18 @@ import { api, CHAT_OPTIONS_CHANGE_EVENT } from '@/api';
 import { loadPrefs, updateThemePreference, type ThemeMode } from '@/preferences';
 import { THEME_CHANGE_EVENT } from '@/components/shell/AppTheme';
 import type { ChatOptions } from '@/protocol.gen';
+import { SettingsLayout } from './SettingsLayout';
+import { SettingsHeader } from './SettingsHeader';
 import { useEffect, useState, type FormEvent, type RefObject } from 'react';
 
 interface SettingsPageProps {
   menuButton: RefObject<HTMLButtonElement | null>;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
-  onOpenPlugins: () => void;
+  onClose: () => void;
 }
 
-export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlugins }: SettingsPageProps) {
+export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onClose }: SettingsPageProps) {
   const [options, setOptions] = useState<ChatOptions | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => loadPrefs().theme);
   const [error, setError] = useState('');
@@ -104,17 +106,15 @@ export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlu
 
   return (
     <section className="main-pane">
-      <header className="topbar">
-        <Button ref={menuButton} type="button" variant="secondary" className="menu-button" aria-expanded={drawerOpen}
-          aria-controls="sidebar" onClick={onToggleDrawer}>Menu</Button>
-        <div className="topbar-title"><h1>Settings</h1></div>
-      </header>
+      <SettingsHeader title="Settings" menuButton={menuButton} drawerOpen={drawerOpen}
+        onToggleDrawer={onToggleDrawer} onClose={onClose} />
       <div className="settings-page">
-        <div className="plugin-settings-heading"><div><h2>Settings</h2><p>Configure the dashboard and defaults inherited by new chats.</p></div></div>
+        <SettingsLayout>
+        <div className="plugin-settings-heading"><div><h2>General</h2><p>Configure Atelier and defaults inherited by new chats.</p></div></div>
         {error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null}
 
         <section className="settings-section" aria-labelledby="appearance-settings">
-          <div><h3 id="appearance-settings">Appearance</h3><p>Choose how the dashboard is displayed in this browser.</p></div>
+          <div><h3 id="appearance-settings">Appearance</h3><p>Choose how Atelier is displayed in this browser.</p></div>
           <Select value={theme} onValueChange={(value) => updateTheme(value as ThemeMode)}>
             <SelectTrigger aria-label="Frontend mode"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -160,10 +160,7 @@ export function SettingsPage({ menuButton, drawerOpen, onToggleDrawer, onOpenPlu
             onChange={(name, enabled) => void updateTool(name, enabled)}
             onRefresh={async () => setOptions(await api.chatOptions())} /> : <p className="hint">Loading tools…</p>}
         </section>
-        <section className="settings-section" aria-labelledby="plugin-settings">
-          <div><h3 id="plugin-settings">Plugins</h3><p>Manage installed plugins, backend processes, and contributed features.</p></div>
-          <Button type="button" variant="secondary" onClick={onOpenPlugins}>Manage plugins</Button>
-        </section>
+        </SettingsLayout>
       </div>
     </section>
   );

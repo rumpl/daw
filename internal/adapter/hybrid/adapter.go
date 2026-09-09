@@ -65,6 +65,10 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 	return result, nil
 }
 
+func (a *Adapter) SetSessionStarred(ctx context.Context, sessionID string, starred bool) error {
+	return a.host.SetSessionStarred(ctx, sessionID, starred)
+}
+
 func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
 	target, err := a.targetForSession(ctx, sessionID)
 	if err != nil {

@@ -208,6 +208,32 @@ func TestStoredSessionReadDoesNotOpenChatAndPaginates(t *testing.T) {
 	}
 }
 
+func TestSessionStarringPersistsInSummaries(t *testing.T) {
+	h := newHarness(t)
+	ws := h.openWorkspace()
+	h.fake.Seed("star-me", "Important", ws.Path, nil)
+
+	resp := h.do(http.MethodPut, "/api/sessions/star-me/starred", struct {
+		Starred bool `json:"starred"`
+	}{Starred: true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("star session: %d", resp.StatusCode)
+	}
+	_ = decodeJSON[protocol.Accepted](t, resp)
+
+	list := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/workspaces/"+ws.WorkspaceID+"/sessions", nil))
+	if len(list) != 1 || !list[0].Starred {
+		t.Fatalf("starred session not returned: %+v", list)
+	}
+
+	missing := h.do(http.MethodPut, "/api/sessions/missing/starred", struct {
+		Starred bool `json:"starred"`
+	}{Starred: true})
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing session status = %d, want 404", missing.StatusCode)
+	}
+}
+
 func TestStoredSessionReadIsWorkspaceScoped(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Seed("elsewhere", "Elsewhere", filepath.Join(h.root, "other"), nil)
@@ -1082,6 +1108,16 @@ func TestLiveSessionsListsEveryProject(t *testing.T) {
 	if len(live) != 2 {
 		t.Fatalf("expected live sessions from both projects, got %+v", live)
 	}
+	all := decodeJSON[[]protocol.SessionSummary](t,
+		h.do(http.MethodGet, "/api/sessions", nil))
+	if len(all) != 2 {
+		t.Fatalf("expected all sessions from both projects, got %+v", all)
+	}
+	for _, session := range all {
+		if session.WorkingDir == "" || !session.Live || session.RunState == nil {
+			t.Fatalf("global session is missing workspace or live status: %+v", session)
+		}
+	}
 	gotPaths := map[string]bool{}
 	for _, session := range live {
 		if !session.Live || session.ChatID == "" || session.RunState == nil {
@@ -1313,100 +1349,6 @@ func TestFullTurnStreamsAndSettles(t *testing.T) {
 	}
 }
 
-func TestToolConfirmationRoundTrip(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	sse := h.openSSE(ref.ChatID, 0)
-	sse.next(3 * time.Second)
-
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/confirm list the files", Mode: protocol.DeliveryNormal}).Body.Close()
-
-	events := sse.collect(func(e protocol.Event) bool {
-		return e.Type == protocol.EventToolConfirmation
-	}, 5*time.Second)
-	req := events[len(events)-1].Confirmation
-	if req.Pattern == "" {
-		t.Fatal("confirmation must carry the exact pattern to be granted")
-	}
-	if !strings.Contains(req.PatternLabel, req.Pattern) {
-		t.Fatalf("dialog label %q must show the pattern %q", req.PatternLabel, req.Pattern)
-	}
-
-	resp := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
-		protocol.ToolConfirmationReply{ToolCallID: req.ToolCallID, Decision: protocol.DecisionApproveAlways})
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("confirm: %d", resp.StatusCode)
-	}
-	resolved := sse.collect(func(e protocol.Event) bool {
-		return e.Type == protocol.EventToolResolved
-	}, 5*time.Second)
-	got := resolved[len(resolved)-1].ToolResolved
-	// Pattern fidelity: what the dialog showed is exactly what was granted.
-	if got.Pattern != req.Pattern {
-		t.Fatalf("granted pattern %q != dialog pattern %q", got.Pattern, req.Pattern)
-	}
-
-	// The grant is reflected in the honest permission view.
-	sse.collect(func(e protocol.Event) bool {
-		return e.Type == protocol.EventRunStatus && e.Run != nil && e.Run.State == protocol.RunStateIdle
-	}, 5*time.Second)
-	snap := decodeJSON[protocol.Snapshot](t, h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil))
-	found := false
-	for _, g := range snap.Meta.Permissions.SessionGrants {
-		if g == req.Pattern {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("granted pattern missing from the permission view: %+v", snap.Meta.Permissions)
-	}
-}
-
-func TestUnknownConfirmationRejected(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	resp := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
-		protocol.ToolConfirmationReply{ToolCallID: "nope", Decision: protocol.DecisionApprove})
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", resp.StatusCode)
-	}
-}
-
-func TestElicitationCorrelatedByID(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	sse := h.openSSE(ref.ChatID, 0)
-	sse.next(3 * time.Second)
-
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/elicit please", Mode: protocol.DeliveryNormal}).Body.Close()
-	events := sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventElicitation }, 5*time.Second)
-	req := events[len(events)-1].Elicitation
-	if req.ElicitationID == "" {
-		t.Fatal("elicitation must carry an id for correlation")
-	}
-
-	// A wrong id must not resolve the pending request.
-	bad := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/elicitation",
-		protocol.ElicitationReply{ElicitationID: req.ElicitationID + "-wrong", Action: protocol.ElicitAccept})
-	if bad.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404 for an unknown elicitation id, got %d", bad.StatusCode)
-	}
-
-	ok := h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/elicitation",
-		protocol.ElicitationReply{
-			ElicitationID: req.ElicitationID, Action: protocol.ElicitAccept,
-			Content: map[string]any{"branch": "main"},
-		})
-	if ok.StatusCode != http.StatusAccepted {
-		t.Fatalf("elicitation reply: %d", ok.StatusCode)
-	}
-	sse.collect(func(e protocol.Event) bool {
-		return e.Type == protocol.EventElicitResolved && e.ElicitResolved.ElicitationID == req.ElicitationID
-	}, 5*time.Second)
-}
-
 func TestSteerFollowUpAndAbort(t *testing.T) {
 	h := newHarness(t)
 	h.fake.Delay = 60 * time.Millisecond
@@ -1537,11 +1479,7 @@ func TestToolPreviewIsBounded(t *testing.T) {
 	sse := h.openSSE(ref.ChatID, 0)
 	sse.next(3 * time.Second)
 	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/confirm run it", Mode: protocol.DeliveryNormal}).Body.Close()
-	events := sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 5*time.Second)
-	req := events[len(events)-1].Confirmation
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/tool-confirmation",
-		protocol.ToolConfirmationReply{ToolCallID: req.ToolCallID, Decision: protocol.DecisionApprove}).Body.Close()
+		protocol.SendMessageRequest{Text: "run it", Mode: protocol.DeliveryNormal}).Body.Close()
 	end := sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolEnd }, 5*time.Second)
 	tool := end[len(end)-1].Tool
 	if len(tool.Preview) > 4096+128 {
@@ -1625,11 +1563,6 @@ func TestToolsRunWithoutConfirmationDialog(t *testing.T) {
 		return e.Type == protocol.EventRunStatus && e.Run != nil && e.Run.State == protocol.RunStateIdle
 	}, 6*time.Second)
 
-	for _, e := range events {
-		if e.Type == protocol.EventToolConfirmation {
-			t.Fatal("a normal tool call must not raise a confirmation dialog")
-		}
-	}
 	var ranTool bool
 	for _, e := range events {
 		if e.Type == protocol.EventToolEnd && e.Tool != nil && e.Tool.State == protocol.ToolStateSuccess {
@@ -1666,21 +1599,6 @@ func TestRetitleCompactStatsAndDispose(t *testing.T) {
 	if r := h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil); r.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 after dispose, got %d", r.StatusCode)
 	}
-}
-
-// TestDisposeCancelsPendingDialogs: disposal must never leave the runtime
-// blocked on a dialog nobody can answer.
-func TestDisposeCancelsPendingDialogs(t *testing.T) {
-	h := newHarness(t)
-	ref, _ := h.newChat()
-	sse := h.openSSE(ref.ChatID, 0)
-	sse.next(3 * time.Second)
-	h.do(http.MethodPost, "/api/chats/"+ref.ChatID+"/messages",
-		protocol.SendMessageRequest{Text: "/confirm run it", Mode: protocol.DeliveryNormal}).Body.Close()
-	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventToolConfirmation }, 5*time.Second)
-
-	h.do(http.MethodDelete, "/api/chats/"+ref.ChatID, nil).Body.Close()
-	sse.collect(func(e protocol.Event) bool { return e.Type == protocol.EventChatClosed }, 5*time.Second)
 }
 
 func TestErrorShapeHasNoInternals(t *testing.T) {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { PanelLeftOpen } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ChatPane } from '@/components/chat/ChatPane';
 import { PluginCommandPalette } from '@/components/plugins/PluginCommandPalette';
 import { PluginNotifications } from '@/components/plugins/PluginNotifications';
@@ -7,8 +8,12 @@ import { PluginPage } from '@/components/plugins/PluginPage';
 import { PluginRuntime } from '@/components/plugins/PluginRuntime';
 import { PluginSettingsPage } from '@/components/plugins/PluginSettingsPage';
 import { SettingsPage } from '@/components/settings/SettingsPage';
+import { ProjectSettings } from '@/components/settings/ProjectSettings';
+import { SettingsLayout } from '@/components/settings/SettingsLayout';
+import { SettingsHeader } from '@/components/settings/SettingsHeader';
 import { Sidebar as DashboardSidebar } from '@/components/sidebar/Sidebar';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Sidebar as ShellSidebar, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { SessionTabs } from '@/components/sessions/SessionTabs';
 import { SplitSessionPane } from './SplitSessionPane';
@@ -18,21 +23,55 @@ import { clip } from '@/safety';
 import { useDashboard } from '@/hooks/useDashboard';
 import { useDashboardEvents } from '@/hooks/useDashboardEvents';
 import { usePlugins } from '@/hooks/usePlugins';
+import { useSessionCompletionChime } from '@/hooks/useSessionCompletionChime';
 
 interface PluginTabState {
   pluginId: string;
   path: string;
 }
 
+const SIDEBAR_WIDTH_KEY = 'dawui.sidebar-width';
+const SIDEBAR_OPEN_KEY = 'dawui.sidebar-open';
+const DEFAULT_SIDEBAR_WIDTH = 268;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 480;
+
+function loadSidebarWidth() {
+  try {
+    const stored = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0
+      ? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
+      : DEFAULT_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function loadSidebarOpen() {
+  try {
+    return localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function decodePathPart(value: string | undefined): string | null {
+  if (!value) return null;
+  try { return decodeURIComponent(value); } catch { return null; }
+}
+
 export function Dashboard() {
-  const params = useParams<{ sessionId: string; pluginId: string; '*': string }>();
-  const routeSessionId = params.sessionId;
-  const routePluginId = params.pluginId ?? null;
-  const routePluginPath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '');
   const location = useLocation();
+  const sessionMatch = location.pathname.match(/^\/sessions\/([^/]+)\/?$/);
+  const pluginMatch = location.pathname.match(/^\/plugins\/([^/]+)(?:\/(.*))?$/);
+  const routeSessionId = decodePathPart(sessionMatch?.[1]);
+  const routePluginId = decodePathPart(pluginMatch?.[1]);
+  const routePluginPath = (pluginMatch?.[2] ?? '').split('/').filter(Boolean)
+    .map((part) => decodePathPart(part) ?? '').join('/');
   const settingsActive = location.pathname === '/settings';
+  const projectSettingsActive = location.pathname === '/settings/projects';
   const pluginSettingsActive = location.pathname === '/settings/plugins';
-  const anySettingsActive = settingsActive || pluginSettingsActive;
+  const anySettingsActive = settingsActive || projectSettingsActive || pluginSettingsActive;
   const navigate = useNavigate();
   const routeWorkspacePath = useMemo(
     () => new URLSearchParams(location.search).get('workspace'),
@@ -56,7 +95,11 @@ export function Dashboard() {
     workspacePath: routeWorkspacePath,
     openSession,
     leaveSession,
-  }, dashboardEvents.sessionsRevision);
+  }, dashboardEvents.sessionsRevision, dashboardEvents.provisioning, dashboardEvents.clearProvisioning);
+  useSessionCompletionChime(
+    dashboard.liveSessions,
+    routePluginId || anySettingsActive ? null : dashboard.activeSessionId,
+  );
   const { catalog: pluginCatalog, loadError: pluginLoadError } = usePlugins(
     Boolean(dashboard.boot),
     dashboardEvents.pluginsRevision,
@@ -70,8 +113,75 @@ export function Dashboard() {
   }), [dashboard.activeSessionId, dashboard.chatId, dashboard.state.meta, dashboard.workspace]);
   const menuButton = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
+  const settingsReturnRoute = useRef('/');
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const sidebarAutoCollapsed = useRef(false);
   const dragDepth = useRef(0);
+
+  useEffect(() => {
+    if (!anySettingsActive) settingsReturnRoute.current = `${location.pathname}${location.search}`;
+  }, [anySettingsActive, location.pathname, location.search]);
+
+  const closeSettings = useCallback(() => navigate(settingsReturnRoute.current), [navigate]);
+
+  const setDesktopSidebarOpen = useCallback((open: boolean) => {
+    sidebarAutoCollapsed.current = false;
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_KEY, String(open));
+    } catch {
+      /* Storage is optional. */
+    }
+  }, []);
+
+  useEffect(() => {
+    const narrowWindow = window.matchMedia('(max-width: 820px)');
+    const updateForWindowWidth = (event: MediaQueryListEvent | MediaQueryList) => {
+      if (event.matches) {
+        setSidebarOpen((open) => {
+          if (!open) return open;
+          sidebarAutoCollapsed.current = true;
+          return false;
+        });
+      } else if (sidebarAutoCollapsed.current) {
+        sidebarAutoCollapsed.current = false;
+        setSidebarOpen(true);
+      }
+    };
+
+    updateForWindowWidth(narrowWindow);
+    narrowWindow.addEventListener('change', updateForWindowWidth);
+    return () => narrowWindow.removeEventListener('change', updateForWindowWidth);
+  }, []);
+
+  const resizeSidebar = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (window.matchMedia('(max-width: 820px)').matches) return;
+    event.preventDefault();
+    const update = (pointerEvent: PointerEvent) => {
+      const available = Math.max(MIN_SIDEBAR_WIDTH, window.innerWidth - 320);
+      setSidebarWidth(Math.min(MAX_SIDEBAR_WIDTH, available, Math.max(MIN_SIDEBAR_WIDTH, pointerEvent.clientX)));
+    };
+    const finish = () => {
+      document.removeEventListener('pointermove', update);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', finish);
+      document.body.classList.remove('resizing-sidebar');
+      setSidebarWidth((width) => {
+        try {
+          localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+        } catch {
+          /* Storage is optional. */
+        }
+        return width;
+      });
+    };
+    document.body.classList.add('resizing-sidebar');
+    document.addEventListener('pointermove', update);
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+  }, []);
 
   const openPlugin = useCallback((pluginId: string, path: string) => {
     dashboard.setDrawerOpen(false);
@@ -129,9 +239,31 @@ export function Dashboard() {
   }, [dashboard.liveSessions, navigate]);
 
   const closeSplit = useCallback((paneId: string) => {
-    setSplitPanes((current) => current.filter((pane) => pane.id !== paneId));
+    const pane = splitPanes.find((candidate) => candidate.id === paneId);
+    setSplitPanes((current) => current.filter((candidate) => candidate.id !== paneId));
     setPaneLayout((current) => removeLeaf(current, paneId));
-  }, []);
+    if (pane) dashboard.closeSessionTab(pane.sessionId);
+  }, [dashboard.closeSessionTab, splitPanes]);
+
+  useEffect(() => {
+    if (splitPanes.length === 0 || dashboard.liveSessions.length + pluginTabs.length > 1) return;
+
+    setSplitPanes([]);
+    setPaneLayout({ type: 'leaf', id: PRIMARY_PANE_ID });
+
+    const remainingSession = dashboard.liveSessions[0];
+    if (remainingSession && !routePluginId && !anySettingsActive && routeSessionId !== remainingSession.sessionId) {
+      navigate(sessionRoute(remainingSession.sessionId, remainingSession.workingDir));
+    }
+  }, [
+    anySettingsActive,
+    dashboard.liveSessions,
+    navigate,
+    pluginTabs.length,
+    routePluginId,
+    routeSessionId,
+    splitPanes.length,
+  ]);
 
   const resizeSplit = useCallback((
     event: React.PointerEvent<HTMLDivElement>,
@@ -159,7 +291,7 @@ export function Dashboard() {
     document.addEventListener('pointerup', finish);
   }, []);
 
-  const canDropAttachments = Boolean(dashboard.chatId && !routePluginId && !dashboard.uploading);
+  const canDropAttachments = Boolean(dashboard.workspace && !routePluginId && !dashboard.uploading);
   const onChatDragEnter = (event: React.DragEvent<HTMLElement>) => {
     if (!canDropAttachments || !event.dataTransfer.types.includes('Files')) return;
     event.preventDefault();
@@ -196,7 +328,7 @@ export function Dashboard() {
     return () => document.removeEventListener('keydown', onKey);
   }, [dashboard.drawerOpen, dashboard.setDrawerOpen]);
 
-  if (dashboard.bootError) return <main className="fatal"><h1>The dashboard could not start</h1><p>{clip(dashboard.bootError, 300)}</p></main>;
+  if (dashboard.bootError) return <main className="fatal"><h1>Atelier could not start</h1><p>{clip(dashboard.bootError, 300)}</p></main>;
   if (!dashboard.boot) return <main className="fatal"><p>Loading…</p></main>;
 
   const openPluginTabs = pluginTabs.flatMap((tab) => {
@@ -233,20 +365,32 @@ export function Dashboard() {
       <section className="main-pane" key={PRIMARY_PANE_ID}>
         {settingsActive ? (
           <SettingsPage menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
-            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)}
-            onOpenPlugins={() => navigate('/settings/plugins')} />
+            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} onClose={closeSettings} />
+        ) : projectSettingsActive ? (
+          <section className="main-pane">
+            <SettingsHeader title="Settings · Projects" menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
+              onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} onClose={closeSettings} />
+            <div className="settings-page">
+              <SettingsLayout>
+                <ProjectSettings projects={dashboard.recentWorkspaces} workspacePath={dashboard.workspacePath}
+                  onWorkspacePathChange={dashboard.setWorkspacePath} onAddProject={dashboard.addWorkspace}
+                  onRemoveProject={dashboard.removeWorkspace} />
+              </SettingsLayout>
+            </div>
+          </section>
         ) : pluginSettingsActive ? (
           <PluginSettingsPage boot={dashboard.boot!} revision={dashboardEvents.pluginsRevision}
             menuButton={menuButton} drawerOpen={dashboard.drawerOpen}
-            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} />
+            onToggleDrawer={() => dashboard.setDrawerOpen((open) => !open)} onClose={closeSettings} />
         ) : <>
         <SessionTabs
           sessions={mainSessions} activeSessionId={routePluginId ? null : dashboard.activeSessionId}
           plugins={openPluginTabs} activePluginId={routePluginId} busy={dashboard.busyAction}
           canCreateChat={Boolean(dashboard.workspace)} onNewChat={() => dashboard.newChat()}
-          onOpen={dashboard.resumeChat} onClose={dashboard.closeLiveSession}
+          onOpen={dashboard.resumeChat} onClose={dashboard.closeSessionTab}
           onReorder={dashboard.reorderLiveSessions} onOpenPlugin={openPlugin}
           onClosePlugin={closePlugin}
+          reserveSidebarToggleSpace={!sidebarOpen}
           onSplit={(sessionId, workspacePath, direction) => openSplit(PRIMARY_PANE_ID, sessionId, workspacePath, direction)}
         />
         {routePluginId ? (
@@ -261,27 +405,48 @@ export function Dashboard() {
   };
 
   return (
-    <SidebarProvider className="app" defaultOpen>
+    <SidebarProvider className="app" open={sidebarOpen} onOpenChange={setDesktopSidebarOpen}
+      style={{ '--sidebar-w': `${sidebarWidth}px` } as CSSProperties}>
       <PluginRuntime boot={dashboard.boot} plugins={pluginCatalog.plugins ?? []} workspace={dashboard.workspace} />
       <PluginNotifications />
       <PluginCommandPalette context={contributionContext} />
       <a className="skip" href="#main">Skip to main content</a>
       {dashboard.drawerOpen ? <div className="scrim" onClick={() => dashboard.setDrawerOpen(false)} role="presentation" /> : null}
-      <ShellSidebar id="sidebar" collapsible="none" className={`sidebar ${dashboard.drawerOpen ? 'open' : ''}`} aria-label="Workspace and sessions">
+      <ShellSidebar id="sidebar" collapsible="none" className={`sidebar ${sidebarOpen ? '' : 'sidebar-collapsed'} ${dashboard.drawerOpen ? 'open' : ''}`} aria-label="Workspace and sessions">
         <DashboardSidebar
           boot={dashboard.boot} workspace={dashboard.workspace} sessions={dashboard.sessions}
-          recentWorkspaces={dashboard.recentWorkspaces} plugins={pluginCatalog.plugins ?? []}
+          allSessions={dashboard.allSessions}
+          recentWorkspaces={dashboard.recentWorkspaces} projectFolders={dashboard.projectFolders}
+          onProjectFoldersChange={dashboard.updateProjectFolders} plugins={pluginCatalog.plugins ?? []}
           pluginErrors={pluginCatalog.errors ?? []} activePluginId={routePluginId}
           activePluginPath={routePluginPath}
           activeSessionId={routePluginId || anySettingsActive ? null : dashboard.activeSessionId}
-          workspacePath={dashboard.workspacePath}
           busy={dashboard.busyAction} drawerRef={drawerRef}
-          onWorkspacePathChange={dashboard.setWorkspacePath} onOpenWorkspace={dashboard.openWorkspace}
-          onNewChat={() => dashboard.newChat()} onResumeChat={dashboard.resumeChat} onOpenPlugin={openPlugin}
+          onNewChat={dashboard.newChatForWorkspace} onResumeChat={dashboard.resumeChat}
+          onStarSession={dashboard.starSession} onOpenPlugin={openPlugin}
           settingsActive={anySettingsActive}
           onOpenSettings={() => { dashboard.setDrawerOpen(false); navigate('/settings'); }}
+          onOpenProjectSettings={() => { dashboard.setDrawerOpen(false); navigate('/settings/projects'); }}
+          onCollapse={() => setDesktopSidebarOpen(false)}
         />
+        <div className="sidebar-resize-handle" role="separator" aria-label="Resize sidebar" aria-orientation="vertical"
+          aria-valuemin={MIN_SIDEBAR_WIDTH} aria-valuemax={MAX_SIDEBAR_WIDTH} aria-valuenow={sidebarWidth}
+          tabIndex={0} onPointerDown={resizeSidebar} onDoubleClick={() => setDesktopSidebarOpen(false)}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+            event.preventDefault();
+            const width = event.key === 'Home' ? MIN_SIDEBAR_WIDTH : event.key === 'End' ? MAX_SIDEBAR_WIDTH
+              : Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, sidebarWidth + (event.key === 'ArrowLeft' ? -10 : 10)));
+            setSidebarWidth(width);
+            try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* Storage is optional. */ }
+          }} />
       </ShellSidebar>
+      {!sidebarOpen ? (
+        <Button type="button" size="icon-sm" variant="secondary" className="sidebar-expand-button"
+          aria-label="Expand sidebar" onClick={() => setDesktopSidebarOpen(true)}>
+          <PanelLeftOpen aria-hidden="true" />
+        </Button>
+      ) : null}
 
       <SidebarInset id="main" className={`main ${draggingFiles ? 'main-dragging' : ''}`}
         onDragEnter={onChatDragEnter} onDragOver={onChatDragOver} onDragLeave={onChatDragLeave} onDrop={onChatDrop}>

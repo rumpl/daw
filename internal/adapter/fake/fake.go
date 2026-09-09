@@ -4,7 +4,7 @@
 //
 // It replays a scripted turn whose shape mirrors the real runtime's event
 // order: stream start -> reasoning -> assistant deltas -> tool call ->
-// (optional confirmation / elicitation) -> tool result -> usage -> settle.
+// tool result -> usage -> settle.
 package fake
 
 import (
@@ -48,7 +48,7 @@ type storedSession struct {
 	agentName  string
 	model      string
 	thinking   string
-	grants     []string
+	starred    bool
 }
 
 // New builds an empty fake adapter.
@@ -93,8 +93,8 @@ func (a *Adapter) ListSessions(_ context.Context, workingDir string) ([]protocol
 		}
 		out = append(out, protocol.SessionSummary{
 			SessionID: s.id, Title: s.title, WorkingDir: s.workingDir,
-			Attributes: cloneMap(s.attributes),
-			CreatedAt:  s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items), Cost: s.usage.Cost,
+			Attributes: cloneMap(s.attributes), Starred: s.starred,
+			CreatedAt: s.createdAt.UTC().Format(time.RFC3339), Messages: len(s.items), Cost: s.usage.Cost,
 		})
 	}
 	sortSummaries(out)
@@ -131,6 +131,17 @@ func (a *Adapter) SeedWithAttributes(id, title, workingDir string, attributes ma
 		id: id, title: title, workingDir: workingDir, attributes: cloneMap(attributes), createdAt: a.now(),
 		items: items, agentName: "root", model: "fake/model-a", thinking: "medium",
 	}
+}
+
+func (a *Adapter) SetSessionStarred(_ context.Context, sessionID string, starred bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	stored, ok := a.sessions[sessionID]
+	if !ok {
+		return adapter.ErrNotFound
+	}
+	stored.starred = starred
+	return nil
 }
 
 func (a *Adapter) ReadSession(_ context.Context, sessionID string) (adapter.StoredSession, error) {
@@ -216,8 +227,7 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 	}
 	c := &chat{
 		a: a, st: st,
-		events:  make(chan protocol.Event, 256),
-		pending: map[string]chan reply{},
+		events: make(chan protocol.Event, 256),
 	}
 	c.run = protocol.RunStatus{
 		State: protocol.RunStateIdle,
@@ -229,13 +239,6 @@ func (a *Adapter) OpenChat(_ context.Context, req adapter.OpenRequest) (adapter.
 // Close releases the fake store.
 func (a *Adapter) Close() error { return nil }
 
-type reply struct {
-	decision protocol.ToolDecision
-	action   protocol.ElicitationAction
-	reason   string
-	content  map[string]any
-}
-
 type chat struct {
 	a  *Adapter
 	st *storedSession
@@ -246,7 +249,6 @@ type chat struct {
 	run        protocol.RunStatus
 	closed     bool
 	cancel     context.CancelFunc
-	pending    map[string]chan reply
 	genID      int
 	steer      []protocol.QueuedMessage
 	followUp   []protocol.QueuedMessage
@@ -285,9 +287,8 @@ func (c *chat) meta() protocol.SessionMeta {
 // permissions mirrors the real adapter's configured pattern lists.
 func (c *chat) permissions() protocol.PermissionsView {
 	return protocol.PermissionsView{
-		Allow:         []string{"read_file", "list_files"},
-		Deny:          []string{"rm*"},
-		SessionGrants: append([]string(nil), c.st.grants...),
+		Allow: []string{"read_file", "list_files"},
+		Deny:  []string{"rm*"},
 	}
 }
 
@@ -485,10 +486,6 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 			Type:     protocol.EventTransfer,
 			Transfer: &protocol.Transfer{ID: runID + "-t2", FromAgent: "helper", ToAgent: "root"},
 		})
-	case strings.Contains(prompt, "/elicit"):
-		if !c.elicit(ctx, runID) {
-			return
-		}
 	case strings.Contains(prompt, "/error"):
 		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
 			ID: runID + "-err", Level: protocol.NoticeError,
@@ -507,7 +504,7 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	case strings.Contains(prompt, "/notool"):
 		// plain text turn
 	default:
-		if !c.toolTurn(ctx, strings.Contains(prompt, "/confirm")) {
+		if !c.toolTurn(ctx) {
 			return
 		}
 	}
@@ -544,7 +541,7 @@ func (c *chat) script(ctx context.Context, gen int, runID, prompt string) {
 	c.emit(protocol.Event{Type: protocol.EventUsage, Usage: &usage})
 }
 
-func (c *chat) toolTurn(ctx context.Context, requireConfirmation bool) bool {
+func (c *chat) toolTurn(ctx context.Context) bool {
 	c.mu.Lock()
 	c.toolN++
 	id := fmt.Sprintf("%s-tool-%d", c.st.id, c.toolN)
@@ -556,50 +553,6 @@ func (c *chat) toolTurn(ctx context.Context, requireConfirmation bool) bool {
 		Arguments: map[string]any{"cmd": "ls -la /workspace", "cwd": "."}, State: protocol.ToolStatePending,
 	}
 	c.emit(protocol.Event{Type: protocol.EventToolStart, Tool: act})
-
-	// /confirm simulates an explicit permission rule that still asks even though
-	// the session itself always auto-approves tools.
-	if requireConfirmation {
-		act.State = protocol.ToolStateAwaiting
-		c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: act})
-		pattern := "shell(ls*)"
-		req := &protocol.ToolConfirmationRequest{
-			ToolCallID: id, ToolName: "shell", DisplayName: "Shell", AgentName: c.st.agentName,
-			ArgsSummary: `ls -la /workspace`, Pattern: pattern,
-			PatternLabel:     "Always allow " + pattern,
-			RejectionReasons: []protocol.RejectionReason{{Label: "Not now", Reason: "The user declined this action."}},
-		}
-		ch := make(chan reply, 1)
-		c.mu.Lock()
-		c.pending[id] = ch
-		c.mu.Unlock()
-		c.emit(protocol.Event{Type: protocol.EventToolConfirmation, Confirmation: req})
-
-		var r reply
-		select {
-		case r = <-ch:
-		case <-ctx.Done():
-			return false
-		}
-		c.mu.Lock()
-		delete(c.pending, id)
-		if r.decision == protocol.DecisionApproveAlways {
-			c.st.grants = append(c.st.grants, pattern)
-		}
-		c.mu.Unlock()
-		c.emit(protocol.Event{
-			Type:         protocol.EventToolResolved,
-			ToolResolved: &protocol.ToolResolved{ToolCallID: id, Decision: r.decision, Pattern: pattern},
-		})
-		meta := c.Meta()
-		c.emit(protocol.Event{Type: protocol.EventSessionMeta, Meta: &meta})
-		if r.decision == protocol.DecisionReject {
-			act.State = protocol.ToolStateRejected
-			act.Preview = "Rejected: " + r.reason
-			c.emit(protocol.Event{Type: protocol.EventToolEnd, Tool: act})
-			return true
-		}
-	}
 
 	act.State = protocol.ToolStateRunning
 	c.emit(protocol.Event{Type: protocol.EventToolUpdate, Tool: act})
@@ -615,38 +568,6 @@ func (c *chat) toolTurn(ctx context.Context, requireConfirmation bool) bool {
 	c.st.items = append(c.st.items, protocol.Item{Kind: protocol.ItemKindTool, Tool: act})
 	c.a.mu.Unlock()
 	return true
-}
-
-func (c *chat) elicit(ctx context.Context, runID string) bool {
-	id := runID + "-elicit-1"
-	ch := make(chan reply, 1)
-	c.mu.Lock()
-	c.pending[id] = ch
-	c.mu.Unlock()
-	c.emit(protocol.Event{Type: protocol.EventElicitation, Elicitation: &protocol.ElicitationRequest{
-		ElicitationID: id, Message: "Which branch should I use?", Mode: "form",
-		AgentName: c.st.agentName,
-		Schema: map[string]any{"type": "object", "properties": map[string]any{
-			"branch": map[string]any{"type": "string", "title": "Branch"},
-		}},
-	}})
-	select {
-	case r := <-ch:
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		c.emit(protocol.Event{
-			Type:           protocol.EventElicitResolved,
-			ElicitResolved: &protocol.ElicitResolved{ElicitationID: id},
-		})
-		c.emit(protocol.Event{Type: protocol.EventNotice, Notice: &protocol.Notice{
-			ID: id + "-n", Level: protocol.NoticeInfo,
-			Message: fmt.Sprintf("Elicitation %s answered (%s).", id, r.action),
-		}})
-		return true
-	case <-ctx.Done():
-		return false
-	}
 }
 
 func (c *chat) settle(gen int, runID string) {
@@ -696,40 +617,11 @@ func (c *chat) Abort() {
 	}
 	cancel := c.cancel
 	run := c.run
-	for id, ch := range c.pending {
-		select {
-		case ch <- reply{decision: protocol.DecisionReject, action: protocol.ElicitCancel, reason: "run stopped"}:
-		default:
-		}
-		delete(c.pending, id)
-	}
 	c.mu.Unlock()
 	c.emit(protocol.Event{Type: protocol.EventRunStatus, Run: &run})
 	if cancel != nil {
 		cancel()
 	}
-}
-
-func (c *chat) Confirm(_ context.Context, toolCallID string, d protocol.ToolDecision, reason string) error {
-	c.mu.Lock()
-	ch, ok := c.pending[toolCallID]
-	c.mu.Unlock()
-	if !ok {
-		return adapter.ErrNotFound
-	}
-	ch <- reply{decision: d, reason: reason}
-	return nil
-}
-
-func (c *chat) Elicit(_ context.Context, id string, action protocol.ElicitationAction, content map[string]any) error {
-	c.mu.Lock()
-	ch, ok := c.pending[id]
-	c.mu.Unlock()
-	if !ok {
-		return adapter.ErrNotFound
-	}
-	ch <- reply{action: action, content: content}
-	return nil
 }
 
 func fakeModelOptions(current string) []protocol.ModelOption {
@@ -763,7 +655,6 @@ func (c *chat) Models(context.Context) []protocol.ModelOption {
 func (c *chat) Commands(context.Context) []protocol.CommandInfo {
 	return []protocol.CommandInfo{
 		{Name: "notool", Description: "Reply without calling a tool", Kind: "command"},
-		{Name: "elicit", Description: "Trigger an elicitation", Kind: "command"},
 		{Name: "transfer", Description: "Delegate to the sub-agent", Kind: "command"},
 	}
 }

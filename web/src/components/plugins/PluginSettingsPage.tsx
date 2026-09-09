@@ -1,10 +1,13 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { MoreHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { api, type PluginManagement } from '@/api';
 import type { Bootstrap } from '@/protocol.gen';
+import { SettingsLayout } from '@/components/settings/SettingsLayout';
+import { SettingsHeader } from '@/components/settings/SettingsHeader';
 import { clip } from '@/safety';
 
 interface PluginSettingsPageProps {
@@ -13,11 +16,12 @@ interface PluginSettingsPageProps {
   menuButton: RefObject<HTMLButtonElement | null>;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
+  onClose: () => void;
 }
 
 type PluginAction = 'start' | 'stop' | 'enable' | 'disable';
 
-export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onToggleDrawer }: PluginSettingsPageProps) {
+export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onToggleDrawer, onClose }: PluginSettingsPageProps) {
   const [plugins, setPlugins] = useState<PluginManagement[]>([]);
   const [catalogErrors, setCatalogErrors] = useState<Array<{ pluginId?: string; message: string }>>([]);
   const [loading, setLoading] = useState(true);
@@ -69,12 +73,10 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
 
   return (
     <section className="main-pane">
-      <header className="topbar">
-        <Button ref={menuButton} type="button" variant="secondary" className="menu-button" aria-expanded={drawerOpen}
-          aria-controls="sidebar" onClick={onToggleDrawer}>Menu</Button>
-        <div className="topbar-title"><h1>Settings · Plugins</h1></div>
-      </header>
+      <SettingsHeader title="Settings · Plugins" menuButton={menuButton} drawerOpen={drawerOpen}
+        onToggleDrawer={onToggleDrawer} onClose={onClose} />
       <div className="plugin-settings">
+        <SettingsLayout>
         <div className="plugin-settings-heading">
           <div><h2>Plugins</h2><p>Manage plugins installed in <code>{clip(boot.pluginDir, 160)}</code>.</p></div>
         </div>
@@ -101,37 +103,50 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
                   <div className="plugin-management-info">
                     <div className="plugin-management-title"><h3>{clip(plugin.name || plugin.id, 100)}</h3>{plugin.version ? <span>v{clip(plugin.version, 30)}</span> : null}</div>
                     <p>{clip(plugin.description || plugin.id, 240)}</p>
-                    <div className="plugin-management-status">
-                      <Badge variant={managed.enabled ? 'default' : 'secondary'}>{managed.enabled ? 'Enabled' : 'Disabled'}</Badge>
-                      <Badge variant={managed.running ? 'default' : 'secondary'}>{managed.running ? 'Running' : 'Stopped'}</Badge>
-                      <code>{clip(plugin.id, 80)}</code>
-                    </div>
-                    <div className="plugin-feature-summary" aria-label="Plugin features">
-                      <strong>Features</strong>
-                      <div>
-                        {features.frontend ? <span>Frontend contributions</span> : null}
-                        {(plugin.pages ?? []).length > 0 ? <span>{plugin.pages?.length} page{plugin.pages?.length === 1 ? '' : 's'}</span> : null}
-                        {features.styles ? <span>Custom styles</span> : null}
-                        {features.backend ? <span>Backend API & events</span> : null}
-                        {features.configuration ? <span>Configuration</span> : null}
-                        {webhooks.length > 0 ? <span>{webhooks.length} webhook{webhooks.length === 1 ? '' : 's'}</span> : null}
-                        {mcpServers.length > 0 ? <span>{mcpServers.length} MCP server{mcpServers.length === 1 ? '' : 's'}</span> : null}
-                      </div>
-                      {(plugin.pages ?? []).length > 0 ? <p><b>Pages:</b> {plugin.pages?.map((page) => page.label).join(', ')}</p> : null}
-                      {mcpServers.length > 0 ? <p><b>MCP:</b> {mcpServers.map((server) => `${server.id} (${server.transport})`).join(', ')}</p> : null}
-                      {webhooks.length > 0 ? <p><b>Webhooks:</b> {webhooks.join(', ')}</p> : null}
-                    </div>
+                    <details className="plugin-details">
+                      <summary>Details</summary>
+                      <dl>
+                        <div><dt>ID</dt><dd><code>{clip(plugin.id, 100)}</code></dd></div>
+                        <div><dt>Capabilities</dt><dd>{[
+                          features.frontend && 'Frontend',
+                          (plugin.pages ?? []).length > 0 && `${plugin.pages?.length} page${plugin.pages?.length === 1 ? '' : 's'}`,
+                          features.styles && 'Styles',
+                          features.backend && 'Backend',
+                          features.configuration && 'Configuration',
+                          webhooks.length > 0 && `${webhooks.length} webhook${webhooks.length === 1 ? '' : 's'}`,
+                          mcpServers.length > 0 && `${mcpServers.length} MCP server${mcpServers.length === 1 ? '' : 's'}`,
+                        ].filter(Boolean).join(', ') || 'None declared'}</dd></div>
+                        {(plugin.pages ?? []).length > 0 ? <div><dt>Pages</dt><dd>{plugin.pages?.map((page) => page.label).join(', ')}</dd></div> : null}
+                        {mcpServers.length > 0 ? <div><dt>MCP</dt><dd>{mcpServers.map((server) => `${server.id} (${server.transport})`).join(', ')}</dd></div> : null}
+                      </dl>
+                    </details>
                   </div>
                   <div className="plugin-management-actions">
-                    {managed.enabled ? <Button type="button" variant="secondary" onClick={() => setPending({ managed, action: 'disable' })} disabled={busy}>Disable</Button> : <Button type="button" onClick={() => void act(managed, 'enable')} disabled={busy}>Enable</Button>}
-                    {managed.running ? <Button type="button" variant="secondary" onClick={() => setPending({ managed, action: 'stop' })} disabled={busy}>Stop</Button> : <Button type="button" onClick={() => void act(managed, 'start')} disabled={busy || !managed.enabled}>Start</Button>}
-                    <Button type="button" variant="destructive" onClick={() => setPending({ managed, action: 'delete' })} disabled={busy}>Delete</Button>
+                    {!managed.enabled ? (
+                      <Button type="button" variant="secondary" onClick={() => void act(managed, 'enable')} disabled={busy}>Enable</Button>
+                    ) : managed.running ? (
+                      <Button type="button" variant="secondary" onClick={() => setPending({ managed, action: 'stop' })} disabled={busy}>Stop</Button>
+                    ) : (
+                      <Button type="button" variant="secondary" onClick={() => void act(managed, 'start')} disabled={busy}>Start</Button>
+                    )}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={
+                        <Button type="button" size="icon-sm" variant="ghost" aria-label={`More actions for ${plugin.name || plugin.id}`} disabled={busy}>
+                          <MoreHorizontal aria-hidden="true" />
+                        </Button>
+                      } />
+                      <DropdownMenuContent align="end" className="w-36">
+                        {managed.enabled ? <DropdownMenuItem onClick={() => setPending({ managed, action: 'disable' })}>Disable</DropdownMenuItem> : null}
+                        <DropdownMenuItem variant="destructive" onClick={() => setPending({ managed, action: 'delete' })}>Delete</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </li>
               );
             })}
           </ul>
         )}
+        </SettingsLayout>
       </div>
 
       <AlertDialog open={Boolean(pending)} onOpenChange={(open) => { if (!open) setPending(null); }}>

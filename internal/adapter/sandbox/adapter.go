@@ -24,6 +24,7 @@ import (
 	"github.com/docker/docker-agent/pkg/version"
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/remote"
+	"github.com/rumpl/daw/internal/mcpbridge"
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/sandboxrunner"
 	"github.com/rumpl/daw/internal/stdiomux"
@@ -34,8 +35,8 @@ type Config struct {
 	Client            *sbx.Client
 	Workspace         string
 	Kit               string
-	Template          string
 	PluginDir         string
+	MCPBridge         *mcpbridge.Bridge
 	IndexFile         string
 	CallbackOrigin    string
 	CallbackToken     string
@@ -55,8 +56,8 @@ type Adapter struct {
 	client            *sbx.Client
 	workspace         string
 	kit               string
-	template          string
 	pluginDir         string
+	mcpBridge         *mcpbridge.Bridge
 	indexFile         string
 	callbackOrigin    string
 	callbackToken     string
@@ -106,24 +107,21 @@ func New(config Config) (*Adapter, error) {
 	if strings.TrimSpace(config.Workspace) == "" {
 		return nil, errors.New("sandbox adapter: workspace is required")
 	}
-	if strings.TrimSpace(config.Kit) == "" {
-		return nil, errors.New("sandbox adapter: kit is required")
+	kit := strings.TrimSpace(config.Kit)
+	if kit == "" {
+		return nil, errors.New("sandbox adapter: published kit reference is required")
 	}
 	workspace, err := filepath.Abs(config.Workspace)
 	if err != nil {
 		return nil, err
 	}
-	kit, err := filepath.Abs(config.Kit)
-	if err != nil {
-		return nil, err
-	}
-	for label, path := range map[string]string{"workspace": workspace, "kit": kit} {
-		info, statErr := os.Stat(path)
-		if statErr != nil || !info.IsDir() {
-			return nil, fmt.Errorf("sandbox adapter: %s directory is not usable: %s", label, path)
-		}
+	info, statErr := os.Stat(workspace)
+	if statErr != nil || !info.IsDir() {
+		return nil, fmt.Errorf("sandbox adapter: workspace directory is not usable: %s", workspace)
 	}
 	pluginDir := ""
+	// Plugin MCP commands execute on the host through mcpBridge, so this path
+	// remains host metadata and is not mounted into session sandboxes.
 	if strings.TrimSpace(config.PluginDir) != "" {
 		pluginDir, err = filepath.Abs(config.PluginDir)
 		if err != nil {
@@ -137,8 +135,8 @@ func New(config Config) (*Adapter, error) {
 		config.ReadyTimeout = 2 * time.Minute
 	}
 	a := &Adapter{
-		client: config.Client, workspace: workspace, kit: kit, template: strings.TrimSpace(config.Template), pluginDir: pluginDir,
-		indexFile: config.IndexFile, callbackOrigin: config.CallbackOrigin,
+		client: config.Client, workspace: workspace, kit: kit, pluginDir: pluginDir,
+		mcpBridge: config.MCPBridge, indexFile: config.IndexFile, callbackOrigin: config.CallbackOrigin,
 		callbackToken: config.CallbackToken, callbackHandler: config.CallbackHandler,
 		sessionStoreToken: config.SessionStoreToken, cpus: config.CPUs, memory: config.Memory,
 		readyTimeout: config.ReadyTimeout, log: config.Logger,
@@ -170,6 +168,27 @@ func (a *Adapter) ChatOptions(context.Context, string, []adapter.MCPServer) ([]p
 }
 
 func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (adapter.Chat, error) {
+	bridgePrepared := false
+	keepCapabilities := false
+	defer func() {
+		if bridgePrepared && !keepCapabilities {
+			a.mcpBridge.Revoke(request.ChatID)
+		}
+	}()
+	if a.mcpBridge == nil {
+		for _, server := range request.MCPServers {
+			if server.Command != "" {
+				return nil, errors.New("sandbox adapter: host MCP command bridge is required")
+			}
+		}
+	} else {
+		prepared, err := a.mcpBridge.Prepare(request.MCPServers, request.WorkingDir, request.ChatID, request.SessionContext)
+		if err != nil {
+			return nil, err
+		}
+		request.MCPServers = prepared
+		bridgePrepared = true
+	}
 	a.sessionOps.Lock()
 	defer a.sessionOps.Unlock()
 	var conn *connection
@@ -193,9 +212,9 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 			_ = a.saveLocked()
 			a.mu.Unlock()
 		}
-		conn, err = a.ensureRecord(ctx, rec)
+		conn, err = a.ensureRecord(ctx, rec, request.Progress)
 	} else {
-		conn, err = a.provision(ctx, sessionSandboxName(a.workspace, request.ChatID), request.WorkingDir)
+		conn, err = a.provision(ctx, sessionSandboxName(a.workspace, request.ChatID), request.WorkingDir, request.Progress)
 	}
 	if err != nil {
 		return nil, err
@@ -229,13 +248,18 @@ func (a *Adapter) OpenChat(ctx context.Context, request adapter.OpenRequest) (ad
 		a.releaseConnection(context.WithoutCancel(ctx), conn.runner.Name, true)
 		return nil, err
 	}
-	return &managedChat{Chat: chat, manager: a, conn: conn}, nil
+	keepCapabilities = true
+	return &managedChat{Chat: chat, manager: a, conn: conn, chatID: request.ChatID}, nil
 }
 
 // ListSessions is intentionally unsupported by the lifecycle backend. The
 // target router serves session history from the host catalog.
 func (a *Adapter) ListSessions(context.Context, string) ([]protocol.SessionSummary, error) {
 	return nil, adapter.ErrUnsupported
+}
+
+func (a *Adapter) SetSessionStarred(context.Context, string, bool) error {
+	return adapter.ErrUnsupported
 }
 
 func (a *Adapter) ReadSession(context.Context, string) (adapter.StoredSession, error) {
@@ -297,7 +321,7 @@ func (a *Adapter) Close() error {
 	return nil
 }
 
-func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, error) {
+func (a *Adapter) ensureRecord(ctx context.Context, rec *record, report func(adapter.ProvisioningEvent)) (*connection, error) {
 	a.provisionMu.Lock()
 	defer a.provisionMu.Unlock()
 	a.mu.Lock()
@@ -310,6 +334,7 @@ func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, e
 	if err != nil {
 		return nil, err
 	}
+	reuse := true
 	if rec.GatewayAuthHost != authHost {
 		// Credential proxy declarations are fixed when a sandbox is created.
 		// Recreate a stopped sandbox when Docker gateway auth was added,
@@ -317,26 +342,20 @@ func (a *Adapter) ensureRecord(ctx context.Context, rec *record) (*connection, e
 		if _, removeErr := a.client.Command(ctx, "rm", "-f", rec.Sandbox); removeErr != nil {
 			return nil, fmt.Errorf("replace sandbox after models gateway change: %w", removeErr)
 		}
+		reuse = false
 	}
-	conn, err := a.provisionWithGateway(ctx, rec.Sandbox, rec.WorkingDir, gatewayURL)
-	if err != nil {
-		return nil, err
-	}
-	a.mu.Lock()
-	a.connections[rec.Sandbox] = conn
-	a.mu.Unlock()
-	return conn, nil
+	return a.provisionWithGateway(ctx, rec.Sandbox, rec.WorkingDir, gatewayURL, reuse, report)
 }
 
-func (a *Adapter) provision(ctx context.Context, name, workingDir string) (*connection, error) {
+func (a *Adapter) provision(ctx context.Context, name, workingDir string, report func(adapter.ProvisioningEvent)) (*connection, error) {
 	gatewayURL, _, err := a.currentGateway(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return a.provisionWithGateway(ctx, name, workingDir, gatewayURL)
+	return a.provisionWithGateway(ctx, name, workingDir, gatewayURL, false, report)
 }
 
-func (a *Adapter) provisionWithGateway(ctx context.Context, name, workingDir, gatewayURL string) (*connection, error) {
+func (a *Adapter) provisionWithGateway(ctx context.Context, name, workingDir, gatewayURL string, reuse bool, report func(adapter.ProvisioningEvent)) (*connection, error) {
 	if a.callbackHandler == nil || strings.TrimSpace(a.sessionStoreToken) == "" {
 		return nil, errors.New("sandbox adapter: stdio callback handler and store token are required")
 	}
@@ -352,8 +371,13 @@ func (a *Adapter) provisionWithGateway(ctx context.Context, name, workingDir, ga
 	}
 	runner, err := sandboxrunner.Start(ctx, a.client, sandboxrunner.Options{
 		Workspace: a.workspace, AdditionalWorkspaces: extra, Kit: a.kit,
-		PluginDir: a.pluginDir, Name: name, Template: a.template, CPUs: a.cpus, Memory: a.memory,
+		Name: name, CPUs: a.cpus, Memory: a.memory, Reuse: reuse,
 		SessionStoreToken: a.sessionStoreToken, ModelsGateway: gatewayURL,
+		Progress: func(phase, message string) {
+			if report != nil {
+				report(adapter.ProvisioningEvent{Phase: phase, Message: message})
+			}
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -379,6 +403,9 @@ func (a *Adapter) provisionWithGateway(ctx context.Context, name, workingDir, ga
 		return nil, err
 	}
 	conn.remote = remoteAdapter
+	if report != nil {
+		report(adapter.ProvisioningEvent{Phase: "connecting", Message: "Connecting to agent runner…"})
+	}
 	readyCtx, cancel := context.WithTimeout(ctx, a.readyTimeout)
 	defer cancel()
 	if err := waitReady(readyCtx, remoteAdapter); err != nil {
@@ -475,16 +502,26 @@ func (a *Adapter) closeConnection(ctx context.Context, conn *connection) {
 }
 
 func waitReady(ctx context.Context, value *remote.Adapter) error {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
+	// The runner is normally ready within one local exec startup. Poll quickly
+	// at first so a single early connection refusal does not impose a fixed
+	// 200 ms penalty, then back off to avoid spinning on genuine failures.
+	delay := 10 * time.Millisecond
 	for {
 		if err := value.Check(ctx); err == nil {
 			return nil
 		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return fmt.Errorf("sandbox runner: waiting for stdio readiness: %w", ctx.Err())
-		case <-ticker.C:
+		case <-timer.C:
+		}
+		if delay < 200*time.Millisecond {
+			delay *= 2
+			if delay > 200*time.Millisecond {
+				delay = 200 * time.Millisecond
+			}
 		}
 	}
 }
@@ -542,6 +579,7 @@ type managedChat struct {
 
 	manager *Adapter
 	conn    *connection
+	chatID  string
 	once    sync.Once
 	err     error
 }
@@ -551,6 +589,9 @@ func (c *managedChat) Close(ctx context.Context) error {
 		c.err = c.Chat.Close(ctx)
 		refreshCtx := context.WithoutCancel(ctx)
 		c.manager.releaseConnection(refreshCtx, c.conn.runner.Name, true)
+		if c.manager.mcpBridge != nil {
+			c.manager.mcpBridge.Revoke(c.chatID)
+		}
 	})
 	return c.err
 }

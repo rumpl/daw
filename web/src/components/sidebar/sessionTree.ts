@@ -27,11 +27,12 @@ function sessionForest(sessions: SessionSummary[]): SessionNode[] {
   const roots: SessionNode[] = [];
   for (const node of nodes.values()) {
     const parent = node.session.parentSessionId ? nodes.get(node.session.parentSessionId) : undefined;
-    if (parent && parent !== node) parent.children.push(node);
+    if (!node.session.starred && parent && parent !== node) parent.children.push(node);
     else roots.push(node);
   }
   const sort = (items: SessionNode[]) => {
-    items.sort((a, b) => b.session.createdAt.localeCompare(a.session.createdAt));
+    items.sort((a, b) => Number(b.session.starred) - Number(a.session.starred)
+      || b.session.createdAt.localeCompare(a.session.createdAt));
     items.forEach((item) => sort(item.children));
   };
   sort(roots);

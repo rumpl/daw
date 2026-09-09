@@ -101,10 +101,14 @@ function ownedKey(pluginId: string, id: string) {
 
 function register<T>(store: Map<string, Owned<T>>, pluginId: string, value: T & { id: string }) {
   const key = ownedKey(pluginId, value.id);
-  store.set(key, { pluginId, value });
+  const entry = { pluginId, value };
+  store.set(key, entry);
   emit();
   return () => {
-    if (store.delete(key)) emit();
+    // A plugin can be reactivated while an earlier async activation is still
+    // unwinding. Do not let that stale activation unregister the newer
+    // contribution that reused the same plugin/id key.
+    if (store.get(key) === entry && store.delete(key)) emit();
   };
 }
 

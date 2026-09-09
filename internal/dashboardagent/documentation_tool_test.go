@@ -52,7 +52,7 @@ func TestDeveloperDocumentationCoversEveryBackendRoute(t *testing.T) {
 func TestDeveloperDocumentationCoversEveryExposedHostComponentAndHook(t *testing.T) {
 	for _, name := range []string{
 		"Chat", "Markdown", "Mermaid", "ChatHeader", "Composer", "Conversation",
-		"ElicitationDialog", "ToolConfirmDialog", "ModelPicker", "PendingDialogs", "ToolCard",
+		"ModelPicker", "ToolCard",
 		"useChat", "useDraft",
 	} {
 		if !strings.Contains(developerDocumentation, name) {

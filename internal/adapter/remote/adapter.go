@@ -80,6 +80,12 @@ func (a *Adapter) ListSessions(ctx context.Context, workingDir string) ([]protoc
 	return value, nil
 }
 
+func (a *Adapter) SetSessionStarred(ctx context.Context, sessionID string, starred bool) error {
+	return a.do(ctx, http.MethodPut, "/v1/sessions/"+url.PathEscape(sessionID)+"/starred", struct {
+		Starred bool `json:"starred"`
+	}{Starred: starred}, nil)
+}
+
 func (a *Adapter) ReadSession(ctx context.Context, sessionID string) (adapter.StoredSession, error) {
 	var value adapter.StoredSession
 	err := a.do(ctx, http.MethodGet, "/v1/sessions/"+url.PathEscape(sessionID), nil, &value)
@@ -239,14 +245,6 @@ func (c *chat) Send(ctx context.Context, text string, attachments []adapter.Atta
 
 func (c *chat) Abort() {
 	_ = c.a.do(context.Background(), http.MethodPost, c.path("abort"), map[string]any{}, nil)
-}
-
-func (c *chat) Confirm(ctx context.Context, id string, decision protocol.ToolDecision, reason string) error {
-	return c.a.do(ctx, http.MethodPost, c.path("confirm"), runnerapi.ConfirmRequest{ToolCallID: id, Decision: decision, Reason: reason}, nil)
-}
-
-func (c *chat) Elicit(ctx context.Context, id string, action protocol.ElicitationAction, content map[string]any) error {
-	return c.a.do(ctx, http.MethodPost, c.path("elicit"), runnerapi.ElicitRequest{ElicitationID: id, Action: action, Content: content}, nil)
 }
 
 func (c *chat) Models(ctx context.Context) []protocol.ModelOption {

@@ -28,26 +28,26 @@ type Options struct {
 	Workspace            string
 	AdditionalWorkspaces []string
 	Kit                  string
-	// Template is a sandbox template image previously baked with EnsureTemplate.
-	// When set, the staged kit omits the runner binary because it is already in
-	// the image.
-	Template string
-	// PluginDir is mounted at the same absolute path inside the sandbox. The
-	// runner discovers plugin MCP declarations there, just like dawui does on
-	// the host. Empty disables host plugin mounting.
+	// PluginDir is retained for launcher compatibility and host-side plugin
+	// discovery. Local MCP commands no longer run in the sandbox, so this path
+	// is not mounted by the session adapter.
 	PluginDir string
 	Name      string
 	CPUs      int
 	Memory    string
+	// Reuse identifies a sandbox already owned by a persisted session. Existing
+	// sandboxes must be reattached by name alone; new sessions can skip the
+	// extra `sbx ports` discovery subprocess.
+	Reuse bool
 	// SessionStoreToken authenticates reverse store RPC carried over stdio.
 	SessionStoreToken string
 	// ModelsGateway is the host's current models gateway. Docker gateways add
 	// docker-agent's login mixin kit when the sandbox is created; all gateways
 	// are added to the sandbox network policy before the runner starts.
 	ModelsGateway string
-	// SkipRunner materializes the kit without starting the process. It is used
-	// only while baking a template, before the host store bridge exists.
-	SkipRunner bool
+	// Progress receives lifecycle milestones suitable for a user-facing status
+	// display. Callbacks must return quickly.
+	Progress func(phase, message string)
 }
 
 type Runner struct {
@@ -69,6 +69,12 @@ func DefaultName(workspace string) string {
 	return "daw-" + base + "-" + hex.EncodeToString(sum[:4])
 }
 
+func progress(options Options, phase, message string) {
+	if options.Progress != nil {
+		options.Progress(phase, message)
+	}
+}
+
 // Start stages per-sandbox configuration, creates or resumes the sandbox, and
 // opens the runner's long-lived sbx-exec stdio process. The sbx run command
 // remains the authority for kit composition, credentials, policy, and sandbox
@@ -81,11 +87,11 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: workspace: %w", err)
 	}
-	kit, err := existingDirectory(options.Kit)
-	if err != nil {
-		return Runner{}, fmt.Errorf("sandbox runner: kit: %w", err)
+	kit := strings.TrimSpace(options.Kit)
+	if kit == "" {
+		return Runner{}, errors.New("sandbox runner: published kit reference is required")
 	}
-	if !options.SkipRunner && strings.TrimSpace(options.SessionStoreToken) == "" {
+	if strings.TrimSpace(options.SessionStoreToken) == "" {
 		return Runner{}, errors.New("sandbox runner: host session store token is required")
 	}
 	workspaces := []string{workspace}
@@ -126,49 +132,51 @@ func Start(ctx context.Context, client *sbx.Client, options Options) (Runner, er
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: create authentication token: %w", err)
 	}
-	stagedKit, cleanup, err := stageKit(kit, token, strings.TrimSpace(options.Template) == "")
-	if err != nil {
-		return Runner{}, err
-	}
-	defer cleanup()
 	loginKit, err := agentsandbox.LoginKit(strings.TrimSpace(options.ModelsGateway))
 	if err != nil {
 		return Runner{}, fmt.Errorf("sandbox runner: create Docker gateway login kit: %w", err)
 	}
 	gatewayAuthHost := ""
-	kits := []string{stagedKit}
+	kits := []string{}
 	if loginKit != "" {
 		kits = append(kits, loginKit)
 		gatewayAuthHost = filepath.Base(loginKit)
 	}
 
 	runOptions := sbx.RunOptions{
-		Agent: AgentName, Workspaces: workspaces, Name: name,
-		Kits: kits, Template: strings.TrimSpace(options.Template),
-		Detached: true,
+		Agent: kit, Workspaces: workspaces, Name: name,
+		Kits: kits, CPUs: options.CPUs, Memory: options.Memory, Detached: true,
 	}
-	if runOptions.Template == "" {
-		runOptions.CPUs = options.CPUs
-		runOptions.Memory = options.Memory
-	}
-	// Existing sandboxes must be reattached by name alone; sbx rejects new
-	// workspaces, templates, and kits on that path. The stable token allows the
-	// host adapter to reconnect without recreating the VM.
-	if _, portsErr := client.Ports(ctx, name); portsErr == nil {
+	if options.Reuse {
+		// sbx rejects workspaces, kits, and resource options when reattaching.
 		runOptions.SandboxOptions = sbx.SandboxOptions{Name: name}
 	}
-	err = client.Run(ctx, runOptions)
-	if err != nil {
-		return Runner{}, fmt.Errorf("sandbox runner: start %q: %w", name, err)
+	progress(options, "starting", "Starting Docker Sandbox…")
+	if !options.Reuse {
+		err = client.Run(ctx, runOptions)
+		if err != nil {
+			return Runner{}, fmt.Errorf("sandbox runner: start %q: %w", name, err)
+		}
 	}
-	allowGatewayHost(ctx, client, name, options.ModelsGateway)
-	if options.SkipRunner {
-		return Runner{Name: name, Token: token, GatewayAuthHost: gatewayAuthHost}, nil
-	}
+	// `sbx exec` starts a stopped sandbox itself. A persisted session therefore
+	// avoids a redundant `sbx run --name` subprocess and goes straight to the
+	// long-lived runner transport.
+	progress(options, "configuring", "Configuring sandbox network access…")
+	// Policy mutation is a separate sbx/daemon round trip. It can overlap runner
+	// process startup because bootstrap only uses the host store; Start still
+	// waits for policy completion before returning, so the first model request
+	// cannot race the allow rule.
+	policyDone := make(chan struct{})
+	go func() {
+		defer close(policyDone)
+		allowGatewayHost(ctx, client, name, options.ModelsGateway)
+	}()
 	// Start the runner once through the normal exec path after sbx run completes.
 	// setup.startup is deliberately not used because that launch context can see
 	// proxy-managed placeholder keys before the credential proxy is attached.
-	process, err := startRunner(context.WithoutCancel(ctx), client, name, options.SessionStoreToken)
+	progress(options, "runner", "Starting agent runner…")
+	process, err := startRunner(context.WithoutCancel(ctx), client, name, workspace, token, options.SessionStoreToken)
+	<-policyDone
 	if err != nil {
 		return Runner{}, err
 	}
@@ -194,90 +202,13 @@ func allowGatewayHost(ctx context.Context, client *sbx.Client, name, rawURL stri
 	}
 }
 
-func startRunner(ctx context.Context, client *sbx.Client, name, storeToken string) (*sbx.Process, error) {
-	command := `
-set -eu
-pid_file=/home/agent/.cagent/daw-runner/runner.pid
-if [ -s "$pid_file" ]; then
-  pid=$(cat "$pid_file")
-  if kill -0 "$pid" 2>/dev/null; then
-    # Existing sandboxes made by older kits may still auto-start the runner.
-    # Replace that process so it also receives the post-initialization exec
-    # credential context, but do not wait at all on new sandboxes.
-    kill "$pid" 2>/dev/null || true
-    tries=0
-    while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt 40 ]; do
-      sleep 0.05
-      tries=$((tries + 1))
-    done
-    kill -9 "$pid" 2>/dev/null || true
-  fi
-fi
-rm -f "$pid_file"
-if [ -f /home/agent/.local/lib/daw-runner ]; then
-  chmod 0755 /home/agent/.local/lib/daw-runner 2>/dev/null || sudo -n chmod 0755 /home/agent/.local/lib/daw-runner 2>/dev/null || true
-fi
-exec env DAW_SESSION_STORE_TOKEN=` + shellQuote(storeToken) + ` /home/agent/.local/bin/start-daw-runner
-`
+func startRunner(ctx context.Context, client *sbx.Client, name, workspace, runnerToken, storeToken string) (*sbx.Process, error) {
+	command := `exec env DAW_RUNNER_WORKSPACE=` + shellQuote(workspace) + ` DAW_RUNNER_TOKEN=` + shellQuote(runnerToken) + ` DAW_SESSION_STORE_TOKEN=` + shellQuote(storeToken) + ` /home/agent/.local/lib/daw-runner`
 	process, err := client.ExecPipe(ctx, name, "sh", "-c", command)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox runner: start %q after sandbox initialization: %w", name, err)
 	}
 	return process, nil
-}
-
-func stageKit(source, token string, includeRunner bool) (string, func(), error) {
-	binary := filepath.Join(source, "files", "home", ".local", "lib", "daw-runner")
-	info, err := os.Stat(binary)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", func() {}, errors.New("sandbox runner: kit has no runner binary; run `make build-runner-kit`")
-		}
-		return "", func() {}, fmt.Errorf("sandbox runner: inspect kit runner binary: %w", err)
-	}
-	if info.IsDir() || info.Mode()&0o111 == 0 {
-		return "", func() {}, errors.New("sandbox runner: kit runner binary is not executable")
-	}
-
-	parent, err := os.MkdirTemp("", "daw-runner-kit-")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("sandbox runner: create staged kit: %w", err)
-	}
-	cleanup := func() { _ = os.RemoveAll(parent) }
-	staged := filepath.Join(parent, AgentName)
-	if includeRunner {
-		if err := os.CopyFS(staged, os.DirFS(source)); err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("sandbox runner: stage full kit: %w", err)
-		}
-	} else {
-		// Session templates already contain the runner and static setup files.
-		// Build a genuinely small kit rather than copying the large executable
-		// into a temporary tree only to remove it again.
-		if err := os.MkdirAll(staged, 0o750); err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("sandbox runner: stage lightweight kit: %w", err)
-		}
-		spec, err := os.ReadFile(filepath.Join(source, "spec.yaml"))
-		if err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("sandbox runner: read kit spec: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(staged, "spec.yaml"), spec, 0o600); err != nil {
-			cleanup()
-			return "", func() {}, fmt.Errorf("sandbox runner: stage kit spec: %w", err)
-		}
-	}
-	configDir := filepath.Join(staged, "files", "home", ".config", "daw")
-	if err := os.MkdirAll(configDir, 0o750); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("sandbox runner: stage runner configuration: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "runner-token"), []byte(token+"\n"), 0o600); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("sandbox runner: stage runner token: %w", err)
-	}
-	return staged, cleanup, nil
 }
 
 // RemoveToken deletes the host-side bearer token after its sandbox has been

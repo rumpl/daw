@@ -95,31 +95,11 @@ describe('reducer', () => {
       ],
       run: { state: 'idle', runId: '', queue: emptyQueue },
       usage: { inputTokens: 1, outputTokens: 2, cost: 0.1, contextLimit: 0 },
-      pendingConfirmations: [],
-      pendingElicitations: [],
     };
     s = reduce(s, ev({ type: 'snapshot', seq: 9, snapshot }));
     expect(s.items).toHaveLength(2);
     expect(new Set(s.items.map(itemKey)).size).toBe(2);
     expect(s.seq).toBe(9);
-  });
-
-  it('tracks pending confirmations and elicitations by id', () => {
-    let s = initialChatState();
-    s = reduce(s, ev({ type: 'tool_confirmation', seq: 1, confirmation: { toolCallId: 'c1', toolName: 'shell', agentName: 'root', argsSummary: 'ls', pattern: 'shell:cmd=ls*', patternLabel: 'always allow ls*', rejectionReasons: [] } }));
-    // A duplicate (replayed) request must not create a second dialog.
-    s = reduce(s, ev({ type: 'tool_confirmation', seq: 2, confirmation: { toolCallId: 'c1', toolName: 'shell', agentName: 'root', argsSummary: 'ls', pattern: 'shell:cmd=ls*', patternLabel: 'always allow ls*', rejectionReasons: [] } }));
-    expect(s.confirmations).toHaveLength(1);
-
-    s = reduce(s, ev({ type: 'tool_confirmation_resolved', seq: 3, toolResolved: { toolCallId: 'c1', decision: 'approve', pattern: 'shell:cmd=ls*' } }));
-    expect(s.confirmations).toHaveLength(0);
-
-    s = reduce(s, ev({ type: 'elicitation', seq: 4, elicitation: { elicitationId: 'e1', message: 'q', mode: 'form', url: '', agentName: 'root' } }));
-    s = reduce(s, ev({ type: 'elicitation', seq: 5, elicitation: { elicitationId: 'e2', message: 'q2', mode: 'form', url: '', agentName: 'root' } }));
-    expect(s.elicitations.map((e) => e.elicitationId)).toEqual(['e1', 'e2']);
-    // Resolution is by id, so the right dialog closes.
-    s = reduce(s, ev({ type: 'elicitation_resolved', seq: 6, elicitResolved: { elicitationId: 'e1' } }));
-    expect(s.elicitations.map((e) => e.elicitationId)).toEqual(['e2']);
   });
 
   it('marks the chat closed', () => {
@@ -136,10 +116,7 @@ describe('reducer', () => {
       items: null,
       run: { state: 'idle', runId: '', queue: emptyQueue },
       usage: { inputTokens: 0, outputTokens: 0, cost: 0, contextLimit: 0 },
-      pendingConfirmations: null,
-      pendingElicitations: null,
     });
     expect(s.items).toEqual([]);
-    expect(s.confirmations).toEqual([]);
   });
 });

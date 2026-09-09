@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { ImageLightbox } from '@/components/ui/ImageLightbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Markdown } from '@/components/markdown/Markdown';
 import { PluginBoundary } from '@/components/plugins/PluginBoundary';
@@ -8,30 +9,12 @@ import type { ContributionContext } from '@/plugin-contributions';
 import { usePluginContributions } from '@/plugin-contributions';
 import type { MessageItem } from '@/protocol.gen';
 import { clip } from '@/safety';
-import { useLayoutEffect, useRef } from 'react';
-import { Download } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
 
 function attachmentImageSrc(attachment: NonNullable<MessageItem['attachments']>[number]): string | null {
   if (!attachment.mimeType.startsWith('image/') || !attachment.data) return null;
   return `data:${attachment.mimeType};base64,${attachment.data}`;
-}
-
-function markdownFilename(message: MessageItem): string {
-  const agent = message.agentName.trim().replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'agent';
-  const timestamp = message.createdAt ? message.createdAt.replace(/[:.]/g, '-') : message.id;
-  return `${agent}-${timestamp}.md`;
-}
-
-function downloadMarkdown(message: MessageItem) {
-  const blob = new Blob([message.text], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = markdownFilename(message);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 export function MessageBubble({ message, attachmentRenderers, contributionContext }: {
@@ -40,7 +23,10 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
   contributionContext?: ContributionContext;
 }) {
   const isUser = message.role === 'user';
-  const canDownload = !isUser && !message.streaming;
+  const canShowActions = !isUser && !message.streaming;
+  const canCopy = canShowActions && message.text.trim().length > 0;
+  const [copied, setCopied] = useState(false);
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previousStreamRef = useRef({ id: message.id, textLength: message.text.length, phase: false });
   const previousStream = previousStreamRef.current;
   const sameStream = previousStream.id === message.id;
@@ -56,20 +42,35 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
     };
   }, [appended, message.id, message.text.length, previousStream.phase]);
 
+  useEffect(() => () => clearTimeout(copyResetTimer.current), []);
+
+  async function copyResponse() {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setCopied(true);
+      clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   return (
-    <article className={`msg msg-${isUser ? 'user' : 'assistant'}${canDownload ? ' msg-downloadable' : ''}`} aria-label={`${message.role} message`}>
-      {canDownload ? (
+    <article className={`msg msg-${isUser ? 'user' : 'assistant'}${canShowActions ? ' msg-actionable' : ''}`} aria-label={`${message.role} message`}>
+      {canShowActions ? (
         <div className="msg-actions">
           {contributionContext ? <PluginSlotView slot="assistant-message.actions" context={{ ...contributionContext, message }} /> : null}
-          <Tooltip>
-            <TooltipTrigger render={
-              <Button type="button" size="icon-sm" variant="ghost" className="msg-download"
-                aria-label="Download message as Markdown" onClick={() => downloadMarkdown(message)}>
-                <Download aria-hidden="true" />
-              </Button>
-            } />
-            <TooltipContent>Download as Markdown</TooltipContent>
-          </Tooltip>
+          {canCopy ? (
+            <Tooltip>
+              <TooltipTrigger render={
+                <Button type="button" size="icon-sm" variant="ghost" className="msg-copy"
+                  aria-label={copied ? 'Assistant response copied' : 'Copy assistant response'} onClick={copyResponse}>
+                  {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                </Button>
+              } />
+              <TooltipContent>{copied ? 'Copied' : 'Copy response'}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       ) : null}
       {message.attachments?.length ? (
@@ -86,7 +87,7 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
             const src = attachmentImageSrc(attachment);
             return src ? (
               <figure className="message-attachment-image" key={attachment.id}>
-                <img src={src} alt={attachment.name} />
+                <ImageLightbox src={src} alt={attachment.name} />
                 <figcaption>{clip(attachment.name, 80)}</figcaption>
               </figure>
             ) : (
@@ -101,7 +102,7 @@ export function MessageBubble({ message, attachmentRenderers, contributionContex
       {message.reasoning ? <div className="reasoning"><Markdown>{message.reasoning}</Markdown></div> : null}
       {message.streaming ? (
         <div className="msg-streaming" aria-live="polite">
-          <Markdown animateFrom={animateFrom} animationPhase={animationPhase}>{message.text}</Markdown>
+          <Markdown streaming animateFrom={animateFrom} animationPhase={animationPhase}>{message.text}</Markdown>
           <span className="caret" aria-hidden="true" />
         </div>
       ) : isUser ? <pre className="msg-plain">{message.text}</pre> : <Markdown>{message.text}</Markdown>}

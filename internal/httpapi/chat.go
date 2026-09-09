@@ -44,8 +44,6 @@ type liveChat struct {
 	meta        protocol.SessionMeta
 	run         protocol.RunStatus
 	usage       protocol.Usage
-	pendingC    map[string]protocol.ToolConfirmationRequest
-	pendingE    map[string]protocol.ElicitationRequest
 	attachments map[string]uploadedAttachment
 	// generation invalidates events from a runtime we already replaced or
 	// closed. The pump goroutine carries its generation and drops everything
@@ -64,8 +62,6 @@ func newLiveChat(id, workspaceID string, c adapter.Chat) *liveChat {
 		id: id, workspaceID: workspaceID, chat: c,
 		subs:        map[*subscriber]struct{}{},
 		index:       map[string]int{},
-		pendingC:    map[string]protocol.ToolConfirmationRequest{},
-		pendingE:    map[string]protocol.ElicitationRequest{},
 		attachments: map[string]uploadedAttachment{},
 		run:         protocol.RunStatus{State: protocol.RunStateIdle},
 	}
@@ -296,22 +292,6 @@ func (l *liveChat) applyLocked(ev *protocol.Event) {
 			l.meta = m
 			ev.Meta = &m
 		}
-	case protocol.EventToolConfirmation:
-		if ev.Confirmation != nil {
-			l.pendingC[ev.Confirmation.ToolCallID] = *ev.Confirmation
-		}
-	case protocol.EventToolResolved:
-		if ev.ToolResolved != nil {
-			delete(l.pendingC, ev.ToolResolved.ToolCallID)
-		}
-	case protocol.EventElicitation:
-		if ev.Elicitation != nil {
-			l.pendingE[ev.Elicitation.ElicitationID] = *ev.Elicitation
-		}
-	case protocol.EventElicitResolved:
-		if ev.ElicitResolved != nil {
-			delete(l.pendingE, ev.ElicitResolved.ElicitationID)
-		}
 	}
 }
 
@@ -392,18 +372,7 @@ func (l *liveChat) snapshot() protocol.Snapshot {
 	defer l.mu.Unlock()
 	items := make([]protocol.Item, len(l.items))
 	copy(items, l.items)
-	confirmations := make([]protocol.ToolConfirmationRequest, 0, len(l.pendingC))
-	for _, c := range l.pendingC {
-		confirmations = append(confirmations, c)
-	}
-	elicitations := make([]protocol.ElicitationRequest, 0, len(l.pendingE))
-	for _, e := range l.pendingE {
-		elicitations = append(elicitations, e)
-	}
-	return protocol.Snapshot{
-		Seq: l.seq, Meta: l.meta, Items: items, Run: l.run, Usage: l.usage,
-		PendingConfirmations: confirmations, PendingElicitations: elicitations,
-	}
+	return protocol.Snapshot{Seq: l.seq, Meta: l.meta, Items: items, Run: l.run, Usage: l.usage}
 }
 
 // subscribe registers an SSE listener. When lastEventID is non-zero and still
@@ -496,8 +465,6 @@ func (l *liveChat) close(ctx context.Context, reason string) {
 		subs = append(subs, s)
 	}
 	l.subs = map[*subscriber]struct{}{}
-	l.pendingC = map[string]protocol.ToolConfirmationRequest{}
-	l.pendingE = map[string]protocol.ElicitationRequest{}
 	l.attachments = map[string]uploadedAttachment{}
 	l.mu.Unlock()
 

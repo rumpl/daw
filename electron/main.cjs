@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, protocol, shell } = require('electron');
+const { app, BrowserWindow, dialog, Menu, nativeImage, protocol, shell, Tray } = require('electron');
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -8,12 +8,16 @@ const { Readable } = require('node:stream');
 
 const APP_SCHEME = 'daw';
 const APP_HOST = 'localhost';
-// The first sandbox-enabled launch may need to bake the reusable runner
-// template before the dashboard creates its socket.
+const WINDOW_ROUTE_FILE = 'last-window-route';
+// Pulling the published sandbox kit on its first use may take longer than a
+// cached sandbox start.
 const STARTUP_TIMEOUT_MS = 180_000;
 const APP_ICON = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.png')
   : path.join(__dirname, 'build', 'icon.png');
+const TRAY_ICON = app.isPackaged
+  ? path.join(process.resourcesPath, 'trayTemplate.png')
+  : path.join(__dirname, 'build', 'trayTemplate.png');
 
 // Register before app readiness so Chromium treats daw:// like a normal secure
 // origin. This is required for module scripts, dynamic plugin imports, fetch,
@@ -34,6 +38,7 @@ protocol.registerSchemesAsPrivileged([
 
 let backend = null;
 let socketDirectory = null;
+let tray = null;
 let quitting = false;
 
 function dashboardPath() {
@@ -46,9 +51,16 @@ function sandboxLauncherPath() {
   return path.resolve(__dirname, '..', 'bin', 'daw-sandbox');
 }
 
-function runnerKitPath() {
-  if (app.isPackaged) return path.join(process.resourcesPath, 'kits', 'daw-runner');
-  return path.resolve(__dirname, '..', 'kits', 'daw-runner');
+function runnerKitReference() {
+  const referenceFile = app.isPackaged
+    ? path.join(process.resourcesPath, 'backend', 'daw-runner-kit.ref')
+    : path.resolve(__dirname, '..', 'bin', 'daw-runner-kit.ref');
+  if (!fs.existsSync(referenceFile)) {
+    throw new Error(`Sandbox kit reference not found at ${referenceFile}. Run \`make electron\` from the repository root.`);
+  }
+  const reference = fs.readFileSync(referenceFile, 'utf8').trim();
+  if (!reference) throw new Error(`Sandbox kit reference is empty at ${referenceFile}.`);
+  return reference;
 }
 
 function makeSocketPath() {
@@ -106,8 +118,8 @@ function loginShellEnvironment() {
 function startBackend(socketPath) {
   const executable = sandboxLauncherPath();
   const dashboard = dashboardPath();
-  const kit = runnerKitPath();
-  for (const required of [executable, dashboard, kit]) {
+  const kit = runnerKitReference();
+  for (const required of [executable, dashboard]) {
     if (!fs.existsSync(required)) {
       throw new Error(`Sandbox backend resource not found at ${required}. Run \`make electron\` from the repository root.`);
     }
@@ -135,13 +147,13 @@ function startBackend(socketPath) {
   backend.stdout.on('data', (data) => process.stdout.write(`[backend] ${data}`));
   backend.stderr.on('data', (data) => process.stderr.write(`[backend] ${data}`));
   backend.once('error', (error) => {
-    if (!quitting) dialog.showErrorBox('Unable to start DAW', error.message);
+    if (!quitting) dialog.showErrorBox('Unable to start Atelier', error.message);
   });
   backend.once('exit', (code, signal) => {
     backend = null;
     if (quitting) return;
     dialog.showErrorBox(
-      'DAW backend stopped',
+      'Atelier backend stopped',
       `The backend exited unexpectedly (${signal || `code ${code}`}).`,
     );
     app.quit();
@@ -249,16 +261,47 @@ async function proxyToBackend(request, socketPath) {
   });
 }
 
+function lastWindowURL() {
+  const fallback = new URL(`${APP_SCHEME}://${APP_HOST}/`);
+  try {
+    const saved = new URL(fs.readFileSync(path.join(app.getPath('userData'), WINDOW_ROUTE_FILE), 'utf8').trim());
+    if (saved.protocol === `${APP_SCHEME}:` && saved.hostname === APP_HOST) {
+      fallback.pathname = saved.pathname;
+      fallback.search = saved.search;
+      fallback.hash = saved.hash;
+    }
+  } catch {
+    // A first launch or an invalid state file should simply open the dashboard.
+  }
+  fallback.searchParams.set('electron', '1');
+  return fallback.toString();
+}
+
+function rememberWindowURL(window) {
+  try {
+    const current = new URL(window.webContents.getURL());
+    if (current.protocol !== `${APP_SCHEME}:` || current.hostname !== APP_HOST) return;
+    current.searchParams.delete('electron');
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(path.join(app.getPath('userData'), WINDOW_ROUTE_FILE), current.toString());
+  } catch {
+    // Restoring the route is a convenience and must not prevent the window closing.
+  }
+}
+
 function createWindow() {
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
     minWidth: 800,
     minHeight: 600,
-    title: 'Docker Agent Dashboard',
+    title: 'Atelier',
     icon: APP_ICON,
     backgroundColor: '#111111',
     show: false,
+    autoHideMenuBar: true,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 14, y: 7 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -266,6 +309,8 @@ function createWindow() {
     },
   });
 
+  window.setMenuBarVisibility(false);
+  window.on('close', () => rememberWindowURL(window));
   window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://') || url.startsWith('mailto:')) {
@@ -280,36 +325,77 @@ function createWindow() {
       if (target.protocol === 'https:' || target.protocol === 'http:') void shell.openExternal(url);
     }
   });
-  void window.loadURL(`${APP_SCHEME}://${APP_HOST}/`);
+  void window.loadURL(lastWindowURL());
+  return window;
+}
+
+function showWindow() {
+  let window = BrowserWindow.getAllWindows()[0];
+  if (!window) window = createWindow();
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function createTray() {
+  if (process.platform !== 'darwin') return;
+
+  const trayIcon = nativeImage.createFromPath(TRAY_ICON);
+  trayIcon.setTemplateImage(true);
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Atelier');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Quit Atelier',
+      click: () => app.quit(),
+    },
+  ]);
+  tray.on('click', showWindow);
+  tray.on('right-click', () => tray.popUpContextMenu(contextMenu));
+}
+
+function createApplicationMenu() {
+  const template = [];
+  if (process.platform === 'darwin') template.push({ role: 'appMenu' });
+  template.push({ role: 'fileMenu' });
+  template.push({ role: 'editMenu' });
+  template.push({
+    label: 'View',
+    submenu: [
+      { role: 'resetZoom' },
+      { role: 'zoomIn' },
+      { role: 'zoomOut' },
+      { type: 'separator' },
+      { role: 'togglefullscreen' },
+    ],
+  });
+  return Menu.buildFromTemplate(template);
 }
 
 async function main() {
+  // Native edit and zoom shortcuts are application-menu roles. Keep the menu
+  // installed even when its menu bar is hidden on Windows and Linux.
+  Menu.setApplicationMenu(createApplicationMenu());
   const socketPath = makeSocketPath();
   startBackend(socketPath);
   await waitForBackend(socketPath);
   await protocol.handle(APP_SCHEME, (request) => proxyToBackend(request, socketPath));
   if (process.platform === 'darwin') app.dock.setIcon(APP_ICON);
+  createTray();
   createWindow();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  app.on('activate', showWindow);
 }
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    const window = BrowserWindow.getAllWindows()[0];
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.focus();
-    }
-  });
+  app.on('second-instance', showWindow);
 
   app.whenReady().then(main).catch((error) => {
-    dialog.showErrorBox('Unable to start DAW', error.stack || error.message);
+    dialog.showErrorBox('Unable to start Atelier', error.stack || error.message);
     app.quit();
   });
 }

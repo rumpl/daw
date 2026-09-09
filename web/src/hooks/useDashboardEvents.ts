@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { DashboardEvent } from '@/protocol.gen';
+import type { DashboardEvent, SandboxProvisioning } from '@/protocol.gen';
 
 export function useDashboardEvents(enabled: boolean) {
   const [sessionsRevision, setSessionsRevision] = useState(0);
   const [pluginsRevision, setPluginsRevision] = useState(0);
+  const [provisioning, setProvisioning] = useState<Record<string, SandboxProvisioning>>({});
 
   useEffect(() => {
     if (!enabled) return;
@@ -48,6 +49,12 @@ export function useDashboardEvents(enabled: boolean) {
             case 'plugins_changed':
               schedule(false, true);
               break;
+            case 'sandbox_provisioning':
+              if (event.provisioning) {
+                const update = event.provisioning;
+                setProvisioning((current) => ({ ...current, [update.operationId]: update }));
+              }
+              break;
             case 'snapshot':
             case 'gap':
               schedule(true, true);
@@ -76,5 +83,14 @@ export function useDashboardEvents(enabled: boolean) {
     };
   }, [enabled]);
 
-  return { sessionsRevision, pluginsRevision };
+  const clearProvisioning = (operationId: string) => {
+    setProvisioning((current) => {
+      if (!(operationId in current)) return current;
+      const next = { ...current };
+      delete next[operationId];
+      return next;
+    });
+  };
+
+  return { sessionsRevision, pluginsRevision, provisioning, clearProvisioning };
 }

@@ -7,12 +7,15 @@ SHELL := /bin/bash
 BIN := bin/dawui
 SANDBOX_BIN := bin/daw-sandbox
 RUNNER_KIT_BIN := kits/daw-runner/files/home/.local/lib/daw-runner
-PORT ?= 4788
+RUNNER_REPOSITORY ?= docker.io/djordjelukic1639080/daw-runner
+RUNNER_TEMPLATE_REPOSITORY ?= $(RUNNER_REPOSITORY)-template
+RUNNER_KIT_REPOSITORY ?= $(RUNNER_REPOSITORY)-kit
+RUNNER_KIT_REF := bin/daw-runner-kit.ref
 GO ?= go
 WEB_DEPS_STAMP := web/node_modules/.daw-installed
 
 .PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
-        ci build build-web build-go build-sandbox-launcher build-runner-kit start start-sandbox electron package-electron clean smoke-real screenshots help
+        ci build build-web build-go build-sandbox-launcher build-runner-kit publish-sandbox-kit electron package-electron clean smoke-real screenshots help
 
 all: build
 
@@ -34,20 +37,27 @@ electron-deps:
 generate:
 	$(GO) run ./cmd/tsgen web/src/protocol.gen.ts
 
-## dev: run the Go server and the Vite dev server together
-dev: generate
-	@echo "API:  http://127.0.0.1:$(PORT)"
+## dev: run the sandbox-enabled Go backend and open the Vite dev UI
+# The backend deliberately runs without embedded web assets: Vite owns the UI
+# during development and proxies /api to it.
+dev: generate deps publish-sandbox-kit
+	@echo "API:  http://127.0.0.1:4788"
 	@echo "UI :  http://127.0.0.1:4789  (proxies /api to the Go server)"
 	@trap 'kill 0' EXIT INT TERM; \
-	PORT=$(PORT) $(GO) run ./cmd/dawui & \
-	cd web && npm run dev & \
+	workspace=$$(cd "$${WORKSPACE:-.}" && pwd -P); \
+	PORT=4788 \
+		DAWUI_SANDBOX_PER_SESSION=1 \
+		DAWUI_SANDBOX_WORKSPACE="$$workspace" \
+		DAWUI_SANDBOX_KIT="$$(cat $(RUNNER_KIT_REF))" \
+		$(GO) run ./cmd/dawui & \
+	cd web && npm run dev -- --open & \
 	wait
 
-## dev-fake: same as dev but with the deterministic fake docker-agent adapter
-dev-fake: generate
+## dev-fake: run without a sandbox using the deterministic test adapter
+dev-fake: generate deps
 	@trap 'kill 0' EXIT INT TERM; \
-	PORT=$(PORT) DAWUI_FAKE_ADAPTER=1 DAWUI_FAKE_DELAY_MS=40 $(GO) run ./cmd/dawui & \
-	cd web && npm run dev & \
+	PORT=4788 DAWUI_FAKE_ADAPTER=1 DAWUI_FAKE_DELAY_MS=40 $(GO) run ./cmd/dawui & \
+	cd web && npm run dev -- --open & \
 	wait
 
 ## typecheck: go vet, staticcheck when available, and tsc --noEmit
@@ -101,8 +111,8 @@ ci: generate
 	$(MAKE) test-web
 	$(MAKE) build
 
-## build: compile the Go binary with the frontend embedded
-build: generate build-web build-go
+## build: compile the app and publish its content-addressed sandbox kit
+build: generate build-web build-go publish-sandbox-kit
 
 build-web: deps
 	cd web && npm run build
@@ -124,31 +134,37 @@ build-sandbox-launcher:
 	mkdir -p $(dir $(SANDBOX_BIN))
 	$(GO) build -trimpath -o $(SANDBOX_BIN) ./cmd/daw-sandbox
 
-## build-runner-kit: cross-compile the code-defined Linux runner into the local sandbox kit
+## build-runner-kit: cross-compile and validate the code-defined Linux sandbox runner
 build-runner-kit:
 	mkdir -p $(dir $(RUNNER_KIT_BIN))
 	CGO_ENABLED=0 GOOS=linux GOARCH=$$($(GO) env GOARCH) $(GO) build -trimpath -ldflags "\
+	  -s -w \
 	  -X main.appVersion=$$(git describe --tags --always 2>/dev/null || echo dev) \
 	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
 	  -o $(RUNNER_KIT_BIN) ./cmd/daw-runner
 
-## start: run the compiled production binary
-start: $(BIN)
-	PORT=$(PORT) ./$(BIN)
-
-## start-sandbox: build and run one Docker Sandbox per persistent session
-start-sandbox: build build-runner-kit
-	$(GO) run ./cmd/daw-sandbox -per-session -workspace "$${WORKSPACE:-.}" -dashboard ./$(BIN)
-
-$(BIN):
-	$(MAKE) build
+## publish-sandbox-kit: bake the runner into a cached template and publish its small configuration kit
+publish-sandbox-kit: build-runner-kit
+	@mkdir -p $(dir $(RUNNER_KIT_REF)); \
+	 digest=$$(find kits/daw-runner/spec.yaml kits/daw-runner/Dockerfile $(RUNNER_KIT_BIN) -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-12); \
+	 template_ref="$(RUNNER_TEMPLATE_REPOSITORY):$$digest"; \
+	 kit_ref="$(RUNNER_KIT_REPOSITORY):$$digest"; \
+	 echo "publishing sandbox template $$template_ref"; \
+	 docker buildx build --platform linux/$$($(GO) env GOARCH) --push -t "$$template_ref" -f kits/daw-runner/Dockerfile kits/daw-runner; \
+	 stage=$$(mktemp -d); \
+	 trap 'rm -rf "$$stage"' EXIT; \
+	 sed "s|__DAW_RUNNER_TEMPLATE__|$$template_ref|" kits/daw-runner/spec.yaml > "$$stage/spec.yaml"; \
+	 sbx kit validate "$$stage"; \
+	 echo "publishing sandbox kit $$kit_ref"; \
+	 sbx kit push "$$stage" "$$kit_ref"; \
+	 printf '%s\n' "$$kit_ref" > $(RUNNER_KIT_REF)
 
 ## electron: build and launch the sandbox-first Electron desktop app (backend uses a UDS)
-electron: build build-sandbox-launcher build-runner-kit electron-deps
+electron: build build-sandbox-launcher electron-deps
 	cd electron && npm start
 
 ## package-electron: create a sandbox-first native Electron artifact in electron/dist
-package-electron: build build-sandbox-launcher build-runner-kit electron-deps
+package-electron: build build-sandbox-launcher electron-deps
 	cd electron && npm run dist
 
 ## screenshots: capture desktop + mobile UI screenshots against the fake adapter
@@ -164,7 +180,7 @@ smoke-real:
 
 clean:
 	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules electron/node_modules electron/dist
-	rm -f $(SANDBOX_BIN) $(RUNNER_KIT_BIN)
+	rm -f $(SANDBOX_BIN) $(RUNNER_KIT_BIN) $(RUNNER_KIT_REF)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'

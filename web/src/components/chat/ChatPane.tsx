@@ -1,5 +1,6 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { LoaderCircle } from 'lucide-react';
 import { useMemo, type RefObject } from 'react';
 import { ChatHeader } from './ChatHeader';
 import { PluginActionButtons } from '@/components/plugins/PluginActionButtons';
@@ -7,7 +8,6 @@ import { PluginSlotView } from '@/components/plugins/PluginSlotView';
 import { SessionSideView } from '@/components/plugins/SessionSideView';
 import { Composer } from './Composer';
 import { Conversation } from '@/components/conversation/Conversation';
-import { PendingDialogs } from '@/components/dialogs/PendingDialogs';
 import { clip } from '@/safety';
 import { usePluginContributions, type ContributionContext, type PluginCommand } from '@/plugin-contributions';
 import { useDraft } from '@/hooks/useDraft';
@@ -59,6 +59,13 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         </Alert>
       ) : null}
 
+      {dashboard.provisioning ? (
+        <div className="provisioning-status" role="status" aria-live="polite">
+          <LoaderCircle className="provisioning-spinner" aria-hidden="true" />
+          <span>{clip(dashboard.provisioning.message, 160)}</span>
+        </div>
+      ) : null}
+
       <Conversation
         items={dashboard.state.items}
         queue={dashboard.state.run.queue}
@@ -81,12 +88,6 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         </>
       ) : null}
       <ChatComposer dashboard={dashboard} pluginCommands={pluginCommands} contributionContext={contributionContext} />
-
-      <PendingDialogs
-        state={dashboard.state}
-        onToolDecision={dashboard.decideTool}
-        onElicitationAnswer={dashboard.answerElicitation}
-      />
       </div>
       <SessionSideView context={contributionContext} />
     </div>
@@ -148,6 +149,9 @@ function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
     onCompact={dashboard.compact}
     onAddAttachments={dashboard.addAttachments}
     onRemoveAttachment={dashboard.removeAttachment}
+    onRequestCommands={() => {
+      if (!dashboard.chatId) void dashboard.newChat('');
+    }}
     onSend={(text, mode) => void sendWithPlugins(text, mode)}
     onStop={dashboard.abort}
   />;

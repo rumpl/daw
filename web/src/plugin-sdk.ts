@@ -4,9 +4,6 @@ import { ChatHeader } from '@/components/chat/ChatHeader';
 import { Composer } from '@/components/chat/Composer';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Conversation } from '@/components/conversation/Conversation';
-import { ElicitationDialog } from '@/components/dialogs/ElicitationDialog';
-import { PendingDialogs } from '@/components/dialogs/PendingDialogs';
-import { ToolConfirmDialog } from '@/components/dialogs/ToolConfirmDialog';
 import { Markdown } from '@/components/markdown/Markdown';
 import { Mermaid } from '@/components/markdown/Mermaid';
 import { PluginChat } from '@/components/plugins/PluginChat';
@@ -21,10 +18,7 @@ export const pluginComponents = Object.freeze({
   ChatHeader,
   Composer,
   Conversation,
-  ElicitationDialog,
-  ToolConfirmDialog,
   ModelPicker,
-  PendingDialogs,
   ToolCard,
 });
 

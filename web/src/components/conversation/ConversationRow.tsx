@@ -26,7 +26,12 @@ export const ConversationRow = memo(function ConversationRow({ item, entering = 
   let content;
   switch (item.kind) {
     case 'message':
-      content = item.message ? <MessageBubble message={item.message} attachmentRenderers={attachmentRenderers} contributionContext={contributionContext} /> : null;
+      content = item.message && (
+        item.message.text.trim()
+        || item.message.reasoning.trim()
+        || item.message.attachments?.length
+        || item.message.streaming
+      ) ? <MessageBubble message={item.message} attachmentRenderers={attachmentRenderers} contributionContext={contributionContext} /> : null;
       break;
     case 'tool': {
       if (!item.tool) break;

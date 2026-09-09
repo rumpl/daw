@@ -4,14 +4,12 @@
 // never by timestamp. That is what makes an SSE reconnect (replay or
 // resnapshot) produce no duplicates.
 import type {
-  ElicitationRequest,
   Event,
   Item,
   QueueStatus,
   RunStatus,
   SessionMeta,
   Snapshot,
-  ToolConfirmationRequest,
   Usage,
 } from './protocol.gen';
 
@@ -23,8 +21,6 @@ export interface ChatState {
   meta: SessionMeta | null;
   run: RunStatus;
   usage: Usage;
-  confirmations: ToolConfirmationRequest[];
-  elicitations: ElicitationRequest[];
   closed: boolean;
   closedReason: string;
 }
@@ -45,8 +41,6 @@ export function initialChatState(): ChatState {
     meta: null,
     run: { state: 'idle', runId: '', queue: emptyQueue },
     usage: { inputTokens: 0, outputTokens: 0, cost: 0, contextLimit: 0 },
-    confirmations: [],
-    elicitations: [],
     closed: false,
     closedReason: '',
   };
@@ -123,8 +117,6 @@ export function applySnapshot(snapshot: Snapshot): ChatState {
     meta: snapshot.meta,
     run: snapshot.run,
     usage: snapshot.usage,
-    confirmations: snapshot.pendingConfirmations ?? [],
-    elicitations: snapshot.pendingElicitations ?? [],
     closed: false,
     closedReason: '',
   };
@@ -205,30 +197,6 @@ export function reduce(state: ChatState, event: Event): ChatState {
       return event.summary
         ? { ...state, seq, items: upsert(state.items, { kind: 'summary', summary: event.summary }) }
         : { ...state, seq };
-    case 'tool_confirmation':
-      if (!event.confirmation) return { ...state, seq };
-      if (state.confirmations.some((c) => c.toolCallId === event.confirmation?.toolCallId)) {
-        return { ...state, seq };
-      }
-      return { ...state, seq, confirmations: [...state.confirmations, event.confirmation] };
-    case 'tool_confirmation_resolved':
-      return {
-        ...state,
-        seq,
-        confirmations: state.confirmations.filter((c) => c.toolCallId !== event.toolResolved?.toolCallId),
-      };
-    case 'elicitation':
-      if (!event.elicitation) return { ...state, seq };
-      if (state.elicitations.some((e) => e.elicitationId === event.elicitation?.elicitationId)) {
-        return { ...state, seq };
-      }
-      return { ...state, seq, elicitations: [...state.elicitations, event.elicitation] };
-    case 'elicitation_resolved':
-      return {
-        ...state,
-        seq,
-        elicitations: state.elicitations.filter((e) => e.elicitationId !== event.elicitResolved?.elicitationId),
-      };
     case 'chat_closed':
       return { ...state, seq, closed: true, closedReason: event.closed?.reason ?? '' };
     case 'gap':

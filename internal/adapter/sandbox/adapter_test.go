@@ -12,7 +12,7 @@ import (
 func TestBootstrapAndOptionsDoNotStartSandbox(t *testing.T) {
 	a, err := New(Config{
 		Client:    sbx.New(sbx.WithBinary(filepath.Join(t.TempDir(), "must-not-run-sbx"))),
-		Workspace: t.TempDir(), Kit: t.TempDir(),
+		Workspace: t.TempDir(), Kit: "docker.io/example/daw-runner:test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,9 +40,8 @@ func TestSessionSandboxNameSeparatesSessions(t *testing.T) {
 
 func TestIndexContainsLifecycleMetadataOnly(t *testing.T) {
 	workspace := t.TempDir()
-	kit := t.TempDir()
 	index := filepath.Join(t.TempDir(), "sessions.json")
-	a, err := New(Config{Workspace: workspace, Kit: kit, IndexFile: index})
+	a, err := New(Config{Workspace: workspace, Kit: "docker.io/example/daw-runner:test", IndexFile: index})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +50,7 @@ func TestIndexContainsLifecycleMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reloaded, err := New(Config{Workspace: workspace, Kit: kit, IndexFile: index})
+	reloaded, err := New(Config{Workspace: workspace, Kit: "docker.io/example/daw-runner:test", IndexFile: index})
 	if err != nil {
 		t.Fatal(err)
 	}

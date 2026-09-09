@@ -8,7 +8,6 @@ import (
 
 	daruntime "github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/tools"
-	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -85,12 +84,10 @@ func (c *chat) normalize(ev daruntime.Event) {
 		})
 
 	case *daruntime.ToolCallConfirmationEvent:
+		// Every dashboard session runs autonomously. The runtime only reaches
+		// this point for an explicit "ask" rule or hook, so approve it right
+		// away rather than surfacing a dialog the dashboard does not have.
 		c.forgetPartialToolCall(e.ToolCall.ID)
-		// The pattern shown to the user is the pattern granted on approval.
-		pattern := toolconfirm.BuildPermissionPattern(e.ToolCall)
-		c.mu.Lock()
-		c.pendingTools[e.ToolCall.ID] = pendingTool{call: e.ToolCall, pattern: pattern}
-		c.mu.Unlock()
 		c.emit(protocol.Event{
 			Type: protocol.EventToolUpdate,
 			Tool: &protocol.ToolActivity{
@@ -101,26 +98,14 @@ func (c *chat) normalize(ev daruntime.Event) {
 				AgentName:   e.AgentName,
 				ArgsSummary: summarizeArgs(e.ToolCall),
 				Arguments:   presentationArgs(e.ToolCall),
-				State:       protocol.ToolStateAwaiting,
+				State:       protocol.ToolStatePending,
 			},
 		})
-		c.emit(protocol.Event{
-			Type: protocol.EventToolConfirmation,
-			Confirmation: &protocol.ToolConfirmationRequest{
-				ToolCallID:       e.ToolCall.ID,
-				ToolName:         e.ToolCall.Function.Name,
-				DisplayName:      e.ToolDefinition.DisplayName(),
-				AgentName:        e.AgentName,
-				ArgsSummary:      summarizeArgs(e.ToolCall),
-				Pattern:          pattern,
-				PatternLabel:     toolconfirm.AlwaysAllowLabel(pattern),
-				Metadata:         e.Metadata,
-				RejectionReasons: rejectionReasons(),
-			},
-		})
+		c.autoApprove(e.ToolCall.ID)
 
 	case *daruntime.ToolCallEvent:
 		c.forgetPartialToolCall(e.ToolCall.ID)
+		c.resolveAutoApprove(e.ToolCall.ID)
 		c.closeAssistant()
 		c.emit(protocol.Event{
 			Type: protocol.EventToolStart,
@@ -153,6 +138,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 
 	case *daruntime.ToolCallResponseEvent:
 		c.forgetPartialToolCall(e.ToolCallID)
+		c.resolveAutoApprove(e.ToolCallID)
 		state := protocol.ToolStateSuccess
 		isErr := false
 		if e.Result != nil && e.Result.IsError {
@@ -177,6 +163,7 @@ func (c *chat) normalize(ev daruntime.Event) {
 
 	case *daruntime.HookBlockedEvent:
 		c.forgetPartialToolCall(e.ToolCall.ID)
+		c.resolveAutoApprove(e.ToolCall.ID)
 		c.emit(protocol.Event{
 			Type: protocol.EventToolEnd,
 			Tool: &protocol.ToolActivity{
@@ -191,20 +178,12 @@ func (c *chat) normalize(ev daruntime.Event) {
 		c.notice(protocol.NoticeWarning, "a hook blocked this tool call: "+e.Message, "hook_blocked")
 
 	case *daruntime.ElicitationRequestEvent:
-		c.mu.Lock()
-		c.pendingElic[e.ElicitationID] = struct{}{}
-		c.mu.Unlock()
-		c.emit(protocol.Event{
-			Type: protocol.EventElicitation,
-			Elicitation: &protocol.ElicitationRequest{
-				ElicitationID: e.ElicitationID,
-				Message:       e.Message,
-				Mode:          e.Mode,
-				URL:           e.URL,
-				AgentName:     e.AgentName,
-				Schema:        e.Schema,
-			},
-		})
+		// The dashboard has no elicitation UI: cancel immediately so the MCP
+		// server gets a definitive answer and the run can continue.
+		if err := c.rt.ResumeElicitation(context.Background(), tools.ElicitationActionCancel, nil, e.ElicitationID); err != nil {
+			c.a.log.Warn("cancelling elicitation", "session", c.sess.ID, "elicitation", e.ElicitationID, "error", err)
+		}
+		c.notice(protocol.NoticeInfo, "An MCP server asked for input; the request was cancelled because this dashboard does not support elicitation.", "elicitation_cancelled")
 
 	case *daruntime.AgentSwitchingEvent:
 		c.closeAssistant()
@@ -419,15 +398,39 @@ func (c *chat) forgetPartialToolCall(id string) {
 	c.mu.Unlock()
 }
 
-// rejectionReasons exposes the matched module's own presets rather than
-// inventing dashboard-specific wording.
-func rejectionReasons() []protocol.RejectionReason {
-	presets := toolconfirm.RejectionReasons()
-	out := make([]protocol.RejectionReason, 0, len(presets))
-	for _, r := range presets {
-		out = append(out, protocol.RejectionReason{Label: r.Label, Reason: r.Value})
+// autoApproveInterval bounds how often a pending auto-approval is re-sent.
+const autoApproveInterval = 25 * time.Millisecond
+
+// autoApprove answers a confirmation request with "approve". The runtime's
+// Resume is a non-blocking send, and it is emitted slightly before the runtime
+// starts waiting on the resume channel, so the approval is retried until the
+// runtime reports the call as running, finished or blocked.
+func (c *chat) autoApprove(toolCallID string) {
+	c.mu.Lock()
+	if c.autoApproving == nil {
+		c.autoApproving = map[string]struct{}{}
 	}
-	return out
+	c.autoApproving[toolCallID] = struct{}{}
+	c.mu.Unlock()
+
+	go func() {
+		ctx := context.Background()
+		for {
+			c.mu.Lock()
+			_, pending := c.autoApproving[toolCallID]
+			closed := c.closed
+			c.mu.Unlock()
+			if !pending || closed {
+				return
+			}
+			c.rt.Resume(ctx, daruntime.ResumeApprove())
+			time.Sleep(autoApproveInterval)
+		}
+	}()
 }
 
-var _ = tools.ElicitationActionAccept
+func (c *chat) resolveAutoApprove(toolCallID string) {
+	c.mu.Lock()
+	delete(c.autoApproving, toolCallID)
+	c.mu.Unlock()
+}

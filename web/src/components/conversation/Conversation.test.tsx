@@ -26,14 +26,12 @@ describe('Conversation', () => {
     vi.restoreAllMocks();
   });
 
-  it('downloads each complete agent message as its original Markdown', () => {
-    const createObjectURL = vi.fn((_blob: Blob) => 'blob:message');
-    const revokeObjectURL = vi.fn();
-    Object.defineProperties(URL, {
-      createObjectURL: { value: createObjectURL, configurable: true },
-      revokeObjectURL: { value: revokeObjectURL, configurable: true },
+  it('copies each complete textual agent response as its original Markdown', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
     });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(
       <Conversation
@@ -47,16 +45,13 @@ describe('Conversation', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Download message as Markdown' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy assistant response' }));
 
-    expect(createObjectURL).toHaveBeenCalledOnce();
-    const blob = createObjectURL.mock.calls[0]?.[0] as Blob;
-    expect(blob.type).toBe('text/markdown;charset=utf-8');
-    expect(click).toHaveBeenCalledOnce();
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:message');
+    expect(writeText).toHaveBeenCalledWith('# Result\n\n- one\n- two');
+    expect(await screen.findByRole('button', { name: 'Assistant response copied' })).toBeInTheDocument();
   });
 
-  it('renders assistant message action slots beside the Markdown download', () => {
+  it('renders assistant message action slots beside the response copy action', () => {
     const registry = createContributionRegistry('message-actions-test');
     registry.registerSlot({
       id: 'share',
@@ -74,23 +69,26 @@ describe('Conversation', () => {
 
     const actions = container.querySelector('.msg-actions');
     expect(actions).toContainElement(screen.getByRole('button', {name: 'Share complete'}));
-    expect(actions).toContainElement(screen.getByRole('button', {name: 'Download message as Markdown'}));
+    expect(actions).toContainElement(screen.getByRole('button', {name: 'Copy assistant response'}));
     act(() => removePluginContributions('message-actions-test'));
   });
 
-  it('only offers downloads for complete agent messages', () => {
-    render(
+  it('does not render empty completed assistant message rows', () => {
+    const { container } = render(
       <Conversation
         items={[
           assistantMessage({ id: 'streaming', text: 'Still working', streaming: true }),
           assistantMessage({ id: 'user', role: 'user', text: 'Question', streaming: false }),
+          assistantMessage({ id: 'tool-only', text: '', streaming: false }),
+          assistantMessage({ id: 'whitespace', text: '   ', streaming: false }),
           assistantMessage({ id: 'complete', text: 'Done', streaming: false }),
         ]}
         empty={null}
       />,
     );
 
-    expect(screen.getAllByRole('button', { name: 'Download message as Markdown' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Copy assistant response' })).toHaveLength(1);
+    expect(container.querySelectorAll('.conversation-row')).toHaveLength(3);
   });
 
   it('renders assistant Markdown while the message is streaming', () => {
@@ -165,11 +163,14 @@ describe('Conversation', () => {
       />,
     );
 
-    expect(container.querySelector('.pending-queue')).toHaveTextContent('Steerchange direction');
-    expect(container.querySelector('.pending-queue')).toHaveTextContent('Follow-upthen run tests');
+    const pendingQueue = container.querySelector('.pending-queue');
+    expect(pendingQueue).toHaveTextContent('Steerchange direction');
+    expect(pendingQueue).toHaveTextContent('Follow-upthen run tests');
+    expect(pendingQueue?.closest('.conversation')).toBeNull();
+    expect(pendingQueue?.parentElement).toHaveClass('conversation-wrap');
   });
 
-  it('renders image attachments in user messages', () => {
+  it('renders image attachments in user messages and opens them full size', () => {
     const { container } = render(
       <Conversation
         items={[assistantMessage({
@@ -188,6 +189,11 @@ describe('Conversation', () => {
     expect(image).not.toBeNull();
     expect(image.src).toBe('data:image/png;base64,YWJj');
     expect(image).toHaveAttribute('alt', 'screen.png');
+
+    fireEvent.click(screen.getByRole('button', { name: 'View screen.png full size' }));
+    const dialog = screen.getByRole('dialog', { name: 'screen.png full size' });
+    expect(dialog).toBeVisible();
+    expect(dialog.querySelector('img')).toHaveAttribute('src', 'data:image/png;base64,YWJj');
   });
 
   it('hides jump to latest and resets scrolling when the conversation is cleared', () => {

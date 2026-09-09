@@ -23,11 +23,12 @@ interface SessionTabsProps {
   canCreateChat: boolean;
   onNewChat: () => void;
   onOpen: (sessionId: string, workspacePath: string) => void;
-  onClose: (sessionId: string, chatId: string) => void;
+  onClose: (sessionId: string) => void;
   onReorder: (draggedSessionId: string, targetSessionId: string) => void;
   onOpenPlugin?: (pluginId: string, path: string) => void;
   onClosePlugin?: (pluginId: string) => void;
   onSplit?: (sessionId: string, workspacePath: string, direction: 'vertical' | 'horizontal') => void;
+  reserveSidebarToggleSpace?: boolean;
 }
 
 export function SessionTabs({
@@ -44,6 +45,7 @@ export function SessionTabs({
   onOpenPlugin,
   onClosePlugin,
   onSplit,
+  reserveSidebarToggleSpace = false,
 }: SessionTabsProps) {
   const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
@@ -60,8 +62,7 @@ export function SessionTabs({
     finishDrag();
   };
 
-  const emptyChatActive = !activePluginId && !activeSessionId && canCreateChat;
-  const activeValue = activePluginId ? `plugin:${activePluginId}` : activeSessionId ? `session:${activeSessionId}` : emptyChatActive ? 'new-chat' : '';
+  const activeValue = activePluginId ? `plugin:${activePluginId}` : activeSessionId ? `session:${activeSessionId}` : '';
   const iconTooltip = (label: string, button: ReactElement) => (
     <Tooltip>
       <TooltipTrigger render={button} />
@@ -71,7 +72,10 @@ export function SessionTabs({
 
   return (
     <Tabs value={activeValue} className="session-tabs-root block min-w-0 gap-0 bg-muted/40">
-      <TabsList className="session-tabs h-[42px] w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-muted/40 px-2 py-[5px] group-data-horizontal/tabs:h-[42px]" aria-label="Open tabs">
+      <TabsList className={cn(
+        'session-tabs h-[42px] w-full justify-start gap-1 overflow-x-auto overflow-y-hidden rounded-none border-b bg-muted/40 px-2 py-[5px] group-data-horizontal/tabs:h-[42px]',
+        reserveSidebarToggleSpace && 'pl-12',
+      )} aria-label="Open tabs">
         {sessions.map((session) => {
           const title = session.title || 'Untitled';
           const active = session.sessionId === activeSessionId;
@@ -103,6 +107,11 @@ export function SessionTabs({
               onDragLeave={() => setDropTargetId((current) => current === session.sessionId ? null : current)}
               onDrop={(event) => dropTab(event, session.sessionId)}
               onDragEnd={finishDrag}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                onClose(session.sessionId);
+              }}
             >
               <TabsTrigger
                 value={`session:${session.sessionId}`}
@@ -121,26 +130,13 @@ export function SessionTabs({
                 ))}
                 <PluginSlotView slot="session-tab.badge" context={{workspace: null, chatId: session.chatId ?? null, session: null, sessionId: session.sessionId}} />
               </TabsTrigger>
-              {iconTooltip('Close session',
-                <Button type="button" size="icon-xs" variant="ghost" className="session-tab-close absolute right-1 z-10"
-                  aria-label={`Close live session ${title}`} onClick={() => onClose(session.sessionId, session.chatId ?? '')}
-                  disabled={busy || !session.chatId}>
-                  <X size={13} aria-hidden="true" />
-                </Button>,
-              )}
+              <Button type="button" size="icon-xs" variant="ghost" className="session-tab-close absolute right-1 z-10"
+                aria-label={`Close session tab ${title}`} onClick={() => onClose(session.sessionId)} disabled={busy}>
+                <X size={13} aria-hidden="true" />
+              </Button>
             </div>
           );
         })}
-
-        {emptyChatActive ? (
-          <div className="session-tab relative flex h-8 min-w-20 max-w-50 flex-1 items-center overflow-hidden rounded-md border border-border bg-background p-1 shadow-sm" data-active>
-            <TabsTrigger value="new-chat"
-              className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden border-transparent bg-transparent px-2 shadow-none data-active:border-transparent data-active:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent"
-              aria-current="page" aria-label="New chat">
-              <span>New chat</span>
-            </TabsTrigger>
-          </div>
-        ) : null}
 
         {plugins.map(({ plugin, path }) => {
           const active = plugin.id === activePluginId;
@@ -151,7 +147,12 @@ export function SessionTabs({
             )} data-active={active || undefined} key={`plugin:${plugin.id}`}>
               <TabsTrigger value={`plugin:${plugin.id}`} className="session-tab-open h-full min-w-0 flex-1 justify-start overflow-hidden border-transparent bg-transparent pr-7 pl-2 shadow-none data-active:border-transparent data-active:bg-transparent dark:data-active:border-transparent dark:data-active:bg-transparent [&>span:first-child]:truncate"
                 aria-current={active ? 'page' : undefined} title={plugin.description || plugin.name}
-                aria-label={`${plugin.name} plugin`} onClick={() => { if (!active) onOpenPlugin?.(plugin.id, path); }}>
+                aria-label={`${plugin.name} plugin`} onClick={() => { if (!active) onOpenPlugin?.(plugin.id, path); }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return;
+                  event.preventDefault();
+                  onClosePlugin?.(plugin.id);
+                }}>
                 <span>{clip(plugin.name, 50)}</span>
               </TabsTrigger>
               {iconTooltip('Close plugin',

@@ -2,16 +2,18 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ExecutionTargetIcon, executionTargetLabel } from '@/components/chat/ExecutionTargetIcon';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { clip } from '@/safety';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Star } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { SessionNode } from './sessionTree';
 
-export function SessionTreeItem({ node, busy, activeSessionId, onResumeChat }: {
+export function SessionTreeItem({ node, busy, activeSessionId, onResumeChat, onStarSession }: {
   node: SessionNode;
   busy: boolean;
   activeSessionId: string | null;
   onResumeChat: (sessionId: string) => void;
+  onStarSession: (sessionId: string, starred: boolean) => void;
 }) {
   const session = node.session;
   const hasChildren = node.children.length > 0;
@@ -37,33 +39,47 @@ export function SessionTreeItem({ node, busy, activeSessionId, onResumeChat }: {
               <Button type="button" size="icon-xs" variant="ghost" className="session-tree-toggle"
                 aria-label={`Toggle replies to ${session.title || 'Untitled'}`}>
                 <ChevronRight aria-hidden="true" />
+                </Button>
+              } />
+          ) : <span className="session-tree-spacer" />}
+          <TooltipProvider delay={300} timeout={0}>
+            <Tooltip>
+              <TooltipTrigger render={
+                <Button ref={buttonRef} type="button" variant="ghost" className="session-tree-open"
+                aria-current={active ? 'page' : undefined}
+                onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
+                <span className="session-title">
+                  {session.executionTarget ? (
+                    <span className="session-execution-target">
+                      <ExecutionTargetIcon target={session.executionTarget} className="session-execution-icon" />
+                      <span className="sr-only">{executionTargetLabel(session.executionTarget)}</span>
+                    </span>
+                  ) : null}
+                  <span className="session-title-text">{clip(session.title || 'Untitled', 80)}</span>
+                  {session.runState === 'running' ? (
+                    <Badge variant="secondary" aria-label="Running"><span className="run-dot run-running" aria-hidden="true" /></Badge>
+                  ) : null}
+                </span>
               </Button>
             } />
-          ) : <span className="session-tree-spacer" />}
-          <Button ref={buttonRef} type="button" variant="ghost" className="session-tree-open"
-            aria-current={active ? 'page' : undefined}
-            title={`${session.title || 'Untitled'} — ${executionTargetLabel(session.executionTarget)}`}
-            onClick={() => onResumeChat(session.sessionId)} disabled={busy}>
-            <span className="session-title">
-              {session.executionTarget ? (
-                <span className="session-execution-target" title={executionTargetLabel(session.executionTarget)}>
-                  <ExecutionTargetIcon target={session.executionTarget} className="session-execution-icon" />
-                  <span className="sr-only">{executionTargetLabel(session.executionTarget)}</span>
-                </span>
-              ) : null}
-              <span className="session-title-text">{clip(session.title || 'Untitled', 80)}</span>
-              {session.runState === 'running' ? (
-                <Badge variant="secondary" aria-label="Running"><span className="run-dot run-running" aria-hidden="true" /></Badge>
-              ) : null}
-            </span>
-          </Button>
+              <TooltipContent side="right" align="center" className="max-w-sm whitespace-normal break-words">
+                {session.title || 'Untitled'}
+              </TooltipContent>
+            </Tooltip>
+            <Button type="button" size="icon-xs" variant="ghost" className="session-star"
+              aria-label={session.starred ? 'Unstar session' : 'Star session'}
+              aria-pressed={session.starred} disabled={busy}
+              onClick={() => onStarSession(session.sessionId, !session.starred)}>
+              <Star aria-hidden="true" fill={session.starred ? 'currentColor' : 'none'} />
+            </Button>
+          </TooltipProvider>
         </div>
         {hasChildren ? (
           <CollapsibleContent>
             <ul role="group">
               {node.children.map((child) => (
                 <SessionTreeItem key={child.session.sessionId} node={child} busy={busy}
-                  activeSessionId={activeSessionId} onResumeChat={onResumeChat} />
+                  activeSessionId={activeSessionId} onResumeChat={onResumeChat} onStarSession={onStarSession} />
               ))}
             </ul>
           </CollapsibleContent>

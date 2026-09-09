@@ -31,6 +31,7 @@ import (
 	hybridadapter "github.com/rumpl/daw/internal/adapter/hybrid"
 	sandboxadapter "github.com/rumpl/daw/internal/adapter/sandbox"
 	"github.com/rumpl/daw/internal/httpapi"
+	"github.com/rumpl/daw/internal/mcpbridge"
 	"github.com/rumpl/daw/internal/pathsec"
 	"github.com/rumpl/daw/internal/protocol"
 	"github.com/rumpl/daw/internal/sessionstorebridge"
@@ -148,7 +149,8 @@ func run() error {
 			_ = hostAdapter.Close()
 			return storeErr
 		}
-		sandboxCallbacks = &sandboxCallbackHandler{store: storeHandler}
+		mcpCommands := mcpbridge.New()
+		sandboxCallbacks = &sandboxCallbackHandler{store: storeHandler, mcpCommand: mcpCommands}
 		if perSessionSandbox {
 			home, homeErr := os.UserHomeDir()
 			if homeErr != nil {
@@ -173,8 +175,8 @@ func run() error {
 			perSessionAdapter, adapterErr := sandboxadapter.New(sandboxadapter.Config{
 				Workspace:      workspace,
 				Kit:            strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_KIT")),
-				Template:       strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_TEMPLATE")),
 				PluginDir:      strings.TrimSpace(os.Getenv("DAWUI_SANDBOX_PLUGIN_DIR")),
+				MCPBridge:      mcpCommands,
 				IndexFile:      filepath.Join(home, ".cagent", "dawui", "sandbox-sessions-"+hex.EncodeToString(indexSum[:6])+".json"),
 				CallbackOrigin: callbackOrigin, CallbackToken: mcpBridgeToken,
 				CallbackHandler: sandboxCallbacks, SessionStoreToken: storeBridgeToken,
@@ -333,9 +335,9 @@ func run() error {
 		log.Warn("frontend assets are not built into this binary; run `make build`")
 	}
 	if socketPath != "" {
-		fmt.Printf("docker-agent dashboard listening on unix://%s\n", socketPath)
+		fmt.Printf("Atelier listening on unix://%s\n", socketPath)
 	} else {
-		fmt.Printf("docker-agent dashboard listening on http://%s\n", listenAddress)
+		fmt.Printf("Atelier listening on http://%s\n", listenAddress)
 	}
 	fmt.Printf("  workspace directory: %s\n", strings.Join(guard.Roots(), ", "))
 	switch {
@@ -371,9 +373,10 @@ func run() error {
 }
 
 type sandboxCallbackHandler struct {
-	mu    sync.RWMutex
-	store http.Handler
-	mcp   http.Handler
+	mu         sync.RWMutex
+	store      http.Handler
+	mcpCommand http.Handler
+	mcp        http.Handler
 }
 
 func (h *sandboxCallbackHandler) SetMCP(handler http.Handler) {
@@ -383,7 +386,15 @@ func (h *sandboxCallbackHandler) SetMCP(handler http.Handler) {
 }
 
 func (h *sandboxCallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.EqualFold(strings.Split(r.Host, ":")[0], "mcp-callback") {
+	switch strings.ToLower(strings.Split(r.Host, ":")[0]) {
+	case "mcp-command":
+		if h.mcpCommand == nil {
+			http.Error(w, "MCP command bridge is not ready", http.StatusServiceUnavailable)
+			return
+		}
+		h.mcpCommand.ServeHTTP(w, r)
+		return
+	case "mcp-callback":
 		h.mu.RLock()
 		handler := h.mcp
 		h.mu.RUnlock()

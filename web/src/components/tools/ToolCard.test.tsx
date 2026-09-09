@@ -38,6 +38,18 @@ describe('ToolCard', () => {
     expect([...defaultToolRendererNames].sort()).toEqual([...defaults].sort());
   });
 
+  it('renders an animated disclosure hint for the clickable trigger', () => {
+    const { container } = render(<ToolCard tool={tool({ displayName: 'Shell' })} />);
+    const trigger = container.querySelector('.tool-trigger')!;
+
+    expect(trigger).toHaveTextContent('View details');
+    expect(trigger).toHaveTextContent('Hide details');
+    expect(trigger.querySelector('.tool-click-hint')).toHaveAttribute('aria-hidden', 'true');
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('data-panel-open');
+  });
+
   it('uses the human-readable title and path without repeating a known technical name', () => {
     render(<ToolCard tool={tool({ name: 'read_file', category: 'filesystem', displayName: 'Read', argsSummary: 'README.md', arguments: { path: 'README.md' } })} />);
     expect(screen.getByText('Read')).toBeVisible();
@@ -83,7 +95,7 @@ describe('ToolCard', () => {
     expect(screen.getByText('plain contents')).toBeVisible();
   });
 
-  it('renders image attachments without expanding the tool', () => {
+  it('opens image attachments full size without expanding the tool', () => {
     render(<ToolCard tool={tool({
       name: 'read_file',
       preview: 'Read image file screenshot.png',
@@ -92,6 +104,11 @@ describe('ToolCard', () => {
     const image = screen.getByRole('img', { name: 'screenshot.png' });
     expect(image).toHaveAttribute('src', 'data:image/png;base64,iVBORw0KGgo=');
     expect(screen.getByText('screenshot.png · image/png')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View screenshot.png full size' }));
+    const dialog = screen.getByRole('dialog', { name: 'screenshot.png full size' });
+    expect(dialog).toBeVisible();
+    expect(dialog.querySelector('img')).toHaveAttribute('src', 'data:image/png;base64,iVBORw0KGgo=');
   });
 
   it('renders edit previews as a split, line-aligned diff', async () => {

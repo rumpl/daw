@@ -95,12 +95,35 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Follow-up' })).toBeNull();
-    expect(screen.getByText(/1 steer · 2 follow-up queued/)).toBeInTheDocument();
+    expect(screen.queryByText(/steer · .*follow-up queued/)).toBeNull();
   });
 
   it('offers slash-command autocomplete', async () => {
     setup(idle, '/comp');
     expect(screen.getByRole('option', { name: /compact/ })).toBeInTheDocument();
+  });
+
+  it('requests commands when slash completion is opened', async () => {
+    const user = userEvent.setup();
+    const onRequestCommands = vi.fn();
+    render(
+      <Composer
+        draft=""
+        onDraftChange={vi.fn()}
+        run={idle}
+        disabled={false}
+        commands={[]}
+        attachments={[]}
+        uploading={false}
+        onRequestCommands={onRequestCommands}
+        onAddAttachments={vi.fn()}
+        onRemoveAttachment={vi.fn()}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+    await user.type(screen.getByLabelText('Message'), '/');
+    expect(onRequestCommands).toHaveBeenCalledOnce();
   });
 
   it('uploads files selected from the attachment picker', async () => {

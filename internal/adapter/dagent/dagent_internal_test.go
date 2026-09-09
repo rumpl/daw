@@ -12,7 +12,6 @@ import (
 	"github.com/docker/docker-agent/pkg/safety"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/tools"
-	"github.com/docker/docker-agent/pkg/tui/components/toolconfirm"
 	"github.com/rumpl/daw/internal/protocol"
 )
 
@@ -116,40 +115,6 @@ func TestSnapshotKeepsToolCallOnlyAssistantMessages(t *testing.T) {
 	}
 	if items[0].Message.Cost != 0.0042 || items[0].Message.InputTokens != 500 {
 		t.Fatalf("tool-call message lost billing data: %+v", items[0].Message)
-	}
-}
-
-// TestPatternFidelity locks the contract that the dashboard's confirmation
-// dialog shows exactly the pattern the matched module would grant.
-func TestPatternFidelity(t *testing.T) {
-	call := tools.ToolCall{ID: "1", Function: tools.FunctionCall{
-		Name: "shell", Arguments: `{"cmd":"ls -la /tmp"}`,
-	}}
-	pattern := toolconfirm.BuildPermissionPattern(call)
-	if pattern == "" {
-		t.Fatal("empty pattern")
-	}
-	label := toolconfirm.AlwaysAllowLabel(pattern)
-	if !strings.Contains(label, "ls") {
-		t.Fatalf("label %q must describe the pattern %q", label, pattern)
-	}
-	// Reconstructing the pattern anywhere else is forbidden; verify the
-	// same call always yields the same string.
-	if toolconfirm.BuildPermissionPattern(call) != pattern {
-		t.Fatal("pattern construction is not deterministic")
-	}
-}
-
-func TestRejectionReasonsComeFromTheMatchedModule(t *testing.T) {
-	got := rejectionReasons()
-	want := toolconfirm.RejectionReasons()
-	if len(got) != len(want) {
-		t.Fatalf("expected %d presets, got %d", len(want), len(got))
-	}
-	for i := range want {
-		if got[i].Label != want[i].Label || got[i].Reason != want[i].Value {
-			t.Fatalf("preset %d diverged: %+v vs %+v", i, got[i], want[i])
-		}
 	}
 }
 

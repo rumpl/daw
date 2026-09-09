@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -19,12 +20,16 @@ import (
 	"time"
 
 	"github.com/rumpl/daw/internal/adapter/dagent"
+	"github.com/rumpl/daw/internal/mcpbridge"
 	"github.com/rumpl/daw/internal/runnerapi"
 	"github.com/rumpl/daw/internal/sessionstoreremote"
 	"github.com/rumpl/daw/internal/stdiomux"
 )
 
-const callbackAddress = "127.0.0.1:8081"
+const (
+	callbackAddress = "127.0.0.1:8081"
+	mcpRelayAddress = "127.0.0.1:8082"
+)
 
 var appVersion = "dev"
 
@@ -36,8 +41,10 @@ func main() {
 }
 
 func run() error {
-	if strings.TrimSpace(os.Getenv("SANDBOX_VM_ID")) == "" {
-		return errors.New("daw-runner must run inside a Docker Sandbox")
+	if len(os.Args) == 3 && os.Args[1] == "mcp-relay" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return mcpbridge.Relay(ctx, os.Args[2], os.Stdin, os.Stdout)
 	}
 	if strings.TrimSpace(os.Getenv("DAW_RUNNER_WORKSPACE")) == "" {
 		return errors.New("DAW_RUNNER_WORKSPACE is required")
@@ -100,6 +107,17 @@ func run() error {
 	callbackServer := &http.Server{Handler: proxy, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
 	go func() { _ = callbackServer.Serve(callbackListener) }()
 
+	// Local command MCP servers always run on the host. The process spawned by
+	// docker-agent in this sandbox connects here and is forwarded byte-for-byte
+	// to the host launch broker over the existing reverse stdio mux.
+	mcpListener, err := (&net.ListenConfig{}).Listen(ctx, "tcp4", mcpRelayAddress)
+	if err != nil {
+		_ = callbackServer.Shutdown(context.Background())
+		runner.Shutdown(context.Background())
+		return fmt.Errorf("listen for sandbox MCP relay: %w", err)
+	}
+	go forwardMCPRelays(ctx, mcpListener, peer)
+
 	httpServer := &http.Server{Handler: runner, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
 	log.Info("sandbox runner started", "version", appVersion, "transport", "stdio")
 	errCh := make(chan error, 1)
@@ -116,6 +134,28 @@ func run() error {
 	defer cancel()
 	runner.Shutdown(shutdownCtx)
 	_ = callbackServer.Shutdown(shutdownCtx)
+	_ = mcpListener.Close()
 	transport.CloseIdleConnections()
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+func forwardMCPRelays(ctx context.Context, listener net.Listener, peer *stdiomux.Mux) {
+	for {
+		local, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go func() {
+			defer local.Close()
+			host, err := peer.DialContext(ctx, "tcp", "mcp-command")
+			if err != nil {
+				return
+			}
+			defer host.Close()
+			done := make(chan struct{}, 2)
+			go func() { _, _ = io.Copy(host, local); done <- struct{}{} }()
+			go func() { _, _ = io.Copy(local, host); done <- struct{}{} }()
+			<-done
+		}()
+	}
 }

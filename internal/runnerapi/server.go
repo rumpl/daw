@@ -82,18 +82,6 @@ type SendResponse struct {
 	Queued bool                  `json:"queued"`
 }
 
-type ConfirmRequest struct {
-	ToolCallID string                `json:"toolCallId"`
-	Decision   protocol.ToolDecision `json:"decision"`
-	Reason     string                `json:"reason"`
-}
-
-type ElicitRequest struct {
-	ElicitationID string                     `json:"elicitationId"`
-	Action        protocol.ElicitationAction `json:"action"`
-	Content       map[string]any             `json:"content,omitempty"`
-}
-
 type ValueRequest struct {
 	Value string `json:"value"`
 }
@@ -126,6 +114,7 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT /v1/settings/models-gateway", s.setModelsGateway)
 	m.HandleFunc("GET /v1/sessions", s.sessions)
 	m.HandleFunc("GET /v1/sessions/{id}", s.readSession)
+	m.HandleFunc("PUT /v1/sessions/{id}/starred", s.setSessionStarred)
 	m.HandleFunc("POST /v1/options", s.options)
 	m.HandleFunc("POST /v1/chats", s.open)
 	m.HandleFunc("GET /v1/chats/{id}/meta", s.meta)
@@ -133,8 +122,6 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /v1/chats/{id}/events", s.events)
 	m.HandleFunc("POST /v1/chats/{id}/send", s.send)
 	m.HandleFunc("POST /v1/chats/{id}/abort", s.abort)
-	m.HandleFunc("POST /v1/chats/{id}/confirm", s.confirm)
-	m.HandleFunc("POST /v1/chats/{id}/elicit", s.elicit)
 	m.HandleFunc("GET /v1/chats/{id}/models", s.models)
 	m.HandleFunc("GET /v1/chats/{id}/commands", s.commands)
 	m.HandleFunc("POST /v1/chats/{id}/model", s.setModel)
@@ -179,6 +166,17 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		wire[i] = SessionSummary{SessionSummary: value[i], Attributes: value[i].Attributes}
 	}
 	s.respond(w, wire, nil)
+}
+
+func (s *Server) setSessionStarred(w http.ResponseWriter, r *http.Request) {
+	request, ok := decode[struct {
+		Starred bool `json:"starred"`
+	}](w, r)
+	if !ok {
+		return
+	}
+	err := s.adapter.SetSessionStarred(r.Context(), r.PathValue("id"), request.Starred)
+	s.respond(w, nil, err)
 }
 
 func (s *Server) readSession(w http.ResponseWriter, r *http.Request) {
@@ -295,30 +293,6 @@ func (s *Server) abort(w http.ResponseWriter, r *http.Request) {
 		c.Abort()
 		s.json(w, http.StatusOK, map[string]bool{"ok": true})
 	}
-}
-
-func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.chat(w, r)
-	if !ok {
-		return
-	}
-	q, valid := decode[ConfirmRequest](w, r)
-	if !valid {
-		return
-	}
-	s.respond(w, map[string]bool{"ok": true}, c.Confirm(r.Context(), q.ToolCallID, q.Decision, q.Reason))
-}
-
-func (s *Server) elicit(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.chat(w, r)
-	if !ok {
-		return
-	}
-	q, valid := decode[ElicitRequest](w, r)
-	if !valid {
-		return
-	}
-	s.respond(w, map[string]bool{"ok": true}, c.Elicit(r.Context(), q.ElicitationID, q.Action, q.Content))
 }
 
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {

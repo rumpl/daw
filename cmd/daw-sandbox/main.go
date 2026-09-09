@@ -15,9 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/rumpl/daw/internal/sandboxrunner"
-	sbx "github.com/rumpl/go-sbx"
 )
 
 func main() {
@@ -29,14 +26,13 @@ func main() {
 
 func run() error {
 	workspace := flag.String("workspace", ".", "host workspace to mount in the sandbox")
-	kit := flag.String("kit", defaultKitPath(), "path to the daw-runner kit")
+	kit := flag.String("kit", "", "OCI reference for the daw-runner sandbox kit")
 	pluginDir := flag.String("plugins", defaultPluginDir(), "host plugin directory to mount (empty disables plugins)")
 	cpus := flag.Int("cpus", 0, "sandbox CPU count (0 uses the kit/default)")
 	memory := flag.String("memory", "", "sandbox memory limit, for example 8g")
 	wait := flag.Duration("wait", 2*time.Minute, "maximum time to wait for the runner API")
 	dashboard := flag.String("dashboard", "", "host dashboard executable to run after the sandbox is ready")
 	perSession := flag.Bool("per-session", false, "let the host dashboard provision one sandbox per session")
-	template := flag.String("template", "", "existing sandbox template image (per-session mode builds one when empty)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -51,9 +47,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	kitPath, err := filepath.Abs(*kit)
-	if err != nil {
-		return err
+	kitRef := strings.TrimSpace(*kit)
+	if kitRef == "" {
+		return errors.New("-kit requires a published daw-runner sandbox kit reference")
 	}
 	pluginPath := ""
 	if strings.TrimSpace(*pluginDir) != "" {
@@ -62,22 +58,11 @@ func run() error {
 			return err
 		}
 	}
-	templateRef := strings.TrimSpace(*template)
-	if templateRef == "" {
-		fmt.Println("ensuring content-addressed daw-runner sandbox template...")
-		templateRef, err = sandboxrunner.EnsureTemplate(ctx, sbx.New(), sandboxrunner.TemplateOptions{
-			Workspace: workspacePath, Kit: kitPath, CPUs: *cpus, Memory: *memory, Wait: *wait,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	fmt.Printf("sandbox template: %s\n", templateRef)
+	fmt.Printf("sandbox kit: %s\n", kitRef)
 	return runDashboard(ctx, *dashboard,
 		"DAWUI_SANDBOX_PER_SESSION=1",
 		"DAWUI_SANDBOX_WORKSPACE="+workspacePath,
-		"DAWUI_SANDBOX_KIT="+kitPath,
-		"DAWUI_SANDBOX_TEMPLATE="+templateRef,
+		"DAWUI_SANDBOX_KIT="+kitRef,
 		"DAWUI_SANDBOX_PLUGIN_DIR="+pluginPath,
 		"DAWUI_SANDBOX_CPUS="+strconv.Itoa(*cpus),
 		"DAWUI_SANDBOX_MEMORY="+*memory,
@@ -113,15 +98,4 @@ func defaultPluginDir() string {
 		return path
 	}
 	return ""
-}
-
-func defaultKitPath() string {
-	executable, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "kits", "daw-runner"))
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return filepath.Join("kits", "daw-runner")
 }

@@ -11,13 +11,13 @@ import type {
   ChatOptions,
   ChatRef,
   CommandInfo,
-  ElicitationReply,
   ManagedPlugin,
   ModelOption,
   ModelsGatewayConfig,
   PluginCatalog,
   PluginConfiguration,
   PluginManagementCatalog,
+  ProjectFolder,
   SessionSummary,
   StoredSession,
   StoredSessionItems,
@@ -25,7 +25,6 @@ import type {
   SessionMeta,
   Stats,
   ToolOption,
-  ToolConfirmationReply,
   UpdateConfigRequest,
   Workspace,
 } from './protocol.gen';
@@ -116,11 +115,23 @@ export const api = {
   openWorkspace(path: string): Promise<Workspace> {
     return request<Workspace>('POST', '/api/workspaces/open', { path });
   },
+  removeWorkspace(path: string): Promise<Accepted> {
+    return request<Accepted>('DELETE', `/api/workspaces?path=${encodeURIComponent(path)}`);
+  },
+  updateProjectFolders(folders: ProjectFolder[]): Promise<Accepted> {
+    return request<Accepted>('PUT', '/api/project-folders', { folders });
+  },
+  allSessions(): Promise<SessionSummary[]> {
+    return request<SessionSummary[]>('GET', '/api/sessions');
+  },
   liveSessions(): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', '/api/sessions/live');
   },
   sessions(workspaceId: string): Promise<SessionSummary[]> {
     return request<SessionSummary[]>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
+  },
+  starSession(sessionId: string, starred: boolean): Promise<Accepted> {
+    return request<Accepted>('PUT', `/api/sessions/${encodeURIComponent(sessionId)}/starred`, { starred });
   },
   session(workspaceId: string, sessionId: string, options: RequestOptions = {}): Promise<StoredSession> {
     return request<StoredSession>('GET', `/api/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}`, undefined, options);
@@ -150,15 +161,16 @@ export const api = {
   updateExecutionTarget(executionTarget: ExecutionTarget): Promise<ExecutionTargetPreference> {
     return request<ExecutionTargetPreference>('PATCH', '/api/chat-options/execution-target', { executionTarget });
   },
-  createChat(workspaceId: string, executionLocationId?: string, executionTarget?: ExecutionTarget): Promise<ChatRef> {
+  createChat(workspaceId: string, executionLocationId?: string, executionTarget?: ExecutionTarget, operationId?: string): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats', {
       workspaceId,
       ...(executionLocationId ? { executionLocationId } : {}),
       ...(executionTarget ? { executionTarget } : {}),
+      ...(operationId ? { operationId } : {}),
     });
   },
-  resumeChat(workspaceId: string, sessionId: string): Promise<ChatRef> {
-    return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, sessionId });
+  resumeChat(workspaceId: string, sessionId: string, operationId?: string): Promise<ChatRef> {
+    return request<ChatRef>('POST', '/api/chats/resume', { workspaceId, sessionId, ...(operationId ? { operationId } : {}) });
   },
   snapshot(chatId: string): Promise<Snapshot> {
     return request<Snapshot>('GET', `/api/chats/${encodeURIComponent(chatId)}`);
@@ -200,12 +212,6 @@ export const api = {
   },
   commands(chatId: string): Promise<CommandInfo[]> {
     return request<CommandInfo[]>('GET', `/api/chats/${encodeURIComponent(chatId)}/commands`);
-  },
-  confirmTool(chatId: string, reply: ToolConfirmationReply): Promise<Accepted> {
-    return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/tool-confirmation`, reply);
-  },
-  answerElicitation(chatId: string, reply: ElicitationReply): Promise<Accepted> {
-    return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/elicitation`, reply);
   },
   retitle(chatId: string, title: string): Promise<Accepted> {
     return request<Accepted>('POST', `/api/chats/${encodeURIComponent(chatId)}/retitle`, { title });

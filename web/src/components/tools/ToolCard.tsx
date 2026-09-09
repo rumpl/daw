@@ -10,10 +10,10 @@ import { ToolImages } from './ToolImages';
 import { toolRenderers } from './toolRenderers';
 
 const stateLabel: Record<ToolActivity['state'], string> = {
-  pending: 'Pending', awaiting_confirmation: 'Waiting', running: 'Running', success: 'Done', error: 'Failed', rejected: 'Rejected',
+  pending: 'Pending', running: 'Running', success: 'Done', error: 'Failed', rejected: 'Rejected',
 };
 const stateMark: Record<ToolActivity['state'], string> = {
-  pending: '·', awaiting_confirmation: '!', running: '·', success: '✓', error: '×', rejected: '×',
+  pending: '·', running: '·', success: '✓', error: '×', rejected: '×',
 };
 
 function fallbackTitle(name: string): string {
@@ -39,6 +39,10 @@ export function ToolCard({ tool, actions }: { tool: ToolActivity; actions?: Reac
               <span className="tool-name">{clip(title, 80)}</span>
               {!renderer && title !== tool.name ? <code className="tool-technical-name">{clip(tool.name, 60)}</code> : null}
               {summary ? <span className="tool-args" title={summary}>{clip(summary, 300)}</span> : null}
+            </span>
+            <span className="tool-click-hint" aria-hidden="true">
+              <span className="tool-click-hint-open">View details</span>
+              <span className="tool-click-hint-close">Hide details</span>
             </span>
             {tool.state !== 'success' ? (
               <Badge variant={tool.state === 'error' || tool.state === 'rejected' ? 'destructive' : 'secondary'} className="tool-state">

@@ -44,6 +44,7 @@ export function Composer({
   onCompact = () => undefined,
   onAddAttachments,
   onRemoveAttachment,
+  onRequestCommands = () => undefined,
   onSend,
   onStop,
 }: {
@@ -77,6 +78,7 @@ export function Composer({
   onCompact?: () => void;
   onAddAttachments: (files: File[]) => void;
   onRemoveAttachment: (id: string) => void;
+  onRequestCommands?: () => void;
   onSend: (text: string, mode: SendMode) => void;
   onStop: () => void;
 }) {
@@ -123,7 +125,10 @@ export function Composer({
         attachments={attachments}
         placeholder={placeholder ?? (busy ? 'Steer the current run, or use Alt+Enter to queue a follow-up…' : 'Ask for a follow-up…')}
         inputRef={inputRef}
-        onValueChange={onDraftChange}
+        onValueChange={(value) => {
+          onDraftChange(value);
+          if (value === '/') onRequestCommands();
+        }}
         onSubmit={submit}
         onStop={onStop}
         onAddAttachments={onAddAttachments}
@@ -199,12 +204,6 @@ export function Composer({
           </>
         }
       />
-
-      {busy && (run.queue.steerDepth > 0 || run.queue.followUpDepth > 0) ? (
-        <span className="queue-pill" aria-live="polite">
-          {run.queue.steerDepth} steer · {run.queue.followUpDepth} follow-up queued
-        </span>
-      ) : null}
     </div>
   );
 }
