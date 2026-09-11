@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	Version          = "2"
+	Version          = "3"
 	maxResponseBytes = 64 << 20
 )
 
@@ -185,8 +185,8 @@ func (s *RemoteStore) AddMessage(ctx context.Context, id string, value *session.
 	return result.MessageID, err
 }
 
-func (s *RemoteStore) UpdateMessage(ctx context.Context, id int64, value *session.Message) error {
-	return s.mutate(ctx, http.MethodPut, "/v1/store/messages/"+strconv.FormatInt(id, 10), messageRequest{value}, nil)
+func (s *RemoteStore) UpdateMessage(ctx context.Context, sessionID string, messageID int64, value *session.Message) error {
+	return s.mutate(ctx, http.MethodPut, "/v1/store/sessions/"+url.PathEscape(sessionID)+"/messages/"+strconv.FormatInt(messageID, 10), messageRequest{value}, nil)
 }
 
 func (s *RemoteStore) AddSubSession(ctx context.Context, id string, value *session.Session) error {

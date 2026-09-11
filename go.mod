@@ -3,8 +3,9 @@ module github.com/rumpl/daw
 go 1.27.0
 
 require (
-	github.com/docker/docker-agent v1.134.0
+	github.com/docker/docker-agent v1.138.0
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/google/go-containerregistry v0.22.1
 	github.com/rumpl/go-sbx v0.0.0-20260827195633-6e5c60a09409
 )
 
@@ -64,7 +65,6 @@ require (
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/pprof v0.0.0-20260906184651-6331bc6350fe // indirect
 	github.com/google/s2a-go v0.1.9 // indirect

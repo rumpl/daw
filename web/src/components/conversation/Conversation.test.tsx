@@ -196,6 +196,89 @@ describe('Conversation', () => {
     expect(dialog.querySelector('img')).toHaveAttribute('src', 'data:image/png;base64,YWJj');
   });
 
+  it('magnifies message markers based on pointer proximity and hides them on leave', () => {
+    const user = assistantMessage({ id: 'user-1', role: 'user', text: 'Question', streaming: false });
+    const { container } = render(<Conversation items={[user]} empty={null} />);
+    const wrap = container.querySelector('.conversation-scroll') as HTMLDivElement;
+    const marker = screen.getByRole('button', { name: 'Jump to user message 1' });
+    vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 0, right: 500, bottom: 500, width: 500, height: 500, x: 0, y: 0, toJSON: () => ({}),
+    });
+    vi.spyOn(marker, 'getBoundingClientRect').mockReturnValue({
+      left: 470, top: 240, right: 490, bottom: 250, width: 20, height: 10, x: 470, y: 240, toJSON: () => ({}),
+    });
+
+    const pointerMove = new Event('pointermove', { bubbles: true });
+    Object.defineProperties(pointerMove, {
+      clientX: { value: 495 },
+      clientY: { value: 245 },
+    });
+    fireEvent(wrap, pointerMove);
+    expect(marker.style.getPropertyValue('--marker-opacity')).not.toBe('0');
+    expect(Number(marker.style.getPropertyValue('--marker-scale'))).toBeGreaterThan(2);
+
+    fireEvent.pointerLeave(wrap);
+    expect(marker.style.getPropertyValue('--marker-opacity')).toBe('');
+    expect(marker.style.getPropertyValue('--marker-scale')).toBe('');
+  });
+
+  it('shows one navigation marker per user message and scrolls to it', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      value: scrollIntoView,
+      configurable: true,
+    });
+    const user = assistantMessage({ id: 'user-1', role: 'user', text: 'First question', streaming: false });
+    const assistant = assistantMessage({ id: 'assistant-1', text: 'First answer', streaming: false });
+    const secondUser = assistantMessage({ id: 'user-2', role: 'user', text: 'Second question', streaming: false });
+
+    const { container } = render(
+      <Conversation items={[user, assistant, secondUser]} empty={null} />,
+    );
+
+    expect(screen.getAllByRole('button', { name: /Jump to user message/ })).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to user message 2' }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    expect(container.querySelector('[data-user-message-index="1"] article'))
+      .toHaveAttribute('aria-label', 'user message');
+  });
+
+  it('renders only the latest history batch and loads earlier items without animating them', () => {
+    const items = Array.from({ length: 85 }, (_, index) => assistantMessage({
+      id: `message-${index}`,
+      text: `Message ${index}`,
+      streaming: false,
+    }));
+    const { container } = render(<Conversation items={items} empty={null} />);
+
+    expect(container.querySelectorAll('.conversation-row')).toHaveLength(80);
+    expect(screen.queryByText('Message 0')).not.toBeInTheDocument();
+    expect(screen.getByText('Message 84')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+
+    expect(container.querySelectorAll('.conversation-row')).toHaveLength(85);
+    expect(screen.getByText('Message 0')).toBeInTheDocument();
+    expect(container.querySelector('.conversation-row-enter')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Load earlier messages' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the latest history window mounted as new items arrive', () => {
+    const items = Array.from({ length: 80 }, (_, index) => assistantMessage({
+      id: `message-${index}`,
+      text: `Message ${index}`,
+      streaming: false,
+    }));
+    const { container, rerender } = render(<Conversation items={items} empty={null} />);
+
+    rerender(<Conversation items={[...items, assistantMessage({ id: 'new', text: 'Newest', streaming: false })]} empty={null} />);
+
+    expect(container.querySelectorAll('.conversation-row')).toHaveLength(80);
+    expect(screen.queryByText('Message 0')).not.toBeInTheDocument();
+    expect(screen.getByText('Newest')).toBeInTheDocument();
+  });
+
   it('hides jump to latest and resets scrolling when the conversation is cleared', () => {
     const { container, rerender } = render(
       <Conversation items={[assistantMessage({ text: 'Existing message' })]} empty={<p>Empty</p>} />,

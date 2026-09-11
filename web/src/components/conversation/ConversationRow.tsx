@@ -12,9 +12,10 @@ import { NoticeCard } from './NoticeCard';
 import { SummaryCard } from './SummaryCard';
 import { TransferCard } from './TransferCard';
 
-export const ConversationRow = memo(function ConversationRow({ item, entering = false, toolRenderers, attachmentRenderers, contributionContext }: {
+export const ConversationRow = memo(function ConversationRow({ item, entering = false, userMessageIndex, toolRenderers, attachmentRenderers, contributionContext }: {
   item: Item;
   entering?: boolean;
+  userMessageIndex?: number;
   toolRenderers: ReturnType<typeof usePluginContributions>['toolRenderers'];
   attachmentRenderers: ReturnType<typeof usePluginContributions>['attachmentRenderers'];
   contributionContext?: ContributionContext;
@@ -53,5 +54,8 @@ export const ConversationRow = memo(function ConversationRow({ item, entering = 
       content = item.summary ? <SummaryCard summary={item.summary} /> : null;
       break;
   }
-  return content ? <div className={cn('conversation-row', animateEntry && 'conversation-row-enter')}>{content}</div> : null;
+  return content ? <div
+    className={cn('conversation-row', animateEntry && 'conversation-row-enter')}
+    data-user-message-index={userMessageIndex}
+  >{content}</div> : null;
 });

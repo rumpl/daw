@@ -321,6 +321,12 @@ export interface ManagedPlugin {
   running: boolean;
 }
 
+export interface PluginPushResult {
+  pluginId: string;
+  reference: string;
+  digest: string;
+}
+
 export interface PluginError {
   pluginId?: string;
   message: string;
@@ -387,6 +393,7 @@ export interface CreateChatRequest {
   executionLocationId?: string;
   executionTarget?: ExecutionTarget;
   operationId?: string;
+  persistImmediately?: boolean;
 }
 
 export interface ResumeChatRequest {

@@ -71,13 +71,16 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         queue={dashboard.state.run.queue}
         contributionContext={contributionContext}
         empty={
-          !dashboard.workspace ? (
-            <><h2>Pick a working directory</h2><p>Open a folder in the sidebar and start a chat.</p></>
-          ) : dashboard.chatId ? (
-            <><h2>Say something</h2><p>Ask for a change, a review, or an explanation. Tools run in {clip(dashboard.workspace.label, 40)}.</p></>
-          ) : (
-            <><h2>Start a chat</h2><p>Send a message below to begin working in {clip(dashboard.workspace.label, 40)}.</p></>
-          )
+          <>
+            <img className="empty-brand-icon" src="/atelier-icon.png" alt="" aria-hidden="true" />
+            {!dashboard.workspace ? (
+              <><h2>Pick a working directory</h2><p>Open a folder in the sidebar and start a chat.</p></>
+            ) : dashboard.chatId ? (
+              <><h2>Say something</h2><p>Ask for a change, a review, or an explanation. Tools run in {clip(dashboard.workspace.label, 40)}.</p></>
+            ) : (
+              <><h2>Start a chat</h2><p>Send a message below to begin working in {clip(dashboard.workspace.label, 40)}.</p></>
+            )}
+          </>
         }
       />
 

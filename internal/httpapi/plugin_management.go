@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
+	"github.com/rumpl/daw/internal/pluginoci"
 	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
 )
@@ -163,6 +165,7 @@ func (s *Server) handlePluginLifecycle(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, http.StatusInternalServerError, "plugin_management_failed", "plugin state could not be saved")
 			return
 		}
+		s.pluginManagement.setRunning(id, true)
 	case "disable":
 		if err := s.pluginManagement.setEnabled(id, false); err != nil {
 			s.fail(w, http.StatusInternalServerError, "plugin_management_failed", "plugin state could not be saved")
@@ -180,7 +183,64 @@ func (s *Server) handlePluginLifecycle(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, managed)
 }
 
+func (s *Server) handlePushPlugin(w http.ResponseWriter, r *http.Request) {
+	s.pluginOperations.Lock()
+	defer s.pluginOperations.Unlock()
+	id := r.PathValue("pluginId")
+	if _, ok := s.managedPlugin(id); !ok {
+		s.fail(w, http.StatusNotFound, "plugin_not_found", "plugin not found")
+		return
+	}
+	var request struct {
+		Reference string `json:"reference"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Reference) == "" || len(request.Reference) > 2048 {
+		s.fail(w, http.StatusBadRequest, "invalid_plugin_reference", "a valid OCI reference is required")
+		return
+	}
+	ref, digest, err := pluginoci.Push(r.Context(), filepath.Join(s.pluginDir, id), request.Reference)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, "plugin_push_failed", err.Error())
+		return
+	}
+	resolved := ref.Context().Digest(digest.String()).Name()
+	s.json(w, http.StatusOK, protocol.PluginPushResult{PluginID: id, Reference: resolved, Digest: digest.String()})
+}
+
+func (s *Server) handleInstallPlugin(w http.ResponseWriter, r *http.Request) {
+	s.pluginOperations.Lock()
+	defer s.pluginOperations.Unlock()
+	var request struct {
+		Reference string `json:"reference"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || strings.TrimSpace(request.Reference) == "" || len(request.Reference) > 2048 {
+		s.fail(w, http.StatusBadRequest, "invalid_plugin_reference", "a valid OCI reference is required")
+		return
+	}
+	plugin, err := pluginoci.Install(r.Context(), s.pluginDir, request.Reference)
+	if err != nil {
+		s.fail(w, http.StatusBadRequest, "plugin_install_failed", err.Error())
+		return
+	}
+	if err := s.pluginManagement.setEnabled(plugin.ID, true); err != nil {
+		s.fail(w, http.StatusInternalServerError, "plugin_management_failed", "plugin state could not be saved")
+		return
+	}
+	s.pluginManagement.setRunning(plugin.ID, true)
+	s.backends.stopPlugin(plugin.ID, "plugin updated")
+	s.backends.activateAll()
+	s.publishPluginsChanged()
+	managed, _ := s.managedPlugin(plugin.ID)
+	s.json(w, http.StatusCreated, managed)
+}
+
 func (s *Server) handleDeletePlugin(w http.ResponseWriter, r *http.Request) {
+	s.pluginOperations.Lock()
+	defer s.pluginOperations.Unlock()
 	id := r.PathValue("pluginId")
 	if _, ok := s.managedPlugin(id); !ok {
 		s.fail(w, http.StatusNotFound, "plugin_not_found", "plugin not found")

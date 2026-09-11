@@ -54,7 +54,10 @@ func TestRemoteStoreContractAndFidelity(t *testing.T) {
 		t.Fatalf("AddMessage() = %d, %v", messageID, err)
 	}
 	message.Message.Content = "final"
-	if err := remote.UpdateMessage(t.Context(), messageID, message); err != nil {
+	if err := remote.UpdateMessage(t.Context(), "wrong-session", messageID, message); !errors.Is(err, session.ErrNotFound) {
+		t.Fatalf("UpdateMessage() with wrong session = %v, want ErrNotFound", err)
+	}
+	if err := remote.UpdateMessage(t.Context(), root.ID, messageID, message); err != nil {
 		t.Fatal(err)
 	}
 	if err := remote.AddSummary(t.Context(), root.ID, session.Item{Summary: "summary", FirstKeptEntry: 1, Cost: 0.25, Model: "provider/model", Usage: &chat.Usage{InputTokens: 3, OutputTokens: 4}}); err != nil {

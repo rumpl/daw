@@ -49,6 +49,7 @@ var exported = []any{
 	PluginFeatures{},
 	Plugin{},
 	ManagedPlugin{},
+	PluginPushResult{},
 	PluginError{},
 	PluginCatalog{},
 	PluginManagementCatalog{},

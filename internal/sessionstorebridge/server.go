@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	Version      = "2"
+	Version      = "3"
 	MaxBodyBytes = 64 << 20
 )
 
@@ -203,7 +203,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/store/session-summaries", s.getSessionSummaries)
 	s.mux.HandleFunc("PUT /v1/store/sessions/{id}/starred", s.setStarred)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/messages", s.addMessage)
-	s.mux.HandleFunc("PUT /v1/store/messages/{messageID}", s.updateMessage)
+	s.mux.HandleFunc("PUT /v1/store/sessions/{id}/messages/{messageID}", s.updateMessage)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/sub-sessions", s.addSubSession)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/compactions", s.persistCompaction)
 	s.mux.HandleFunc("POST /v1/store/sessions/{id}/summaries", s.addSummary)
@@ -340,7 +340,7 @@ func (s *Server) updateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "message is required")
 		return
 	}
-	writeStoreResult(w, s.store.UpdateMessage(r.Context(), id, req.Message))
+	writeStoreResult(w, s.store.UpdateMessage(r.Context(), r.PathValue("id"), id, req.Message))
 }
 
 func (s *Server) addSubSession(w http.ResponseWriter, r *http.Request) {

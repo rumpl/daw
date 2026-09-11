@@ -2,6 +2,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { MoreHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { api, type PluginManagement } from '@/api';
@@ -27,6 +28,11 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyPlugin, setBusyPlugin] = useState<string | null>(null);
+  const [reference, setReference] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [pushTarget, setPushTarget] = useState<PluginManagement | null>(null);
+  const [pushReference, setPushReference] = useState('');
+  const [pushResult, setPushResult] = useState('');
   const [pending, setPending] = useState<{ managed: PluginManagement; action: 'stop' | 'disable' | 'delete' } | null>(null);
 
   const load = useCallback(async () => {
@@ -71,6 +77,39 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
     }
   };
 
+  const install = async () => {
+    const value = reference.trim();
+    if (!value) return;
+    setInstalling(true);
+    setError('');
+    try {
+      await api.installPlugin(value);
+      setReference('');
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The plugin could not be installed.');
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const push = async () => {
+    if (!pushTarget || !pushReference.trim()) return;
+    setBusyPlugin(pushTarget.plugin.id);
+    setError('');
+    setPushResult('');
+    try {
+      const result = await api.pushPlugin(pushTarget.plugin.id, pushReference.trim());
+      setPushResult(result.reference);
+      setPushReference('');
+      setPushTarget(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The plugin could not be pushed.');
+    } finally {
+      setBusyPlugin(null);
+    }
+  };
+
   return (
     <section className="main-pane">
       <SettingsHeader title="Settings · Plugins" menuButton={menuButton} drawerOpen={drawerOpen}
@@ -80,6 +119,13 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
         <div className="plugin-settings-heading">
           <div><h2>Plugins</h2><p>Manage plugins installed in <code>{clip(boot.pluginDir, 160)}</code>.</p></div>
         </div>
+        <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void install(); }}>
+          <Input value={reference} onChange={(event) => setReference(event.target.value)}
+            placeholder="docker.io/username/plugin:version" aria-label="Plugin OCI reference" disabled={installing} />
+          <Button type="submit" disabled={installing || !reference.trim()}>{installing ? 'Installing…' : 'Install'}</Button>
+        </form>
+        <p className="hint">Pulls a trusted Atelier plugin OCI artifact using your Docker credentials, installs it, and enables it.</p>
+        {pushResult ? <Alert><AlertDescription>Published as <code>{clip(pushResult, 240)}</code></AlertDescription></Alert> : null}
         {error ? <Alert variant="destructive"><AlertDescription>{clip(error, 300)}</AlertDescription></Alert> : null}
         {catalogErrors.length > 0 ? (
           <section className="plugin-management-errors" aria-label="Invalid plugins">
@@ -137,6 +183,7 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
                       } />
                       <DropdownMenuContent align="end" className="w-36">
                         {managed.enabled ? <DropdownMenuItem onClick={() => setPending({ managed, action: 'disable' })}>Disable</DropdownMenuItem> : null}
+                        <DropdownMenuItem onClick={() => { setPushTarget(managed); setPushReference(''); setPushResult(''); }}>Push to registry…</DropdownMenuItem>
                         <DropdownMenuItem variant="destructive" onClick={() => setPending({ managed, action: 'delete' })}>Delete</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -148,6 +195,27 @@ export function PluginSettingsPage({ boot, revision, menuButton, drawerOpen, onT
         )}
         </SettingsLayout>
       </div>
+
+      <AlertDialog open={Boolean(pushTarget)} onOpenChange={(open) => { if (!open && !busyPlugin) setPushTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Push {pushTarget?.plugin.name || pushTarget?.plugin.id} to a registry</AlertDialogTitle>
+            <AlertDialogDescription>
+              Packages the current local plugin and pushes it using credentials from your Docker configuration.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <form id="push-plugin-form" onSubmit={(event) => { event.preventDefault(); void push(); }}>
+            <Input autoFocus value={pushReference} onChange={(event) => setPushReference(event.target.value)}
+              placeholder="docker.io/username/plugin:version" aria-label="Destination OCI reference" disabled={Boolean(busyPlugin)} />
+          </form>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busyPlugin)}>Cancel</AlertDialogCancel>
+            <Button type="submit" form="push-plugin-form" disabled={Boolean(busyPlugin) || !pushReference.trim()}>
+              {busyPlugin ? 'Pushing…' : 'Push'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={Boolean(pending)} onOpenChange={(open) => { if (!open) setPending(null); }}>
         <AlertDialogContent>

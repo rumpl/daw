@@ -117,7 +117,7 @@ type Store interface {
     SetSessionStarred(context.Context, string, bool) error
 
     AddMessage(context.Context, string, *session.Message) (int64, error)
-    UpdateMessage(context.Context, int64, *session.Message) error
+    UpdateMessage(context.Context, string, int64, *session.Message) error
     AddSubSession(context.Context, string, *session.Session) error
     AddSummary(context.Context, string, session.Item) error
     AddError(context.Context, string, *session.Error) error
@@ -244,7 +244,7 @@ PUT    /v1/store/sessions/{id}                    UpdateSession
 DELETE /v1/store/sessions/{id}                    DeleteSession
 PUT    /v1/store/sessions/{id}/starred            SetSessionStarred
 POST   /v1/store/sessions/{id}/messages           AddMessage
-PUT    /v1/store/messages/{messageId}             UpdateMessage
+PUT    /v1/store/sessions/{id}/messages/{messageId} UpdateMessage
 POST   /v1/store/sessions/{id}/sub-sessions       AddSubSession
 POST   /v1/store/sessions/{id}/summaries          AddSummary
 POST   /v1/store/sessions/{id}/errors             AddError

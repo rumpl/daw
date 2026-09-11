@@ -17,6 +17,7 @@ import type {
   PluginCatalog,
   PluginConfiguration,
   PluginManagementCatalog,
+  PluginPushResult,
   ProjectFolder,
   SessionSummary,
   StoredSession,
@@ -100,6 +101,12 @@ export const api = {
   pluginManagement(): Promise<PluginManagementCatalog> {
     return request<PluginManagementCatalog>('GET', '/api/plugin-management');
   },
+  installPlugin(reference: string): Promise<PluginManagement> {
+    return request<PluginManagement>('POST', '/api/plugins/install', { reference });
+  },
+  pushPlugin(pluginId: string, reference: string): Promise<PluginPushResult> {
+    return request<PluginPushResult>('POST', `/api/plugins/${encodeURIComponent(pluginId)}/push`, { reference });
+  },
   managePlugin(pluginId: string, action: 'start' | 'stop' | 'enable' | 'disable'): Promise<PluginManagement> {
     return request<PluginManagement>('POST', `/api/plugins/${encodeURIComponent(pluginId)}/${action}`);
   },
@@ -161,12 +168,13 @@ export const api = {
   updateExecutionTarget(executionTarget: ExecutionTarget): Promise<ExecutionTargetPreference> {
     return request<ExecutionTargetPreference>('PATCH', '/api/chat-options/execution-target', { executionTarget });
   },
-  createChat(workspaceId: string, executionLocationId?: string, executionTarget?: ExecutionTarget, operationId?: string): Promise<ChatRef> {
+  createChat(workspaceId: string, executionLocationId?: string, executionTarget?: ExecutionTarget, operationId?: string, persistImmediately = false): Promise<ChatRef> {
     return request<ChatRef>('POST', '/api/chats', {
       workspaceId,
       ...(executionLocationId ? { executionLocationId } : {}),
       ...(executionTarget ? { executionTarget } : {}),
       ...(operationId ? { operationId } : {}),
+      ...(persistImmediately ? { persistImmediately: true } : {}),
     });
   },
   resumeChat(workspaceId: string, sessionId: string, operationId?: string): Promise<ChatRef> {

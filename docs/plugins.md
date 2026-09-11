@@ -24,6 +24,40 @@ the same lowercase kebab-case value.
     └── index.js
 ```
 
+## Package and install OCI plugins
+
+Atelier plugins can be distributed through any OCI registry, including Docker
+Hub. Build the helper, authenticate with Docker, and push a plugin directory:
+
+```sh
+make build-plugin
+docker login
+bin/daw-plugin push --tag docker.io/USER/project-health:1.0.0 \
+  ~/.cagent/dawui/plugins/project-health
+```
+
+The command validates the plugin before publishing it and uses Docker's normal
+credential store. The resulting artifact is an OCI image manifest with a
+single `application/vnd.atelier.plugin.layer.v1.tar+gzip` layer and an
+`application/vnd.atelier.plugin.config.v1+json` config.
+
+To publish a plugin created locally from the app, open its **More actions** menu
+in **Settings → Plugins**, select **Push to registry…**, and enter a destination
+reference. Atelier validates and packages the plugin on the host, pushes it with
+credentials from your Docker configuration, and shows the immutable digest
+reference after success.
+
+To install, open **Settings → Plugins**, enter the registry reference, and
+select **Install**. Atelier pulls it with the same Docker credential store,
+validates the media types and plugin contents, atomically installs it under its
+manifest `id`, and enables it. Installing a tag that contains the same plugin
+id updates the existing installation.
+
+Plugins are trusted code. A plugin frontend has the dashboard's same-origin
+access and its backend runs with your user account, so install only artifacts
+you trust. Prefer immutable digest references such as
+`docker.io/USER/project-health@sha256:…` when reproducibility matters.
+
 ## Manifest
 
 ```json

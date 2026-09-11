@@ -295,13 +295,13 @@ export function useDashboard(
     [loadChatExtras, prepareChat, refreshAllSessions, refreshLiveSessions, refreshSessions, updateOpenTabSessionIds],
   );
 
-  const createDraftChat = () => {
+  const createDraftChat = (persistImmediately = false) => {
     if (creatingDraftChat.current) return creatingDraftChat.current;
     const creation = (async () => {
       if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
       const replacedDraftId = activeSessionId?.startsWith('draft:') ? activeSessionId : null;
       const ref = await withProvisioning((operationId) =>
-        api.createChat(workspace.workspaceId, undefined, executionTarget, operationId));
+        api.createChat(workspace.workspaceId, undefined, executionTarget, operationId, persistImmediately));
       if (replacedDraftId) {
         migrateDraft(replacedDraftId, ref.sessionId);
         setDraftSessions((current) => current.filter((session) => session.sessionId !== replacedDraftId));
@@ -334,13 +334,14 @@ export function useDashboard(
       return ref;
     })();
     creatingDraftChat.current = creation;
-    void creation.catch(() => {
+    const clearCreatingChat = () => {
       if (creatingDraftChat.current === creation) creatingDraftChat.current = null;
-    });
+    };
+    void creation.then(clearCreatingChat, clearCreatingChat);
     return creation;
   };
 
-  const newChat = (initialMessage?: string) => {
+  const newChat = (initialMessage?: string, persistImmediately = false) => {
     // Empty chats stay client-side until their first message or attachment,
     // but each one has a stable identity so it behaves like a real tab.
     if (initialMessage === undefined) {
@@ -350,16 +351,16 @@ export function useDashboard(
       return Promise.resolve(true);
     }
 
-    let created = false;
+    let created: ChatRef | false = false;
     return guard(async () => {
       const draftSessionId = activeSessionId;
-      const ref = await createDraftChat();
+      const ref = await createDraftChat(persistImmediately);
       if (initialMessage) {
         await api.send(ref.chatId, initialMessage, 'normal');
         clearDraft(draftSessionId);
         clearDraft(ref.sessionId);
       }
-      created = true;
+      created = ref;
     }).then(() => created);
   };
 

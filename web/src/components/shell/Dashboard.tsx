@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Sidebar as ShellSidebar, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { SessionTabs } from '@/components/sessions/SessionTabs';
 import { SplitSessionPane } from './SplitSessionPane';
+import { newTabSplitShortcut } from './keyboardShortcuts';
 import { PRIMARY_PANE_ID, removeLeaf, splitLeaf, updateSplitSize, type PaneLayout, type SplitPaneState } from './paneLayout';
 import { pluginRoute, sessionRoute } from '@/routes';
 import { clip } from '@/safety';
@@ -225,18 +226,43 @@ export function Dashboard() {
     sessionId: string,
     workspacePath: string,
     direction: 'vertical' | 'horizontal',
+    preservePrimarySelection = false,
   ) => {
     const pane: SplitPaneState = { id: `pane-${nextPaneId.current++}`, sessionId, workspacePath };
     setSplitPanes((current) => [...current, pane]);
     setPaneLayout((current) => splitLeaf(current, paneId, pane, direction));
 
-    if (paneId !== PRIMARY_PANE_ID) return;
+    if (paneId !== PRIMARY_PANE_ID || preservePrimarySelection) return;
     const remaining = dashboard.liveSessions.filter((session) => session.sessionId !== sessionId);
     const currentIndex = dashboard.liveSessions.findIndex((session) => session.sessionId === sessionId);
     const replacement = remaining[Math.min(Math.max(currentIndex, 0), remaining.length - 1)];
     if (replacement) navigate(sessionRoute(replacement.sessionId, replacement.workingDir));
     else navigate('/');
   }, [dashboard.liveSessions, navigate]);
+
+  const openNewTabAndSplit = useCallback((direction: 'vertical' | 'horizontal') => {
+    if (dashboard.busyAction || !dashboard.workspace || routePluginId || anySettingsActive) return false;
+    const active = dashboard.liveSessions.find((session) => session.sessionId === dashboard.activeSessionId);
+    if (!active || active.sessionId.startsWith('draft:')) return false;
+
+    void dashboard.newChat('', true).then((created) => {
+      if (!created || created === true) return;
+      openSplit(PRIMARY_PANE_ID, created.sessionId, dashboard.workspace!.path, direction, true);
+      navigate(sessionRoute(active.sessionId, active.workingDir));
+    });
+    return true;
+  }, [anySettingsActive, dashboard, navigate, openSplit, routePluginId]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      const direction = newTabSplitShortcut(event);
+      if (!direction || !openNewTabAndSplit(direction)) return;
+      event.preventDefault();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openNewTabAndSplit]);
 
   const closeSplit = useCallback((paneId: string) => {
     const pane = splitPanes.find((candidate) => candidate.id === paneId);

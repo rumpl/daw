@@ -21,7 +21,7 @@ func (s *Server) handleCreateChat(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"), req.ExecutionTarget, req.OperationID)
+	s.openChat(w, r, req.WorkspaceID, "", req.ExecutionLocationID, nil, r.Header.Get("X-DAW-Session-Context"), r.Header.Get("X-DAW-Plugin-ID"), req.ExecutionTarget, req.OperationID, req.PersistImmediately)
 }
 
 func (s *Server) pluginMCPServers() []adapter.MCPServer {
@@ -108,10 +108,10 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]), req.OperationID)
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]), req.OperationID, false)
 }
 
-func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget, operationID string) {
+func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget, operationID string, persistImmediately bool) {
 	ws, ok := s.workspaces.Get(workspaceID)
 	if !ok {
 		s.fail(w, http.StatusNotFound, "unknown_workspace", "unknown workspace")
@@ -155,7 +155,6 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 			Kind: sessionlineage.KindAgent, PluginID: pluginID,
 		}.Attributes()
 	}
-	persistImmediately := false
 	if resumeID != "" && stored != nil && stored.Attributes[executionlocations.AttributeLocationType] == executionlocations.LocationType {
 		if stored.Attributes[executionlocations.AttributeWorkspacePath] != ws.Path ||
 			stored.Attributes[executionlocations.AttributeLocationID] == "" ||

@@ -469,6 +469,13 @@ type ManagedPlugin struct {
 	Running bool   `json:"running"`
 }
 
+// PluginPushResult identifies a plugin artifact published to an OCI registry.
+type PluginPushResult struct {
+	PluginID  string `json:"pluginId"`
+	Reference string `json:"reference"`
+	Digest    string `json:"digest"`
+}
+
 // PluginManagementCatalog includes stopped and disabled plugins.
 type PluginManagementCatalog struct {
 	Plugins []ManagedPlugin `json:"plugins"`
@@ -584,6 +591,7 @@ type CreateChatRequest struct {
 	ExecutionLocationID string          `json:"executionLocationId,omitempty"`
 	ExecutionTarget     ExecutionTarget `json:"executionTarget,omitempty"`
 	OperationID         string          `json:"operationId,omitempty"`
+	PersistImmediately  bool            `json:"persistImmediately,omitempty"`
 }
 
 // ResumeChatRequest is POST /api/chats/resume.

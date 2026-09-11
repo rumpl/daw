@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rumpl/daw/internal/adapter"
@@ -83,6 +84,7 @@ type Server struct {
 	pluginDir              string
 	pluginAPIOrigin        string
 	pluginAPISocket        string
+	pluginOperations       sync.Mutex
 
 	guard              *pathsec.Guard
 	workspaces         *workspaces.Service
@@ -173,6 +175,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
 	m.HandleFunc("GET /api/plugin-management", s.handlePluginManagement)
+	m.HandleFunc("POST /api/plugins/install", s.handleInstallPlugin)
+	m.HandleFunc("POST /api/plugins/{pluginId}/push", s.handlePushPlugin)
 	m.HandleFunc("POST /api/plugins/{pluginId}/start", s.handlePluginLifecycle)
 	m.HandleFunc("POST /api/plugins/{pluginId}/stop", s.handlePluginLifecycle)
 	m.HandleFunc("POST /api/plugins/{pluginId}/enable", s.handlePluginLifecycle)

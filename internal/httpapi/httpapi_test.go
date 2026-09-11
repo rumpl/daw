@@ -524,8 +524,17 @@ func TestPluginManagementLifecycleAndDelete(t *testing.T) {
 	}
 
 	enabled := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/enable", nil))
-	if !enabled.Enabled || enabled.Running {
-		t.Fatalf("enabling should not start plugin: %#v", enabled)
+	if !enabled.Enabled || !enabled.Running {
+		t.Fatalf("enabling should start plugin: %#v", enabled)
+	}
+	catalog = decodeJSON[protocol.PluginCatalog](t, h.do(http.MethodGet, "/api/plugins", nil))
+	if len(catalog.Plugins) != 1 || catalog.Plugins[0].ID != "managed" {
+		t.Fatalf("enabled plugin missing from active catalog: %#v", catalog.Plugins)
+	}
+
+	stopped = decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/stop", nil))
+	if stopped.Running || !stopped.Enabled {
+		t.Fatalf("unexpected stopped state after enable: %#v", stopped)
 	}
 	running := decodeJSON[protocol.ManagedPlugin](t, h.do(http.MethodPost, "/api/plugins/managed/start", nil))
 	if !running.Enabled || !running.Running {
@@ -1172,6 +1181,19 @@ func TestLiveSessionsListsEveryProject(t *testing.T) {
 		h.do(http.MethodGet, "/api/sessions/live", nil))
 	if len(remaining) != 1 || remaining[0].SessionID != refs[1].SessionID {
 		t.Fatalf("disposed session remained live: %+v", remaining)
+	}
+}
+
+func TestCreateChatCanPersistEmptySessionImmediately(t *testing.T) {
+	h := newHarness(t)
+	ws := h.openWorkspace()
+
+	ref := decodeJSON[protocol.ChatRef](t, h.do(http.MethodPost, "/api/chats", protocol.CreateChatRequest{
+		WorkspaceID: ws.WorkspaceID, PersistImmediately: true,
+	}))
+	live := decodeJSON[[]protocol.SessionSummary](t, h.do(http.MethodGet, "/api/sessions/live", nil))
+	if len(live) != 1 || live[0].SessionID != ref.SessionID {
+		t.Fatalf("persisted empty session missing from live list: %+v", live)
 	}
 }
 

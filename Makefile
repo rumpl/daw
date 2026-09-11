@@ -5,6 +5,7 @@
 
 SHELL := /bin/bash
 BIN := bin/dawui
+PLUGIN_BIN := bin/daw-plugin
 SANDBOX_BIN := bin/daw-sandbox
 RUNNER_KIT_BIN := kits/daw-runner/files/home/.local/lib/daw-runner
 RUNNER_REPOSITORY ?= docker.io/djordjelukic1639080/daw-runner
@@ -15,7 +16,7 @@ GO ?= go
 WEB_DEPS_STAMP := web/node_modules/.daw-installed
 
 .PHONY: all deps electron-deps generate dev dev-fake typecheck lint test test-go test-race test-web test-e2e \
-        ci build build-web build-go build-sandbox-launcher build-runner-kit publish-sandbox-kit electron package-electron clean smoke-real screenshots help
+        ci build build-web build-go build-plugin build-sandbox-launcher build-runner-kit publish-sandbox-kit electron package-electron clean smoke-real screenshots help
 
 all: build
 
@@ -129,6 +130,11 @@ build-go:
 	  -X github.com/docker/docker-agent/pkg/version.Version=$(CAGENT_VERSION)" \
 	  -o $(BIN) ./cmd/dawui
 
+## build-plugin: compile the plugin OCI packaging and publishing CLI
+build-plugin:
+	mkdir -p $(dir $(PLUGIN_BIN))
+	$(GO) build -trimpath -o $(PLUGIN_BIN) ./cmd/daw-plugin
+
 ## build-sandbox-launcher: compile the host-side per-session sandbox launcher
 build-sandbox-launcher:
 	mkdir -p $(dir $(SANDBOX_BIN))
@@ -180,7 +186,7 @@ smoke-real:
 
 clean:
 	rm -rf bin internal/webassets/dist web/node_modules e2e/node_modules electron/node_modules electron/dist
-	rm -f $(SANDBOX_BIN) $(RUNNER_KIT_BIN) $(RUNNER_KIT_REF)
+	rm -f $(PLUGIN_BIN) $(SANDBOX_BIN) $(RUNNER_KIT_BIN) $(RUNNER_KIT_REF)
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## //'

@@ -40,12 +40,14 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
   - Lists plugins that are currently running plus validation diagnostics.
 - `GET /api/plugin-management` → `200 PluginManagementCatalog`
   - Lists every installed valid plugin, including stopped and disabled plugins.
+- `POST /api/plugins/install` with `{ "reference": "docker.io/user/plugin:tag" }` → `201 ManagedPlugin`; pulls a trusted Atelier OCI plugin with Docker credentials, atomically installs it, and enables it.
+- `POST /api/plugins/{pluginId}/push` with `{ "reference": "docker.io/user/plugin:tag" }` → `200 PluginPushResult`; validates, packages, and pushes the installed plugin using Docker credentials.
 - `POST /api/plugins/{pluginId}/start` → `200 ManagedPlugin`
 - `POST /api/plugins/{pluginId}/stop` → `200 ManagedPlugin`
 - `POST /api/plugins/{pluginId}/enable` → `200 ManagedPlugin`
 - `POST /api/plugins/{pluginId}/disable` → `200 ManagedPlugin`
   - Start and stop change the current process state. Disable persists across
-    dashboard restarts and also stops the plugin; enable does not start it.
+    dashboard restarts and also stops the plugin; enable starts it immediately.
 - `DELETE /api/plugins/{pluginId}` → `200 Accepted`
   - Stops the plugin and permanently removes its directory from disk.
 - `GET|POST|PUT|PATCH|DELETE /api/plugins/{pluginId}/backend[/{path...}]`
