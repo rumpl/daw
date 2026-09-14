@@ -49,6 +49,8 @@ let backendExitError = null;
 let tray = null;
 let quitting = false;
 let transcription = null;
+let backendSocketPath = null;
+let backendCSRFToken = null;
 
 function dashboardPath() {
   if (app.isPackaged) return path.join(process.resourcesPath, 'backend', 'dawui');
@@ -540,6 +542,22 @@ function stopTranscription(event) {
   return current.stopPromise;
 }
 
+function notifyBackendDetached(socketPath) {
+  return new Promise((resolve) => {
+    const request = http.request({
+      socketPath,
+      path: '/api/lifecycle/detach',
+      method: 'POST',
+      headers: { Host: APP_HOST, 'X-DAW-CSRF': backendCSRFToken || '' },
+    }, (response) => {
+      response.resume();
+      response.once('end', resolve);
+    });
+    request.once('error', resolve);
+    request.end();
+  });
+}
+
 async function main() {
   ipcMain.handle('speech-to-text:start', startTranscription);
   ipcMain.on('speech-to-text:audio', appendTranscriptionAudio);
@@ -559,12 +577,25 @@ async function main() {
   // installed even when its menu bar is hidden on Windows and Linux.
   Menu.setApplicationMenu(createApplicationMenu());
   const socketPath = makeSocketPath();
+  backendSocketPath = socketPath;
   try {
     await healthCheck(socketPath);
   } catch {
     startBackend(socketPath);
     await waitForBackend(socketPath);
   }
+  const bootstrap = await new Promise((resolve, reject) => {
+    const request = http.request({ socketPath, path: '/api/bootstrap', method: 'GET', headers: { Host: APP_HOST } }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.once('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (error) { reject(error); }
+      });
+    });
+    request.once('error', reject);
+    request.end();
+  });
+  backendCSRFToken = bootstrap.csrfToken;
   await protocol.handle(APP_SCHEME, (request) => proxyToBackend(request, socketPath));
   if (process.platform === 'darwin') app.dock.setIcon(APP_ICON);
   createTray();
@@ -589,9 +620,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
-  // Quitting closes only the desktop shell. The detached backend owns active
-  // agents and remains reachable through its persistent Unix socket, allowing
-  // a later launch to show everything that happened while the UI was away.
+app.on('before-quit', (event) => {
   quitting = true;
+  if (!backendSocketPath) return;
+  event.preventDefault();
+  const socketPath = backendSocketPath;
+  backendSocketPath = null;
+  void notifyBackendDetached(socketPath).finally(() => app.quit());
 });

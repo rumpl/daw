@@ -360,6 +360,8 @@ func run() error {
 	select {
 	case <-ctx.Done():
 		fmt.Println("\nshutting down…")
+	case <-srv.Retire():
+		fmt.Println("\ndesktop detached; background work complete")
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return err

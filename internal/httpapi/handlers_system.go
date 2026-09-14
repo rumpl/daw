@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"time"
@@ -8,6 +9,11 @@ import (
 	"github.com/rumpl/daw/internal/plugins"
 	"github.com/rumpl/daw/internal/protocol"
 )
+
+func (s *Server) handleDetach(w http.ResponseWriter, r *http.Request) {
+	s.beginDrain(context.WithoutCancel(r.Context()))
+	s.json(w, http.StatusAccepted, protocol.Accepted{Accepted: true})
+}
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.json(w, http.StatusOK, protocol.Health{
@@ -17,6 +23,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
+	s.cancelDrain()
 	info, err := s.adapter.Info(r.Context())
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "sdk_init_failed",

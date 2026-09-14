@@ -275,6 +275,9 @@ func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, r
 	lc.creationContext = creationContext
 	lc.onIndexChange = func(sessionID, workspaceID, reason string) {
 		s.publishSessionsChanged(workspaceID, sessionID, reason)
+		if reason == "run_state" {
+			s.disposeIfDraining(chatID)
+		}
 	}
 	lc.generation = 1
 	if other := s.chats.register(sessionID, lc); other != nil {

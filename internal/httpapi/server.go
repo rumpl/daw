@@ -85,6 +85,10 @@ type Server struct {
 	pluginAPIOrigin        string
 	pluginAPISocket        string
 	pluginOperations       sync.Mutex
+	lifecycleMu            sync.Mutex
+	draining               bool
+	retireOnce             sync.Once
+	retire                 chan struct{}
 
 	guard              *pathsec.Guard
 	workspaces         *workspaces.Service
@@ -151,6 +155,7 @@ func New(opts Options) *Server {
 		started:                time.Now(),
 		events:                 newDashboardEvents(),
 		pluginEvents:           newPluginEventHub(),
+		retire:                 make(chan struct{}),
 	}
 	s.workspaces = workspaces.New(opts.Guard, strings.TrimSpace(opts.WorkspaceHistoryFile), log)
 	s.preferences = chatprefs.New(strings.TrimSpace(opts.ChatPreferencesFile), log)
@@ -171,6 +176,7 @@ func (s *Server) CSRFToken() string { return s.csrf }
 func (s *Server) routes() {
 	m := s.mux
 	m.HandleFunc("GET /api/health", s.handleHealth)
+	m.HandleFunc("POST /api/lifecycle/detach", s.handleDetach)
 	m.HandleFunc("GET /api/bootstrap", s.handleBootstrap)
 	m.HandleFunc("GET /api/events", s.handleDashboardEvents)
 	m.HandleFunc("GET /api/plugins", s.handlePlugins)
@@ -311,6 +317,59 @@ func newOpaqueID(prefix string) string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return prefix + "_" + hex.EncodeToString(b)
+}
+
+// Retire is closed after the desktop detaches and all running turns have
+// settled. CLI servers never request retirement and therefore keep running.
+func (s *Server) Retire() <-chan struct{} { return s.retire }
+
+func (s *Server) beginDrain(ctx context.Context) {
+	s.lifecycleMu.Lock()
+	s.draining = true
+	s.lifecycleMu.Unlock()
+	for _, chat := range s.chats.all() {
+		if chat.runState() == protocol.RunStateIdle {
+			s.disposeChat(ctx, chat.id, "desktop detached")
+		}
+	}
+	s.retireIfDrained()
+}
+
+func (s *Server) cancelDrain() {
+	s.lifecycleMu.Lock()
+	s.draining = false
+	s.lifecycleMu.Unlock()
+}
+
+func (s *Server) disposeIfDraining(chatID string) {
+	s.lifecycleMu.Lock()
+	draining := s.draining
+	s.lifecycleMu.Unlock()
+	if !draining {
+		return
+	}
+	if chat, ok := s.chat(chatID); ok && chat.runState() == protocol.RunStateIdle {
+		s.disposeChat(context.Background(), chatID, "detached turn finished")
+	}
+	s.retireIfDrained()
+}
+
+func (s *Server) retireIfDrained() {
+	s.lifecycleMu.Lock()
+	draining := s.draining
+	s.lifecycleMu.Unlock()
+	if !draining || len(s.chats.all()) != 0 {
+		return
+	}
+	// Give the detach response time to reach Electron. A new desktop bootstrap
+	// during this grace period cancels retirement and reclaims the worker.
+	time.AfterFunc(250*time.Millisecond, func() {
+		s.lifecycleMu.Lock()
+		defer s.lifecycleMu.Unlock()
+		if s.draining && len(s.chats.all()) == 0 {
+			s.retireOnce.Do(func() { close(s.retire) })
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

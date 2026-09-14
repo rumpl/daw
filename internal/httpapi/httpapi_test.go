@@ -28,6 +28,7 @@ import (
 type harness struct {
 	t         *testing.T
 	srv       *httptest.Server
+	server    *httpapi.Server
 	fake      *fake.Adapter
 	csrf      string
 	root      string
@@ -54,7 +55,7 @@ func newHarness(t *testing.T) *harness {
 		ts.Close()
 		s.Shutdown(context.WithoutCancel(t.Context()))
 	})
-	h := &harness{t: t, srv: ts, fake: f, csrf: s.CSRFToken(), root: root, pluginDir: pluginDir}
+	h := &harness{t: t, srv: ts, server: s, fake: f, csrf: s.CSRFToken(), root: root, pluginDir: pluginDir}
 	return h
 }
 
@@ -147,6 +148,26 @@ func (h *harness) newChat() (protocol.ChatRef, protocol.Workspace) {
 		h.t.Fatalf("create chat: %d %s", resp.StatusCode, body)
 	}
 	return decodeJSON[protocol.ChatRef](h.t, resp), ws
+}
+
+func TestDetachRetiresIdleChats(t *testing.T) {
+	h := newHarness(t)
+	ref, _ := h.newChat()
+
+	response := h.do(http.MethodPost, "/api/lifecycle/detach", nil)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("detach status = %d", response.StatusCode)
+	}
+
+	missing := h.do(http.MethodGet, "/api/chats/"+ref.ChatID, nil)
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("detached idle chat status = %d, want 404", missing.StatusCode)
+	}
+	select {
+	case <-h.server.Retire():
+	case <-time.After(time.Second):
+		t.Fatal("idle server did not retire after desktop detach")
+	}
 }
 
 func TestCreateChatPassesAvailableExecutionTarget(t *testing.T) {
