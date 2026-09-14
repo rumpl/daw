@@ -93,10 +93,11 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...ad
 		return nil, err
 	}
 
+	loadedSkills := dashboardSkills(skills.Load(ctx, []string{"local"}))
 	toolsets := []tools.ToolSet{
 		file.New(filesystem.New(runConfig.WorkingDir)),
 		shell.New(os.Environ(), runConfig),
-		skillstool.New(skills.Load(ctx, []string{"local"}), runConfig.WorkingDir),
+		skillstool.New(loadedSkills, runConfig.WorkingDir),
 	}
 	for _, server := range mcpServers {
 		switch {
@@ -124,7 +125,6 @@ func Build(ctx context.Context, runConfig *dacfg.RuntimeConfig, mcpServers ...ad
 		}),
 		agent.WithAddDate(true),
 		agent.WithAddEnvironmentInfo(true),
-		agent.WithTools(DeveloperDocumentationTool()),
 		agent.WithToolSets(toolsets...),
 	)
 

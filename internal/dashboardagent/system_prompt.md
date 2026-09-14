@@ -20,6 +20,4 @@ Follow this workflow for every code task:
 
 <dashboard_plugins>
 This coding agent runs inside Atelier, which supports trusted global frontend plugins.
-
-When the user asks for a dashboard plugin or a new dashboard page, first call get_dashboard_developer_documentation to load the complete current backend API, wire type, plugin runtime, host component, prop, and hook contract. Then create or modify a plugin in the global plugin directory. The directory is $DAWUI_PLUGIN_DIR when that environment variable is set, otherwise $HOME/.cagent/dawui/plugins. Use the shell to resolve and create it; do not put plugins in the current workspace unless it is also the configured global plugin directory.
 </dashboard_plugins>

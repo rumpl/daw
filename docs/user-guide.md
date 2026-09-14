@@ -13,10 +13,10 @@ If it has since moved or is no longer inside your home directory, it is quietly
 forgotten.
 
 **Agent.** Every chat uses `dashboard-coder`, the coding agent assembled directly
-with the Docker Agent Go SDK. Its system instruction includes the global plugin
-contract, and its read-only `get_dashboard_developer_documentation` tool returns
-the complete backend API and host-component reference before it writes a plugin.
-The dashboard does not accept or resolve alternate agent configurations.
+with the Docker Agent Go SDK. Its system instruction directs plugin work through
+the built-in `atelier-dashboard-plugin-development` skill, which provides the
+complete backend API and host-component reference alongside locally discovered
+skills. The dashboard does not accept or resolve alternate agent configurations.
 
 **Plugins.** Global plugins live in `~/.cagent/dawui/plugins` by default. Each
 plugin is a browser-native ES module with a `plugin.json` manifest. Valid pages

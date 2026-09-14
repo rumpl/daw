@@ -2,8 +2,9 @@
 
 Dashboard plugins are trusted, global browser modules. They are discovered at
 startup and every few seconds while the dashboard is open. The SDK-built
-`dashboard-coder` can retrieve the complete backend and frontend contract at any
-time with its read-only `get_dashboard_developer_documentation` tool.
+`dashboard-coder` exposes the complete backend and frontend contract in its
+built-in `atelier-dashboard-plugin-development` skill alongside locally
+discovered skills.
 
 The plugin directory is `DAWUI_PLUGIN_DIR`, defaulting to:
 

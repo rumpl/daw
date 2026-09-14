@@ -27,6 +27,8 @@ is the absolute path in `DAWUI_PLUGIN_DIR` (default
 
 - `GET /api/health` → `200 Health`
   - No setup required. Liveness and process uptime.
+- `POST /api/lifecycle/detach` → `202 Accepted`
+  - Desktop-shell lifecycle endpoint. Retires idle chats and drains running turns before the detached dashboard process exits. Plugins should not call it.
 - `GET /api/bootstrap` → `200 Bootstrap`
   - Initializes the API client CSRF token and returns paths, defaults, notices,
     workspace hints, and model availability.
