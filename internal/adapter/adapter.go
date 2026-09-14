@@ -145,6 +145,9 @@ type Chat interface {
 	// Used on open/resume and after a server restart.
 	Snapshot(ctx context.Context) ([]protocol.Item, protocol.Usage, error)
 	Events() <-chan protocol.Event
+	// RunStatus reports the runtime's current lifecycle state. Remote transports
+	// use it to reconcile state after reconnecting an interrupted event stream.
+	RunStatus() protocol.RunStatus
 
 	Send(ctx context.Context, text string, attachments []Attachment, preferred protocol.DeliveryMode) (mode protocol.DeliveryMode, runID string, queued bool, err error)
 	Abort()

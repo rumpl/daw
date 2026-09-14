@@ -1,6 +1,7 @@
 package dagent
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -13,8 +14,13 @@ func presentationCall(name, arguments string) tools.ToolCall {
 
 func TestPresentationArgsForDefaultTools(t *testing.T) {
 	t.Run("shell", func(t *testing.T) {
-		got := presentationArgs(presentationCall("shell", `{"cmd":"npm test","cwd":"web","timeout":60}`))
-		if got["cmd"] != "npm test" || got["cwd"] != "web" || got["timeout"] != float64(60) {
+		script := "node --input-type=module <<'NODE'\n" + strings.Repeat("console.log('visible');\n", 300) + "NODE"
+		payload, err := json.Marshal(map[string]any{"cmd": script, "cwd": "web", "timeout": 60})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := presentationArgs(presentationCall("shell", string(payload)))
+		if got["cmd"] != script || got["cwd"] != "web" || got["timeout"] != float64(60) {
 			t.Fatalf("unexpected shell arguments: %#v", got)
 		}
 	})

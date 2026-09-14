@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/protocol"
@@ -227,6 +228,7 @@ type chat struct {
 	closeOnce sync.Once
 	mu        sync.Mutex
 	meta      protocol.SessionMeta
+	run       protocol.RunStatus
 }
 
 func (c *chat) SessionID() string          { return c.sessionID }
@@ -234,9 +236,17 @@ func (c *chat) Meta() protocol.SessionMeta { c.mu.Lock(); defer c.mu.Unlock(); r
 func (c *chat) Snapshot(ctx context.Context) ([]protocol.Item, protocol.Usage, error) {
 	var value runnerapi.SnapshotResponse
 	err := c.a.do(ctx, http.MethodGet, c.path("snapshot"), nil, &value)
+	c.mu.Lock()
+	c.run = value.Run
+	c.mu.Unlock()
 	return value.Items, value.Usage, err
 }
 func (c *chat) Events() <-chan protocol.Event { return c.events }
+func (c *chat) RunStatus() protocol.RunStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.run
+}
 func (c *chat) Send(ctx context.Context, text string, attachments []adapter.Attachment, mode protocol.DeliveryMode) (protocol.DeliveryMode, string, bool, error) {
 	var value runnerapi.SendResponse
 	err := c.a.do(ctx, http.MethodPost, c.path("send"), runnerapi.SendRequest{Text: text, Attachments: attachments, Mode: mode}, &value)
@@ -297,20 +307,58 @@ func (c *chat) path(action string) string { return "/v1/chats/" + url.PathEscape
 
 func (c *chat) stream(ctx context.Context) {
 	defer close(c.events)
+	delay := 100 * time.Millisecond
+	notified := false
+	for {
+		err := c.streamOnce(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil && !notified {
+			c.streamNotice(err)
+			notified = true
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			if delay < 2*time.Second {
+				delay *= 2
+			}
+		}
+	}
+}
+
+func (c *chat) streamOnce(ctx context.Context) error {
+	// Reconcile before each subscription. The previous stream may have dropped
+	// after delivering the final assistant bytes but before its idle event.
+	var snapshot runnerapi.SnapshotResponse
+	if err := c.a.do(ctx, http.MethodGet, c.path("snapshot"), nil, &snapshot); err != nil {
+		return fmt.Errorf("reconcile runner event stream: %w", err)
+	}
+	c.mu.Lock()
+	c.run = snapshot.Run
+	c.mu.Unlock()
+	select {
+	case c.events <- protocol.Event{Type: protocol.EventRunStatus, Run: &snapshot.Run}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.a.endpoint+c.path("events"), http.NoBody)
 	if err != nil {
-		return
+		return err
 	}
 	request.Header.Set("Authorization", "Bearer "+c.a.token)
 	response, err := c.a.client.Do(request)
 	if err != nil {
-		c.streamNotice(err)
-		return
+		return fmt.Errorf("connect to runner event stream: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		c.streamNotice(fmt.Errorf("runner event stream returned %s", response.Status))
-		return
+		return fmt.Errorf("runner event stream returned %s", response.Status)
 	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 64<<10), 16<<20)
@@ -328,15 +376,21 @@ func (c *chat) stream(ctx context.Context) {
 			c.meta = *event.Meta
 			c.mu.Unlock()
 		}
+		if event.Type == protocol.EventRunStatus && event.Run != nil {
+			c.mu.Lock()
+			c.run = *event.Run
+			c.mu.Unlock()
+		}
 		select {
 		case c.events <- event:
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 	}
-	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		c.streamNotice(err)
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read runner event stream: %w", err)
 	}
+	return io.ErrUnexpectedEOF
 }
 
 func (c *chat) streamNotice(err error) {

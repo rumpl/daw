@@ -167,7 +167,7 @@ export function Sidebar({
   return (
     <div className="sidebar-inner" ref={drawerRef} aria-busy={busy || undefined}>
       <div className="brand-row">
-        <img className="brand-icon" src="/atelier-icon.png" alt="" aria-hidden="true" />
+        <img className="brand-icon" src="/bee.png" alt="" aria-hidden="true" />
         <div className="brand">
           Atelier<span className="brand-sub"> coding studio</span>
         </div>

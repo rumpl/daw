@@ -55,8 +55,9 @@ type StreamEvent struct {
 }
 
 type SnapshotResponse struct {
-	Items []protocol.Item `json:"items"`
-	Usage protocol.Usage  `json:"usage"`
+	Items []protocol.Item    `json:"items"`
+	Usage protocol.Usage     `json:"usage"`
+	Run   protocol.RunStatus `json:"run"`
 }
 
 type ChatOptionsRequest struct {
@@ -239,7 +240,7 @@ func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, usage, err := c.Snapshot(r.Context())
-	s.respond(w, SnapshotResponse{Items: items, Usage: usage}, err)
+	s.respond(w, SnapshotResponse{Items: items, Usage: usage, Run: c.RunStatus()}, err)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +255,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	// Commit the response immediately. Without an initial flush, a reconnect
+	// made while the agent is quiet has no headers or body to deliver, so the
+	// HTTP client can block in Do until the next agent event. That defeats the
+	// remote adapter's stream recovery and leaves the host stuck in running.
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 	encoder := json.NewEncoder(w)
 	for {
 		select {

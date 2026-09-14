@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	adapterpkg "github.com/rumpl/daw/internal/adapter"
 	"github.com/rumpl/daw/internal/adapter/fake"
 	"github.com/rumpl/daw/internal/httpapi"
 	"github.com/rumpl/daw/internal/pathsec"
@@ -420,6 +421,69 @@ func TestSandboxedBootstrap(t *testing.T) {
 	}
 	if adapter.LastOpenRequest.ExecutionTarget != protocol.ExecutionTargetHost {
 		t.Fatalf("new chat inherited target %q", adapter.LastOpenRequest.ExecutionTarget)
+	}
+}
+
+func TestResumeUsesPersistedTargetAndDefaultsUntaggedCLISessionToHost(t *testing.T) {
+	root := t.TempDir()
+	guard, _, err := pathsec.NewGuard([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := fake.New()
+	server := httpapi.New(httpapi.Options{
+		Adapter: adapter, Guard: guard, Sandboxed: true,
+		ExecutionTargets: []protocol.ExecutionTargetOption{
+			{Value: protocol.ExecutionTargetSandbox, Label: "Docker Sandbox"},
+			{Value: protocol.ExecutionTargetHost, Label: "Host"},
+		},
+		DefaultExecutionTarget: protocol.ExecutionTargetSandbox,
+		ChatPreferencesFile:    filepath.Join(t.TempDir(), "preferences.json"),
+		PluginDir:              t.TempDir(), PluginDataDir: t.TempDir(),
+	})
+	t.Cleanup(func() { server.Shutdown(context.WithoutCancel(t.Context())) })
+
+	do := func(path string, body any) *httptest.ResponseRecorder {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(payload))
+		request.Host = "127.0.0.1"
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(httpapi.CSRFHeader, server.CSRFToken())
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		return response
+	}
+
+	opened := do("/api/workspaces/open", protocol.OpenWorkspaceRequest{Path: root})
+	if opened.Code != http.StatusOK {
+		t.Fatalf("open workspace: %d %s", opened.Code, opened.Body.String())
+	}
+	var workspace protocol.Workspace
+	if err := json.Unmarshal(opened.Body.Bytes(), &workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter.Seed("cli-session", "CLI session", workspace.Path, nil)
+	resumed := do("/api/chats/resume", protocol.ResumeChatRequest{WorkspaceID: workspace.WorkspaceID, SessionID: "cli-session"})
+	if resumed.Code != http.StatusCreated {
+		t.Fatalf("resume CLI session: %d %s", resumed.Code, resumed.Body.String())
+	}
+	if adapter.LastOpenRequest.ExecutionTarget != protocol.ExecutionTargetHost {
+		t.Fatalf("untagged CLI session target = %q, want host", adapter.LastOpenRequest.ExecutionTarget)
+	}
+
+	adapter.SeedWithAttributes("sandbox-session", "Sandbox session", workspace.Path,
+		map[string]string{adapterpkg.ExecutionTargetAttribute: string(protocol.ExecutionTargetSandbox)}, nil)
+	resumed = do("/api/chats/resume", protocol.ResumeChatRequest{WorkspaceID: workspace.WorkspaceID, SessionID: "sandbox-session"})
+	if resumed.Code != http.StatusCreated {
+		t.Fatalf("resume sandbox session: %d %s", resumed.Code, resumed.Body.String())
+	}
+	if adapter.LastOpenRequest.ExecutionTarget != protocol.ExecutionTargetSandbox {
+		t.Fatalf("persisted sandbox session target = %q", adapter.LastOpenRequest.ExecutionTarget)
 	}
 }
 

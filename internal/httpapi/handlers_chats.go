@@ -108,7 +108,14 @@ func (s *Server) handleResumeChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "unknown_session", "unknown session")
 		return
 	}
-	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute]), req.OperationID, false)
+	executionTarget := protocol.ExecutionTarget(stored.Attributes[adapter.ExecutionTargetAttribute])
+	if executionTarget == "" {
+		// Sessions created by docker-agent outside Atelier predate DAW's routing
+		// attribute and always ran on the host. Do not apply the current new-chat
+		// preference, which may otherwise attempt to migrate them into a sandbox.
+		executionTarget = protocol.ExecutionTargetHost
+	}
+	s.openChat(w, r, req.WorkspaceID, req.SessionID, "", stored, "", "", executionTarget, req.OperationID, false)
 }
 
 func (s *Server) openChat(w http.ResponseWriter, r *http.Request, workspaceID, resumeID, executionLocationID string, stored *protocol.SessionSummary, contextToken, pluginID string, executionTarget protocol.ExecutionTarget, operationID string, persistImmediately bool) {

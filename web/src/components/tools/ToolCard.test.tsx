@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolActivity } from '@/protocol.gen';
 import { ToolCard } from './ToolCard';
 import { defaultToolRendererNames } from './toolRenderers';
+import { languageForPath } from './fileLanguage';
 
 function tool(overrides: Partial<ToolActivity>): ToolActivity {
   return {
@@ -61,10 +62,28 @@ describe('ToolCard', () => {
   it('renders shell calls as a command and terminal output', () => {
     const { container } = render(<ToolCard tool={tool({ displayName: 'Shell', arguments: { cmd: 'npm test', cwd: 'web', timeout: 60 }, argsSummary: 'npm test', preview: '12 tests passed' })} />);
     fireEvent.click(container.querySelector('.tool-trigger')!);
-    expect(screen.getAllByText('npm test')).toHaveLength(1);
+    expect(container.querySelector('.shell-input')).toHaveTextContent('npm test');
     expect(screen.getByText('12 tests passed')).toBeVisible();
     expect(screen.queryByText('web')).not.toBeInTheDocument();
     expect(screen.queryByText('timeout 60s')).not.toBeInTheDocument();
+  });
+
+  it('renders the complete multiline shell command above its output', () => {
+    const command = "node --input-type=module <<'NODE'\nconst answer = 42;\nconsole.log(answer);\nNODE";
+    const { container } = render(<ToolCard tool={tool({ name: 'shell', displayName: 'Shell', arguments: { cmd: command, cwd: 'web', timeout: 60 }, argsSummary: "node --input-type=module <<'NODE'", preview: '42' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+
+    expect(container.querySelector('.shell-command')).toHaveAccessibleName('Command');
+    expect(container.querySelector('.shell-output-section')).toHaveAccessibleName('Output');
+    expect(container.querySelector('.shell-prompt')).toHaveTextContent('$');
+    expect(container.querySelector('.shell-input')?.textContent).toBe(command);
+    expect(container.querySelector('.shell-output')).toHaveTextContent('42');
+  });
+
+  it('supports command as the shell input alias', () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'shell', displayName: 'Shell', arguments: { command: 'printf one\\nprintf two' }, preview: 'onetwo' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+    expect(container.querySelector('.shell-input')).toHaveTextContent('printf one\\nprintf two');
   });
 
   it('turns list_directory output into file and directory entries', () => {
@@ -72,6 +91,29 @@ describe('ToolCard', () => {
     fireEvent.click(container.querySelector('.tool-trigger')!);
     expect(screen.getByText('src')).toBeVisible();
     expect(screen.getByText('package.json')).toBeVisible();
+  });
+
+  it('uses highlight.js aliases and its full language registry for file types', () => {
+    expect(languageForPath('electron/main.cjs')).toBe('cjs');
+    expect(languageForPath('src/types.d.cts')).toBe('cts');
+    expect(languageForPath('config.toml')).toBe('toml');
+    expect(languageForPath('Dockerfile')).toBe('dockerfile');
+    expect(languageForPath('file.unknown')).toBeUndefined();
+  });
+
+  it('syntax-highlights read_file output for known file extensions', () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'read_file', category: 'filesystem', displayName: 'Read', arguments: { path: 'electron/main.cjs', line: 4, limit: 1 }, preview: 'const answer = 42;' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+    expect(container.querySelector('.file-code code.language-cjs')).not.toBeNull();
+    expect(container.querySelector('.file-code .hljs-keyword')?.textContent).toBe('const');
+    expect(screen.getByText('Contents · lines 4–4')).toBeVisible();
+  });
+
+  it('leaves read_file output plain for unknown file extensions', () => {
+    const { container } = render(<ToolCard tool={tool({ name: 'read_file', category: 'filesystem', displayName: 'Read', arguments: { path: 'hello.unknown' }, preview: 'plain contents' })} />);
+    fireEvent.click(container.querySelector('.tool-trigger')!);
+    expect(container.querySelector('.file-code')).toBeNull();
+    expect(screen.getByText('plain contents')).toBeVisible();
   });
 
   it('shows the contents being written by write_file', () => {
@@ -84,7 +126,7 @@ describe('ToolCard', () => {
   it('syntax-highlights write_file previews for known file extensions', () => {
     const { container } = render(<ToolCard tool={tool({ name: 'write_file', category: 'filesystem', displayName: 'Write', arguments: { path: 'hello.ts', contentBytes: 20, contentLines: 1, contentPreview: 'const answer = 42;' }, preview: 'File written successfully.' })} />);
     fireEvent.click(container.querySelector('.tool-trigger')!);
-    expect(container.querySelector('.write-code code.language-typescript')).not.toBeNull();
+    expect(container.querySelector('.write-code code.language-ts')).not.toBeNull();
     expect(container.querySelector('.write-code .hljs-keyword')?.textContent).toBe('const');
   });
 

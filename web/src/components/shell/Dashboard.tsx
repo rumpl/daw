@@ -245,13 +245,12 @@ export function Dashboard() {
     const active = dashboard.liveSessions.find((session) => session.sessionId === dashboard.activeSessionId);
     if (!active || active.sessionId.startsWith('draft:')) return false;
 
-    void dashboard.newChat('', true).then((created) => {
-      if (!created || created === true) return;
+    void dashboard.newSplitChat().then((created) => {
+      if (!created) return;
       openSplit(PRIMARY_PANE_ID, created.sessionId, dashboard.workspace!.path, direction, true);
-      navigate(sessionRoute(active.sessionId, active.workingDir));
     });
     return true;
-  }, [anySettingsActive, dashboard, navigate, openSplit, routePluginId]);
+  }, [anySettingsActive, dashboard, openSplit, routePluginId]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -273,6 +272,9 @@ export function Dashboard() {
 
   useEffect(() => {
     if (splitPanes.length === 0 || dashboard.liveSessions.length + pluginTabs.length > 1) return;
+    // A freshly created split can render before the dashboard-wide live-session
+    // refresh includes it. Do not collapse that pending pane in the meantime.
+    if (splitPanes.some((pane) => !dashboard.liveSessions.some((session) => session.sessionId === pane.sessionId))) return;
 
     setSplitPanes([]);
     setPaneLayout({ type: 'leaf', id: PRIMARY_PANE_ID });

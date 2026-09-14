@@ -72,7 +72,7 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
         contributionContext={contributionContext}
         empty={
           <>
-            <img className="empty-brand-icon" src="/atelier-icon.png" alt="" aria-hidden="true" />
+            <img className="empty-brand-icon" src="/bee.png" alt="" aria-hidden="true" />
             {!dashboard.workspace ? (
               <><h2>Pick a working directory</h2><p>Open a folder in the sidebar and start a chat.</p></>
             ) : dashboard.chatId ? (
@@ -90,17 +90,20 @@ export function ChatPane({ dashboard, menuButton, showMenu = true }: ChatPanePro
           <PluginSlotView slot="composer.actions" context={contributionContext} />
         </>
       ) : null}
-      <ChatComposer dashboard={dashboard} pluginCommands={pluginCommands} contributionContext={contributionContext} />
+      <ChatComposer dashboard={dashboard} pluginCommands={pluginCommands} contributionContext={contributionContext}
+        pushToTalkShortcut={showMenu && Boolean(dashboard.chatId)} electron={Boolean(window.atelier)} />
       </div>
       <SessionSideView context={contributionContext} />
     </div>
   );
 }
 
-function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
+function ChatComposer({ dashboard, pluginCommands, contributionContext, pushToTalkShortcut, electron }: {
   dashboard: DashboardController;
   pluginCommands: PluginCommand[];
   contributionContext: ContributionContext;
+  pushToTalkShortcut: boolean;
+  electron: boolean;
 }) {
   const { draft, setDraft } = useDraft(dashboard.activeSessionId);
 
@@ -128,6 +131,8 @@ function ChatComposer({ dashboard, pluginCommands, contributionContext }: {
     disabled={!dashboard.workspace || dashboard.busyAction || dashboard.state.closed}
     placeholder={dashboard.workspace ? undefined : 'Choose a project to start a chat…'}
     focusKey={dashboard.activeSessionId}
+    pushToTalkShortcut={pushToTalkShortcut}
+    speechToTextEnabled={electron}
     commands={[...dashboard.commands, ...pluginCommands.map((command) => ({ name: command.name, description: command.description, kind: 'plugin' }))]}
     attachments={dashboard.attachments}
     uploading={dashboard.uploading}

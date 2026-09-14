@@ -364,6 +364,16 @@ export function useDashboard(
     }).then(() => created);
   };
 
+  const newSplitChat = () => {
+    let created: ChatRef | false = false;
+    return guard(async () => {
+      if (!workspace) throw new ApiError(400, 'no_workspace', 'choose a working directory first');
+      created = await withProvisioning((operationId) =>
+        api.createChat(workspace.workspaceId, undefined, executionTarget, operationId, true));
+      void refreshLiveSessions().catch(() => undefined);
+    }).then(() => created);
+  };
+
   const resumeChat = (sessionId: string, targetWorkspacePath?: string) => {
     if (sessionId.startsWith('draft:')) {
       const draft = draftSessions.find((session) => session.sessionId === sessionId);
@@ -629,6 +639,7 @@ export function useDashboard(
     addWorkspace,
     removeWorkspace,
     newChat,
+    newSplitChat,
     newChatForWorkspace,
     resumeChat,
     closeSessionTab,

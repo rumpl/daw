@@ -22,6 +22,7 @@ interface PromptInputProps {
   running?: boolean;
   attachments?: Attachment[];
   toolbar?: ReactNode;
+  action?: ReactNode;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   submitLabel?: string;
   onValueChange: (value: string) => void;
@@ -43,6 +44,7 @@ export function PromptInput({
   running = false,
   attachments = [],
   toolbar,
+  action,
   inputRef,
   submitLabel = 'Send',
   onValueChange,
@@ -114,6 +116,7 @@ export function PromptInput({
         <InputGroupAddon align="block-end" className="composer-toolbar">
           <div className="composer-config">{toolbar}</div>
           <div className="composer-actions">
+            {action}
             {onAddAttachments ? (
               <Tooltip>
                 <TooltipTrigger render={

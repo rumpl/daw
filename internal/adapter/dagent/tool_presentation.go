@@ -10,6 +10,7 @@ import (
 
 const (
 	maxArgumentString       = 4000
+	maxShellCommand         = 64 * 1024
 	maxArgumentPaths        = 40
 	maxEditPreviews         = 8
 	maxEditPreview          = 1200
@@ -31,10 +32,13 @@ func presentationArgs(tc tools.ToolCall) map[string]any {
 	}
 
 	out := map[string]any{}
-	copyString := func(key string) {
+	copyStringLimit := func(key string, limit int) {
 		if value, ok := raw[key].(string); ok && value != "" {
-			out[key] = truncateMultiline(value, maxArgumentString)
+			out[key] = truncateMultiline(value, limit)
 		}
+	}
+	copyString := func(key string) {
+		copyStringLimit(key, maxArgumentString)
 	}
 	copyValue := func(key string) {
 		if value, ok := raw[key]; ok {
@@ -65,9 +69,9 @@ func presentationArgs(tc tools.ToolCall) map[string]any {
 
 	switch tc.Function.Name {
 	case "shell":
-		copyString("cmd")
+		copyStringLimit("cmd", maxShellCommand)
 		if _, ok := out["cmd"]; !ok { // accepted alias in docker-agent
-			copyString("command")
+			copyStringLimit("command", maxShellCommand)
 		}
 		copyString("cwd")
 		copyValue("timeout")

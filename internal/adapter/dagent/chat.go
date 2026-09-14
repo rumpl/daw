@@ -82,6 +82,11 @@ func (c *chat) emit(ev protocol.Event) {
 }
 
 func (c *chat) Events() <-chan protocol.Event { return c.events }
+func (c *chat) RunStatus() protocol.RunStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.run
+}
 
 // collectWarnings surfaces load-time warnings instead of swallowing them.
 func (c *chat) collectWarnings(ag *daagent.Agent) {

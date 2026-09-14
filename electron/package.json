@@ -20,6 +20,7 @@
     "asar": true,
     "files": [
       "main.cjs",
+      "preload.cjs",
       "package.json"
     ],
     "extraResources": [
@@ -55,6 +56,9 @@
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Atelier uses your microphone to transcribe speech into chat messages."
+      },
       "binaries": [
         "Contents/Resources/backend/dawui",
         "Contents/Resources/backend/daw-sandbox"
@@ -71,5 +75,8 @@
         "AppImage"
       ]
     }
+  },
+  "dependencies": {
+    "ws": "8.18.3"
   }
 }

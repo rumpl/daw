@@ -61,6 +61,12 @@ that releases its server runtime without deleting the stored history. Every
 session for the current directory is also listed below and searchable. Selecting
 one resumes it with its real history from docker-agent's store.
 
+**Quitting during a sandbox run.** The desktop window and the agent worker have
+separate lifetimes. You can quit Atelier completely while a sandboxed agent is
+working; the background worker and sandbox continue the run. Opening Atelier
+again reconnects to that worker, restores the session, and shows the events that
+arrived while the app was closed.
+
 ---
 
 ## Tool execution

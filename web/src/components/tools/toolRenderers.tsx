@@ -14,7 +14,7 @@ export const toolRenderers: Record<string, ToolRenderer> = {
   shell: {
     title: 'Shell',
     summary: (args, fallback) => (text(args, 'cmd') || text(args, 'command') || fallback).split('\n')[0] ?? fallback,
-    body: (tool) => <ShellBody tool={tool} />,
+    body: (tool, args) => <ShellBody tool={tool} args={args} />,
   },
   directory_tree: {
     title: 'Directory Tree', summary: pathSummary,

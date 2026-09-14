@@ -299,6 +299,11 @@ func (c *chat) Snapshot(context.Context) ([]protocol.Item, protocol.Usage, error
 }
 
 func (c *chat) Events() <-chan protocol.Event { return c.events }
+func (c *chat) RunStatus() protocol.RunStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.run
+}
 
 func (c *chat) emit(ev protocol.Event) {
 	// Events are immutable once published. The scripted fake reuses its local

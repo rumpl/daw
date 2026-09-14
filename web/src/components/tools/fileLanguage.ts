@@ -1,11 +1,11 @@
-const languageByExtension: Record<string, string> = {
-  c: 'c', cc: 'cpp', cpp: 'cpp', cs: 'csharp', css: 'css', go: 'go', h: 'c', hpp: 'cpp',
-  html: 'html', java: 'java', js: 'javascript', jsx: 'jsx', json: 'json', md: 'markdown',
-  py: 'python', rb: 'ruby', rs: 'rust', sh: 'bash', sql: 'sql', ts: 'typescript', tsx: 'tsx',
-  xml: 'xml', yaml: 'yaml', yml: 'yaml',
-};
+import { all, createLowlight } from 'lowlight';
+
+const highlighter = createLowlight(all);
 
 export function languageForPath(path: string): string | undefined {
-  const extension = path.split('.').pop()?.toLowerCase();
-  return extension ? languageByExtension[extension] : undefined;
+  const filename = path.split(/[\\/]/).pop()?.toLowerCase();
+  if (!filename) return undefined;
+
+  const candidates = [filename, ...filename.split('.').slice(1)];
+  return candidates.reverse().find((candidate) => highlighter.registered(candidate));
 }
